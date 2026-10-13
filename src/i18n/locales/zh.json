@@ -25,6 +25,13 @@
     "none": "没有发现问题",
     "parse": {
       "syntax": "YAML 语法错误"
+    },
+    "structure": {
+      "multiDoc": "一个文件只能有一个文档，第二个文档从这里开始",
+      "topLevel": "顶层必须是字段映射",
+      "sectionMapping": "该节必须是字段映射",
+      "missingKey": "缺少必填字段",
+      "unknownKey": "无法识别的字段"
     }
   },
   "menu": {

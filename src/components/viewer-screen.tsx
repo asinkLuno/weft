@@ -3,7 +3,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 // Codes the backend can send (src-tauri/src/validate.rs); each needs a
 // problems.<code> entry in the locales, which this union makes the compiler check.
-export type ProblemCode = "parse.syntax";
+export type ProblemCode =
+  | "parse.syntax"
+  | "structure.multiDoc"
+  | "structure.topLevel"
+  | "structure.sectionMapping"
+  | "structure.missingKey"
+  | "structure.unknownKey";
 
 export type Problem = {
   code: ProblemCode;

@@ -26,6 +26,13 @@
     "none": "No problems found",
     "parse": {
       "syntax": "YAML syntax error"
+    },
+    "structure": {
+      "multiDoc": "Only one document per file; a second one starts here",
+      "topLevel": "Top level must be a mapping of fields",
+      "sectionMapping": "This section must be a mapping",
+      "missingKey": "Missing required field",
+      "unknownKey": "Unrecognized field"
     }
   },
   "menu": {
