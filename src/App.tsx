@@ -12,7 +12,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { asLang, initialLang, type Lang, strings } from "./i18n";
 import "./App.css";
@@ -106,24 +105,21 @@ function App() {
     });
     return () => {
       unlisten.then((fn) => fn());
+      clearTimeout(flashTimer.current);
     };
   }, [path, lang]);
 
   function remember(p: string) {
-    setRecents((prev) => {
-      const next = [p, ...prev.filter((r) => r !== p)].slice(0, 5);
-      settings.set("recentFiles", next);
-      return next;
-    });
+    const next = [p, ...recents.filter((r) => r !== p)].slice(0, 5);
+    setRecents(next);
+    settings.set("recentFiles", next);
   }
 
   // 读不到的文件（已删除等）从最近列表里移除
   function forget(p: string) {
-    setRecents((prev) => {
-      const next = prev.filter((r) => r !== p);
-      settings.set("recentFiles", next);
-      return next;
-    });
+    const next = recents.filter((r) => r !== p);
+    setRecents(next);
+    settings.set("recentFiles", next);
   }
 
   async function bind(p: string) {
@@ -171,7 +167,6 @@ function App() {
             </ul>
           </>
         )}
-        <Toaster richColors position="bottom-right" offset={40} />
       </main>
     );
   }
@@ -201,7 +196,6 @@ function App() {
           </TabsContent>
         </main>
       </Tabs>
-      <Toaster richColors position="bottom-right" offset={40} />
       <footer className={flash ? "statusbar flash" : "statusbar"}>
         <span className="statusbar-path">{path}</span>
         <span>YAML</span>
