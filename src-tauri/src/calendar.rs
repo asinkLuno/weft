@@ -108,7 +108,7 @@ impl Calendar {
             other => {
                 let spec = spec
                     .ok_or_else(|| format!("未注册的历法 `{other}`，请在顶层 calendar 中注册"))?;
-                spec.validate(other)?;
+                spec.validate(other, "calendar")?;
                 RhaiCalendar::load(other, &base.join(&spec.source))?
             }
         };
@@ -175,8 +175,8 @@ impl Calendar {
     }
 }
 
-// 脚本来自用户文件，限制资源防止失控
-fn limited_engine() -> Engine {
+// 脚本来自用户文件，限制资源防止失控（材料脚本同款，material.rs 复用）
+pub(crate) fn limited_engine() -> Engine {
     let mut engine = Engine::new();
     engine.set_max_expr_depths(64, 32);
     engine.set_max_call_levels(32);

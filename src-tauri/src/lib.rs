@@ -1,5 +1,6 @@
 mod calendar;
 mod document;
+mod material;
 mod model;
 
 use std::sync::Mutex;

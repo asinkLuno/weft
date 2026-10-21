@@ -66,10 +66,14 @@ fn parse(content: &str, base: &Path) -> Result<Value, String> {
     // 序列化 model.rs 声明过的结构：未知键在这里被滤掉
     let mut doc = StoryDoc::deserialize(&yaml).map_err(|e| e.to_string())?;
     // 加载历法并解析所有时间：历法错误等同 YAML 错误，阻止展示
-    let mode = doc.story.date_mode.as_deref().unwrap_or("gregorian");
-    let spec = doc.calendar.get(mode);
-    let cal = Calendar::load(mode, spec, base)?;
-    doc.calendar_meta = Some(cal.metadata(mode));
+    let mode = doc
+        .story
+        .date_mode
+        .clone()
+        .unwrap_or_else(|| "gregorian".into());
+    let spec = doc.calendar.get(&mode);
+    let cal = Calendar::load(&mode, spec, base)?;
+    doc.calendar_meta = Some(cal.metadata(&mode));
     for entity in doc.entity.values_mut() {
         if let Some(values) = &entity.base_time {
             let normalized = cal.normalize(values)?;
@@ -77,6 +81,7 @@ fn parse(content: &str, base: &Path) -> Result<Value, String> {
             entity.base_time = Some(normalized);
         }
     }
+    apply_materials(&mut doc, base, &mode)?;
     // 事件：展平相对时间 → 归一化 → tick（排序与先后校验的基准）→ humanize
     for events in doc.event.values_mut() {
         for ev in &mut *events {
@@ -154,6 +159,73 @@ fn parse(content: &str, base: &Path) -> Result<Value, String> {
         nar.subject.sort_by_key(|s| s.start_tick.unwrap_or(i64::MAX));
     }
     serde_json::to_value(doc).map_err(|e| e.to_string())
+}
+
+// 材料：按各实体 base_time 执行脚本，归属链 chain[0] 并入 belong_to，其余逐级生成缺失实体
+fn apply_materials(doc: &mut StoryDoc, base: &Path, mode: &str) -> Result<(), String> {
+    if doc.material.is_empty() && doc.entity.values().all(|e| e.materials.is_empty()) {
+        return Ok(());
+    }
+    let runtime = crate::material::MaterialRuntime::load(&doc.material, base)?;
+    let ids: Vec<String> = doc.entity.keys().cloned().collect();
+    for id in ids {
+        for name in doc.entity[&id].materials.clone() {
+            let entity = &doc.entity[&id];
+            let context = serde_json::json!({
+                "api": 1,
+                "date_mode": mode,
+                "entity": {
+                    "id": id,
+                    "name": entity.name,
+                    "base_time": entity.base_time,
+                    "description": entity.description,
+                    "belong_to": entity.belong_to,
+                },
+            });
+            let chain = runtime.material(&name, &context)?;
+            let chain: Vec<String> = serde_json::from_value(chain)
+                .map_err(|_| format!("材料 `{name}` 必须返回字符串列表（归属链）"))?;
+            apply_chain(&mut doc.entity, &id, &chain)?;
+        }
+    }
+    // 材料生成的归属可能成环（比如把实体自己算进链里），复查 belong_to 无环
+    crate::model::check_acyclic(&doc.entity)
+}
+
+// 归属链：实体 → chain[0] → chain[1] …；缺失的环上实体自动生成，撞到已有实体即停（YAML 自定义的归属不动）
+fn apply_chain(
+    entity: &mut std::collections::HashMap<String, crate::model::Entity>,
+    id: &str,
+    chain: &[String],
+) -> Result<(), String> {
+    let Some(first) = chain.first() else {
+        return Ok(());
+    };
+    for (i, target) in chain.iter().enumerate() {
+        let exists = entity.contains_key(target)
+            || entity.values().any(|e| e.name.as_deref() == Some(target));
+        if exists {
+            break;
+        }
+        entity.insert(
+            target.clone(),
+            crate::model::Entity {
+                name: Some(target.clone()),
+                base_time: None,
+                base_time_display: None,
+                description: None,
+                belong_to: chain.get(i + 1).cloned().into_iter().collect(),
+                materials: Vec::new(),
+            },
+        );
+    }
+    let owner = entity
+        .get_mut(id)
+        .ok_or_else(|| format!("材料归属链引用了不存在的实体 `{id}`"))?;
+    if !owner.belong_to.contains(first) {
+        owner.belong_to.push(first.clone());
+    }
+    Ok(())
 }
 
 fn read_doc(path: &Path) -> Result<(String, Result<Value, String>), String> {

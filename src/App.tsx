@@ -15,7 +15,14 @@ import {
 } from "@xyflow/react";
 import { ChevronDown, X as XIcon } from "lucide-react";
 import "@xyflow/react/dist/style.css";
-import { memo, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  memo,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +37,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -405,7 +413,16 @@ function EntityCanvas({
   // 不传则拖动不落盘（筛选视图的临时摆放）
   onPersist?: (id: string, pos: { x: number; y: number }) => void;
 }) {
-  const [nodes, , onNodesChange] = useNodesState(initialNodes);
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  // useNodesState 只在挂载时读 initialNodes；文件热更新后同步卡片数据，保留用户摆位
+  useEffect(() => {
+    setNodes((nds) =>
+      nds.map((n) => {
+        const next = initialNodes.find((x) => x.id === n.id);
+        return next ? { ...n, data: next.data } : n;
+      }),
+    );
+  }, [initialNodes, setNodes]);
   return (
     <ReactFlow
       nodes={nodes}
@@ -424,18 +441,20 @@ function EntityCanvas({
   );
 }
 
-// 维度筛选下拉（shadcn faceted filter 同款）：outline 按钮当触发器，选中值显示为 Badge
+// 维度筛选下拉（shadcn faceted filter 同款）：outline 按钮当触发器，选中值显示为 Badge；
+// sections 之间画分隔线，单组不画
 function DimensionFilter({
   label,
-  values,
+  sections,
   active,
   onChoose,
 }: {
   label: string;
-  values: Array<{ v: string; label: string }>;
+  sections: Array<Array<{ v: string; label: string }>>;
   active: { value: string; label: string } | null;
   onChoose: (v: string) => void;
 }) {
+  const count = sections.reduce((n, s) => n + s.length, 0);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -443,7 +462,7 @@ function DimensionFilter({
           variant="outline"
           size="xs"
           className="border-dashed"
-          disabled={values.length === 0}
+          disabled={count === 0}
         >
           {label}
           {active && (
@@ -455,14 +474,19 @@ function DimensionFilter({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="max-h-72 w-48 overflow-auto">
-        {values.map(({ v, label: text }) => (
-          <DropdownMenuCheckboxItem
-            key={v}
-            checked={active?.value === v}
-            onCheckedChange={() => onChoose(v)}
-          >
-            {text}
-          </DropdownMenuCheckboxItem>
+        {sections.map((section, i) => (
+          <Fragment key={section[0].v}>
+            {i > 0 && <DropdownMenuSeparator />}
+            {section.map(({ v, label: text }) => (
+              <DropdownMenuCheckboxItem
+                key={v}
+                checked={active?.value === v}
+                onCheckedChange={() => onChoose(v)}
+              >
+                {text}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </Fragment>
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -530,6 +554,26 @@ function EntityViewInner({
   const targets = [...new Set(entities.flatMap(([, e]) => e.belong_to ?? []))];
   const activePick =
     dim === "belong" && pick && targets.includes(pick) ? pick : null;
+
+  // 归属目标按顶层祖先分组：霍格沃茨 → 四学院一组，材料生成的维度（星座）各自成组，
+  // 组内按层级深度排（根在前），组间在前端画分隔线
+  const byRoot: Record<string, Array<{ v: string; label: string }>> = {};
+  for (const tg of targets) {
+    const root =
+      [...ancestorsOf(tg)].find(
+        (a) => (doc?.entity?.[a]?.belong_to ?? []).length === 0,
+      ) ?? tg;
+    if (!byRoot[root]) byRoot[root] = [];
+    byRoot[root].push({ v: tg, label: nameOf(tg) });
+  }
+  const belongSections = Object.values(byRoot).map((section) =>
+    section.sort(
+      (a, b) =>
+        ancestorsOf(a.v).size - ancestorsOf(b.v).size ||
+        a.label.localeCompare(b.label),
+    ),
+  );
+  belongSections.sort((x, y) => x[0].label.localeCompare(y[0].label));
 
   // 关系组筛选同理：组在文件更新后可能消失，失效视为未选
   const groups = Object.keys(doc?.entity_link ?? {}).sort();
@@ -630,7 +674,7 @@ function EntityViewInner({
       <div className="flex flex-wrap items-center gap-2">
         <DimensionFilter
           label={t.belongTo}
-          values={targets.sort().map((tg) => ({ v: tg, label: nameOf(tg) }))}
+          sections={belongSections}
           active={
             activePick ? { value: activePick, label: nameOf(activePick) } : null
           }
@@ -638,7 +682,7 @@ function EntityViewInner({
         />
         <DimensionFilter
           label={t.linkGroup}
-          values={groups.map((g) => ({ v: g, label: g }))}
+          sections={[groups.map((g) => ({ v: g, label: g }))]}
           active={activeLink ? { value: activeLink, label: activeLink } : null}
           onChoose={(v) => choose("link", v)}
         />

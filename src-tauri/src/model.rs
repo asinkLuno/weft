@@ -27,6 +27,9 @@ pub struct StoryDoc {
     // 自定义历法注册表：注册名 → Rhai 脚本清单（相对故事文件的路径）
     #[serde(default)]
     pub calendar: HashMap<String, CalendarSpec>,
+    // 材料注册表：注册名 → Rhai 脚本清单（与 calendar 同构），按实体 base_time 计算归属
+    #[serde(default)]
+    pub material: HashMap<String, CalendarSpec>,
     // 事件分组：组名 → 按 tick 排序的事件列表（解析在 document.rs 完成）
     #[serde(default)]
     pub event: BTreeMap<String, Vec<EventItem>>,
@@ -53,6 +56,8 @@ impl<'de> Deserialize<'de> for StoryDoc {
             narrative: HashMap<String, RawNarrative>,
             #[serde(default)]
             calendar: HashMap<String, CalendarSpec>,
+            #[serde(default)]
+            material: HashMap<String, CalendarSpec>,
         }
         let raw = Raw::deserialize(d)?;
         // 事件标题全局唯一：跨组同名也算重复，subject 等引用才能省略组名
@@ -144,6 +149,7 @@ impl<'de> Deserialize<'de> for StoryDoc {
             event,
             narrative,
             calendar: raw.calendar,
+            material: raw.material,
             calendar_meta: None,
         })
     }
@@ -360,7 +366,7 @@ where
     d.deserialize_any(IntOrSeq)
 }
 
-// 顶层 calendar 的注册清单，格式沿旧版：rhai 脚本 + 固定入口约定
+// 顶层 calendar / material 共用的插件清单，格式沿旧版：rhai 脚本 + 固定入口约定
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CalendarSpec {
     pub runtime: String,
@@ -371,11 +377,9 @@ pub struct CalendarSpec {
 }
 
 impl CalendarSpec {
-    pub fn validate(&self, name: &str) -> Result<(), String> {
-        if self.runtime != "rhai" || self.kind != "calendar" || self.api != 1 {
-            return Err(format!(
-                "历法 `{name}` 需要 runtime: rhai, kind: calendar, api: 1"
-            ));
+    pub fn validate(&self, name: &str, kind: &str) -> Result<(), String> {
+        if self.runtime != "rhai" || self.kind != kind || self.api != 1 {
+            return Err(format!("`{name}` 需要 runtime: rhai, kind: {kind}, api: 1"));
         }
         Ok(())
     }
@@ -420,8 +424,8 @@ where
 }
 
 // 归属图不许成环（如 a belong_to b、b belong_to a），否则按层级递归展示无法终止。
-// DFS 三色标记：0 未访问 / 1 在当前路径上 / 2 已完成
-fn check_acyclic(graph: &HashMap<String, Entity>) -> Result<(), String> {
+// 材料算出的归属也要复查，所以开放给 document.rs。DFS 三色标记：0 未访问 / 1 在当前路径上 / 2 已完成
+pub(crate) fn check_acyclic(graph: &HashMap<String, Entity>) -> Result<(), String> {
     fn visit(
         id: &str,
         graph: &HashMap<String, Entity>,
@@ -467,7 +471,10 @@ pub struct Entity {
     #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub base_time_display: Option<String>,
     pub description: Option<String>,
-    // 归属的上层实体 id 列表（如人物 → 团体）
+    // 归属的上层实体 id 列表（如人物 → 团体）；材料算出的归属也并到这里，不单独存
     #[serde(default)]
     pub belong_to: Vec<String>,
+    // 材料列表：document.rs 按 base_time 执行后把归属链写进 belong_to，不来自展示数据
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub materials: Vec<String>,
 }
