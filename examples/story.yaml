@@ -39,44 +39,44 @@ entity:
   james:
     name: 詹姆·波特
     description: 哈利的父亲，格兰芬多击球手，掠夺者之首。
-    base_time: 1960-03-27
+    base_time: [1960, 3, 27]
     belong_to: [gryffindor]
   lily:
     name: 莉莉·波特
     description: 哈利的母亲，麻瓜出身却天资出众的女巫。
-    base_time: 1960-01-30
+    base_time: [1960, 1, 30]
     belong_to: [gryffindor]
 
   harry:
     name: 哈利·波特
     description: 大难不死的男孩，入学当晚被分院帽分入格兰芬多。
-    base_time: 1980-07-31
+    base_time: [1980, 7, 31]
     belong_to: [gryffindor]
   ron:
     name: 罗恩·韦斯莱
     description: 哈利在火车上结识的好友，韦斯莱家幼子。
-    base_time: 1980-03-01
+    base_time: [1980, 3, 1]
     belong_to: [gryffindor]
   hermione:
     name: 赫敏·格兰杰
     description: 麻瓜出身、成绩拔尖的女巫，与哈利罗恩同寝。
-    base_time: 1979-09-19
+    base_time: [1979, 9, 19]
     belong_to: [gryffindor]
   neville:
     name: 纳威·隆巴顿
     description: 健忘胆小的同院同学，蟾蜍莱夫总在跑丢。
-    base_time: 1980-07-30
+    base_time: [1980, 7, 30]
     belong_to: [gryffindor]
   ginny:
     name: 金妮·韦斯莱
     description: 韦斯莱家的小女儿，在国王十字车站送哥哥上学。
-    base_time: 1981-08-11
+    base_time: [1981, 8, 11]
     belong_to: [gryffindor]
 
   draco:
     name: 德拉科·马尔福
     description: 纯血世家出身的傲慢男生，入学前就想拉拢哈利。
-    base_time: 1980-06-05
+    base_time: [1980, 6, 5]
     belong_to: [slytherin]
   crabbe:
     name: 文森特·克拉布
@@ -121,3 +121,22 @@ entity_link:
       relations: 同学与朋友
     - entities: [罗恩·韦斯莱, 赫敏·格兰杰]
       relations: 同学与朋友
+
+# 事件：按组组织，组内按开始时间排序；时间列表末尾嵌套列表表示锚点相对时间
+event:
+  入学之夜:
+    分院帽晚宴:
+      start_time: &feast [1991, 9, 1, 19]
+      end_time: [0, 0, 0, 2, *feast] # 宴会两小时后结束
+      entities: [哈利·波特, 罗恩·韦斯莱, 赫敏·格兰杰, 德拉科·马尔福]
+      description: 开学宴会上分院帽把新生分入四大学院。
+    厄里斯魔镜:
+      start_time: [1991, 12, 25, 21]
+      entities: [哈利·波特]
+      description: 圣诞夜哈利在镜中看见了家人。
+  密室事件:
+    蛇怪袭击:
+      start_time: &basilisk [1993, 4, 20, 8]
+      end_time: [0, 0, 6, 0, *basilisk] # 锚点：自己开始后 6 小时
+      entities: [金妮·韦斯莱]
+      description: 金妮被里德的日记控制，打开密室。

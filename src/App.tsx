@@ -15,7 +15,7 @@ import {
 } from "@xyflow/react";
 import { ChevronDown, X as XIcon } from "lucide-react";
 import "@xyflow/react/dist/style.css";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,11 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { asLang, initialLang, type Lang, strings } from "./i18n";
 import "./App.css";
@@ -51,19 +56,46 @@ type StoryDoc = {
     description?: string;
     author?: string;
   };
+  // story.date_mode 所指历法的元数据（后端解析时填充）
+  calendar_meta?: {
+    name?: string;
+    title?: string;
+    description?: string;
+    components?: number;
+  };
   entity?: Record<
     string,
     {
       name?: string;
       description?: string;
       belong_to?: string[];
-      base_time?: unknown;
+      base_time?: number[];
+      base_time_display?: string;
     }
   >;
   entity_link?: Record<
     string,
     Array<{ entities: [string, string]; relations: string }>
   >;
+  // 事件分组：组名 → 按 tick 升序的事件
+  event?: Record<string, EventItem[]>;
+};
+
+type EventItem = {
+  id: string;
+  title: string;
+  description?: string;
+  entities?: string[];
+  // 每个参与实体相对其 base_time 的偏移
+  offsets?: Array<{
+    entity: string;
+    start?: string;
+    end?: string;
+  }>;
+  start_tick?: number;
+  end_tick?: number;
+  start_display?: string;
+  end_display?: string;
 };
 
 const YAML_FILTER = { name: "YAML", extensions: ["yaml", "yml"] };
@@ -218,6 +250,9 @@ function App() {
           <TabsContent value="tab2" className="pane">
             <EntityView doc={doc} lang={lang} path={path} />
           </TabsContent>
+          <TabsContent value="tab3" className="pane">
+            <EventView doc={doc} lang={lang} />
+          </TabsContent>
         </main>
       </Tabs>
       <footer className={flash ? "statusbar flash" : "statusbar"}>
@@ -253,6 +288,11 @@ function StoryView({ doc, lang }: { doc: StoryDoc; lang: Lang }) {
       {story.author && (
         <p className="story-author">
           {t.author}: {story.author}
+        </p>
+      )}
+      {doc.calendar_meta?.title && (
+        <p className="story-author">
+          {t.calendar}: {doc.calendar_meta.title}
         </p>
       )}
     </div>
@@ -506,8 +546,8 @@ function EntityViewInner({
   const entityData = (id: string, e: EntityT): EntityData => ({
     name: nameOf(id),
     baseTime:
-      e.base_time !== undefined
-        ? `${t.baseTime}: ${String(e.base_time)}`
+      e.base_time_display !== undefined
+        ? `${t.baseTime}: ${e.base_time_display}`
         : undefined,
     parents: (e.belong_to ?? []).map((b) => ({ id: b, name: nameOf(b) })),
     description: e.description,
@@ -605,5 +645,169 @@ function EntityViewInner({
 }
 
 const EntityView = memo(EntityViewInner);
+
+// 事件时间轴（精简自旧版 drift gantt）：左列事件名，右列按 tick 比例摆条/点
+function EventGantt({
+  group,
+  events,
+  nameOf,
+  t,
+}: {
+  group: string;
+  events: EventItem[];
+  nameOf: (r: string) => string;
+  t: (typeof strings)[Lang];
+}) {
+  let minTick = events[0].start_tick ?? 0;
+  let maxTick = events[0].end_tick ?? minTick;
+  for (const ev of events) {
+    const endTick = ev.end_tick ?? ev.start_tick ?? 0;
+    if ((ev.start_tick ?? 0) < minTick) minTick = ev.start_tick ?? 0;
+    if (endTick > maxTick) maxTick = endTick;
+  }
+  const range = Math.max(maxTick - minTick, 1);
+  const first = events[0];
+  const last = events[events.length - 1];
+  // 时间段/标题共用一张 hover 卡：时间、参与实体、描述
+  const card = (ev: EventItem, trigger: ReactNode) => (
+    <HoverCard>
+      <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
+      <HoverCardContent className="w-80">
+        <div className="text-sm font-medium">{ev.title}</div>
+        <div className="mt-0.5 font-mono text-xs text-muted-foreground">
+          {ev.start_display}
+          {ev.end_display && ` – ${ev.end_display}`}
+        </div>
+        {ev.entities && ev.entities.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {ev.entities.map((r) => {
+              const off = ev.offsets?.find((o) => o.entity === r);
+              return (
+                <div
+                  key={r}
+                  className="flex items-baseline justify-between gap-3 rounded-md bg-muted px-2 py-1 text-xs"
+                >
+                  <span className="font-medium">{nameOf(r)}</span>
+                  <span className="text-right font-mono text-muted-foreground">
+                    {off?.start
+                      ? `Δ ${off.start}${off.end ? ` — ${off.end}` : ""}`
+                      : t.noBaseTime}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {ev.description && (
+          <p className="mt-2 text-sm whitespace-pre-wrap">{ev.description}</p>
+        )}
+      </HoverCardContent>
+    </HoverCard>
+  );
+
+  return (
+    <section className="min-w-0">
+      <h2 className="mb-2 text-lg font-medium">{group}</h2>
+      <div className="overflow-hidden rounded-lg border bg-card">
+        <div className="grid grid-cols-[220px_1fr] border-b bg-muted/50 text-xs text-muted-foreground">
+          <div className="h-9 border-r px-3 leading-9">{t.ganttEvent}</div>
+          <div className="relative h-9">
+            <span className="absolute bottom-1 left-3 font-mono">
+              {first.start_display}
+            </span>
+            <span className="absolute right-3 bottom-1 font-mono">
+              {last.end_display ?? last.start_display}
+            </span>
+          </div>
+        </div>
+        {events.map((ev) => {
+          const start = ev.start_tick ?? 0;
+          const end = ev.end_tick ?? start;
+          const left = ((start - minTick) / range) * 100;
+          const width = ((end - start) / range) * 100;
+          return (
+            <div
+              key={ev.id}
+              className="grid min-h-14 grid-cols-[220px_1fr] border-b last:border-b-0"
+            >
+              <div className="min-w-0 border-r px-3 py-2">
+                {card(
+                  ev,
+                  <button
+                    type="button"
+                    className="block w-full truncate text-left text-sm font-medium outline-none hover:underline"
+                  >
+                    {ev.title}
+                  </button>,
+                )}
+                {ev.entities && ev.entities.length > 0 && (
+                  <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {ev.entities.map(nameOf).join(" · ")}
+                  </div>
+                )}
+              </div>
+              <div className="relative bg-[linear-gradient(to_right,color-mix(in_oklab,var(--border)_55%,transparent)_1px,transparent_1px)] bg-[size:25%_100%]">
+                {card(
+                  ev,
+                  ev.end_tick === undefined ? (
+                    <span
+                      className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border border-primary bg-primary shadow-sm"
+                      style={{ left: `clamp(6px, ${left}%, calc(100% - 6px))` }}
+                    />
+                  ) : (
+                    <span
+                      className="absolute top-1/2 h-6 min-w-1 -translate-y-1/2 rounded-[4px] border border-primary/25 bg-primary/85 shadow-sm"
+                      style={{ left: `${left}%`, width: `${width}%` }}
+                    />
+                  ),
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function EventViewInner({ doc, lang }: { doc: StoryDoc | null; lang: Lang }) {
+  const t = strings[lang];
+  const nameOf = (r: string) => doc?.entity?.[r]?.name ?? r;
+  const entries = Object.entries(doc?.event ?? {})
+    .filter(([, events]) => events.length > 0)
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center text-muted-foreground">
+        {t.eventEmpty}
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-full flex-col gap-5 overflow-auto p-4">
+      {entries.map(([group, events]) => (
+        <EventGantt
+          key={group}
+          group={group}
+          events={events}
+          nameOf={nameOf}
+          t={t}
+        />
+      ))}
+      <div className="flex items-center gap-5 text-xs text-muted-foreground">
+        <span className="flex items-center gap-2">
+          <span className="h-2.5 w-5 rounded-[3px] bg-primary/85" />
+          {t.ganttDuration}
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="size-2.5 rotate-45 rounded-[1px] bg-primary" />
+          {t.ganttMilestone}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const EventView = memo(EventViewInner);
 
 export default App;

@@ -1,3 +1,4 @@
+mod calendar;
 mod document;
 mod model;
 
