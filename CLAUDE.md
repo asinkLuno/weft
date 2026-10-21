@@ -1,1 +1,1 @@
-/home/guozr/CODE/weft/AGENTS.md
+AGENTS.md

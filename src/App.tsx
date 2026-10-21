@@ -1,49 +1,97 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
+import { listen } from "@tauri-apps/api/event";
+import { LazyStore } from "@tauri-apps/plugin-store";
+import { useEffect, useState } from "react";
 import "./App.css";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+// 验证期写死的绑定路径（tauri dev 的 cwd 是 src-tauri）；正式版换成文件对话框
+const STORY_PATH = "../examples/story.yaml";
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+const settings = new LazyStore("settings.json");
+
+type DocumentPayload = {
+  doc?: unknown;
+  content?: string;
+  error?: string;
+};
+
+function App() {
+  const [content, setContent] = useState("");
+  const [doc, setDoc] = useState<unknown>(null);
+  const [error, setError] = useState("");
+  const [swapped, setSwapped] = useState(false);
+
+  useEffect(() => {
+    settings.get<boolean>("swapped").then((v) => {
+      if (v !== undefined && v !== null) setSwapped(v);
+    });
+  }, []);
+
+  useEffect(() => {
+    const unlisten = listen<boolean>("settings-changed", (e) => {
+      setSwapped(e.payload);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  useEffect(() => {
+    const unlisten = listen<DocumentPayload>("document-changed", (e) => {
+      const { doc, content, error } = e.payload;
+      if (error) {
+        setError(error);
+        return;
+      }
+      setError("");
+      if (doc !== undefined) setDoc(doc);
+      if (content !== undefined) setContent(content);
+    });
+    invoke<DocumentPayload>("bind_document", { path: STORY_PATH })
+      .then(({ doc, content }) => {
+        if (doc !== undefined) setDoc(doc);
+        if (content !== undefined) setContent(content);
+      })
+      .catch((err) => setError(String(err)));
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  async function save() {
+    try {
+      await invoke("save_document", { content });
+      setError("");
+    } catch (err) {
+      setError(String(err));
+    }
   }
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank" rel="noopener">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank" rel="noopener">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank" rel="noopener">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
+    <main
+      className="panes"
+      style={{ flexDirection: swapped ? "row-reverse" : "row" }}
+    >
+      <section className="pane">
+        <header>
+          <span>解析视图</span>
+          {error && <span className="error">{error}</span>}
+        </header>
+        <pre>{JSON.stringify(doc, null, 2)}</pre>
+      </section>
+      <section className="pane">
+        <header>
+          <span>YAML 编辑器</span>
+          <button type="button" onClick={save}>
+            保存
+          </button>
+        </header>
+        <textarea
+          value={content}
+          spellCheck={false}
+          onChange={(e) => setContent(e.currentTarget.value)}
         />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
+      </section>
     </main>
   );
 }
