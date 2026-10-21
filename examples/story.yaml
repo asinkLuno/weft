@@ -36,6 +36,17 @@ entity:
     # 多父归属示例：既是格兰芬多出身，也直属霍格沃茨
     belong_to: [gryffindor, hogwarts]
 
+  james:
+    name: 詹姆·波特
+    description: 哈利的父亲，格兰芬多击球手，掠夺者之首。
+    base_time: 1960-03-27
+    belong_to: [gryffindor]
+  lily:
+    name: 莉莉·波特
+    description: 哈利的母亲，麻瓜出身却天资出众的女巫。
+    base_time: 1960-01-30
+    belong_to: [gryffindor]
+
   harry:
     name: 哈利·波特
     description: 大难不死的男孩，入学当晚被分院帽分入格兰芬多。
@@ -93,3 +104,20 @@ entity:
     name: 贾斯廷·芬列里
     description: 放弃麻瓜私立名校来读霍格沃茨的赫奇帕奇学生。
     belong_to: [hufflepuff]
+
+# 实体关系：按组组织，每组是一批关系对；引用写实体 id 或名称都行
+entity_link:
+  波特一家:
+    - entities: [哈利·波特, 莉莉·波特]
+      relations: 母子
+    - entities: [哈利·波特, 詹姆·波特]
+      relations: 父子
+    - entities: [莉莉·波特, 詹姆·波特]
+      relations: 夫妻
+  格兰芬多伙伴:
+    - entities: [哈利·波特, 罗恩·韦斯莱]
+      relations: 同学与朋友
+    - entities: [哈利·波特, 赫敏·格兰杰]
+      relations: 同学与朋友
+    - entities: [罗恩·韦斯莱, 赫敏·格兰杰]
+      relations: 同学与朋友

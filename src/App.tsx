@@ -13,9 +13,9 @@ import {
   ReactFlow,
   useNodesState,
 } from "@xyflow/react";
-import { X as XIcon } from "lucide-react";
+import { ChevronDown, X as XIcon } from "lucide-react";
 import "@xyflow/react/dist/style.css";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { asLang, initialLang, type Lang, strings } from "./i18n";
 import "./App.css";
@@ -54,6 +59,10 @@ type StoryDoc = {
       belong_to?: string[];
       base_time?: unknown;
     }
+  >;
+  entity_link?: Record<
+    string,
+    Array<{ entities: [string, string]; relations: string }>
   >;
 };
 
@@ -355,7 +364,53 @@ function EntityCanvas({
   );
 }
 
-function EntityView({
+// 维度筛选下拉（shadcn faceted filter 同款）：outline 按钮当触发器，选中值显示为 Badge
+function DimensionFilter({
+  label,
+  values,
+  active,
+  onChoose,
+}: {
+  label: string;
+  values: Array<{ v: string; label: string }>;
+  active: { value: string; label: string } | null;
+  onChoose: (v: string) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          size="xs"
+          className="border-dashed"
+          disabled={values.length === 0}
+        >
+          {label}
+          {active && (
+            <Badge variant="secondary" className="rounded-sm px-1 font-normal">
+              {active.label}
+            </Badge>
+          )}
+          <ChevronDown className="text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="max-h-72 w-48 overflow-auto">
+        {values.map(({ v, label: text }) => (
+          <DropdownMenuCheckboxItem
+            key={v}
+            checked={active?.value === v}
+            onCheckedChange={() => onChoose(v)}
+          >
+            {text}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+// memo：flash 等无关状态变化时不重跑排序/布局/建节点
+function EntityViewInner({
   doc,
   lang,
   path,
@@ -365,8 +420,9 @@ function EntityView({
   path: string;
 }) {
   const t = strings[lang];
-  const [query, setQuery] = useState("");
-  const [picked, setPicked] = useState<string | null>(null);
+  // 两级筛选：先选维度（归属/关系），再选值；dim 为 null 即无筛选
+  const [dim, setDim] = useState<"belong" | "link" | null>(null);
+  const [pick, setPick] = useState<string | null>(null);
   // 节点摆放松存 settings.json（按文件隔离），不写进用户的 YAML
   const layoutKey = `layout:${path}`;
   const [saved, setSaved] = useState<Record<
@@ -389,6 +445,13 @@ function EntityView({
 
   const nameOf = (id: string) => doc?.entity?.[id]?.name ?? id;
 
+  // entity_link 的引用按 id 或名称对回实体 id；同名取排序靠前的（entities 已排序）
+  const idByName = new Map<string, string>();
+  for (const [id, e] of entities)
+    if (e.name !== undefined && !idByName.has(e.name)) idByName.set(e.name, id);
+  const idOf = (r: string) =>
+    doc?.entity && r in doc.entity ? r : (idByName.get(r) ?? null);
+
   // id 的全部上层归属（跨多级）；后端已保证无环，先占位只是防手滑自环
   const cache = new Map<string, Set<string>>();
   const ancestorsOf = (id: string): Set<string> => {
@@ -405,18 +468,38 @@ function EntityView({
 
   // 出现过的所有归属目标；已不存在的选中项视为无效，不参与过滤
   const targets = [...new Set(entities.flatMap(([, e]) => e.belong_to ?? []))];
-  const activePick = picked && targets.includes(picked) ? picked : null;
+  const activePick =
+    dim === "belong" && pick && targets.includes(pick) ? pick : null;
 
-  const q = query.trim().toLowerCase();
-  const filtered = entities.filter(([id, e]) => {
+  // 关系组筛选同理：组在文件更新后可能消失，失效视为未选
+  const groups = Object.keys(doc?.entity_link ?? {}).sort();
+  const activeLink =
+    dim === "link" && pick && groups.includes(pick) ? pick : null;
+
+  // 再选已选中的值 = 取消筛选
+  function choose(d: "belong" | "link", v: string) {
+    if (dim === d && pick === v) {
+      setDim(null);
+      setPick(null);
+    } else {
+      setDim(d);
+      setPick(v);
+    }
+  }
+  // 选中组内出现过的实体（解析成 id）
+  const linkMembers = new Set(
+    activeLink
+      ? (doc?.entity_link?.[activeLink] ?? [])
+          .flatMap(({ entities: [a, b] }) => [idOf(a), idOf(b)])
+          .filter((x): x is string => x !== null)
+      : [],
+  );
+
+  const filtered = entities.filter(([id]) => {
     // 选中的实体自己也算命中，层级图里当根展示
     if (activePick && id !== activePick && !ancestorsOf(id).has(activePick))
       return false;
-    if (
-      q &&
-      !`${e.name ?? ""} ${id} ${e.description ?? ""}`.toLowerCase().includes(q)
-    )
-      return false;
+    if (activeLink && !linkMembers.has(id)) return false;
     return true;
   });
 
@@ -431,16 +514,37 @@ function EntityView({
     belongLabel: t.belongTo,
   });
 
-  // 有归属筛选时按 belong_to 连边、dagre 分层；无筛选不连线、摆成网格平铺
+  // 有归属筛选时按 belong_to 连边、dagre 分层；无筛选不连归属线、摆成网格平铺
   const visibleSet = new Set(filtered.map(([id]) => id));
   const edges: Edge[] = filtered.flatMap(([id, e]) =>
     (e.belong_to ?? [])
       .filter((p) => visibleSet.has(p))
       .map((p) => ({ id: `${p}->${id}`, source: p, target: id })),
   );
+
+  // 关系对在平铺和关系筛选视图展示；端点不在当前过滤集时整条隐藏
+  const linkEdges: Edge[] = Object.entries(doc?.entity_link ?? {}).flatMap(
+    ([group, links]) =>
+      links.flatMap(({ entities: [a, b], relations }, i) => {
+        const s = idOf(a);
+        const t = idOf(b);
+        return s && t && s !== t && visibleSet.has(s) && visibleSet.has(t)
+          ? [
+              {
+                id: `link:${group}:${i}`,
+                source: s,
+                target: t,
+                label: relations,
+                labelStyle: { fontSize: 12 },
+              },
+            ]
+          : [];
+      }),
+  );
   const auto: Record<string, { x: number; y: number }> = {};
-  if (activePick) {
-    Object.assign(auto, dagreLayout(filtered, edges));
+  if (activePick || activeLink) {
+    // 归属筛选按 belong_to 分层，关系筛选按关系线分层；两个维度互斥
+    Object.assign(auto, dagreLayout(filtered, activePick ? edges : linkEdges));
   } else {
     const cols = Math.ceil(Math.sqrt(filtered.length));
     filtered.forEach(([id], i) => {
@@ -450,60 +554,56 @@ function EntityView({
       };
     });
   }
-  // 筛选视图始终按 dagre 全量重排（不读、不存用户摆位）；平铺视图尊重拖过的位置
+  // 筛选视图始终按 dagre 全量重排（不读、不存用户摆位）；平铺/搜索视图尊重拖过的位置
   const nodes: EntityFlowNode[] = filtered.map(([id, e]) => ({
     id,
     type: "entity",
-    position: activePick ? auto[id] : (saved[id] ?? auto[id]),
+    position: activePick || activeLink ? auto[id] : (saved[id] ?? auto[id]),
     data: entityData(id, e),
   }));
 
-  // 过滤集或筛选形态变化时重挂载画布：重新取景，筛选模式才能重排成树
-  const canvasKey = `${activePick ?? ""}|${filtered.map(([id]) => id).join("|")}`;
+  // 过滤集或筛选形态变化时重挂载画布：重新取景，筛选模式才能重排
+  const canvasKey = `${activePick ?? ""}|${activeLink ?? ""}|${filtered.map(([id]) => id).join("|")}`;
 
   return (
     <div className="flex h-full flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t.search}
-          className="max-w-64"
+        <DimensionFilter
+          label={t.belongTo}
+          values={targets.sort().map((tg) => ({ v: tg, label: nameOf(tg) }))}
+          active={
+            activePick ? { value: activePick, label: nameOf(activePick) } : null
+          }
+          onChoose={(v) => choose("belong", v)}
         />
-        {targets.sort().map((tg) => (
-          <Button
-            key={tg}
-            size="xs"
-            variant={picked === tg ? "default" : "outline"}
-            aria-pressed={picked === tg}
-            onClick={() => setPicked((prev) => (prev === tg ? null : tg))}
-          >
-            {nameOf(tg)}
-          </Button>
-        ))}
+        <DimensionFilter
+          label={t.linkGroup}
+          values={groups.map((g) => ({ v: g, label: g }))}
+          active={activeLink ? { value: activeLink, label: activeLink } : null}
+          onChoose={(v) => choose("link", v)}
+        />
       </div>
-      {filtered.length === 0 ? (
-        <p className="text-muted-foreground text-sm">{t.noMatch}</p>
-      ) : (
-        <div className="min-h-0 flex-1">
-          <EntityCanvas
-            key={canvasKey}
-            initialNodes={nodes}
-            edges={activePick ? edges : []}
-            onPersist={
-              activePick
-                ? undefined
-                : (id, pos) => {
-                    const next = { ...saved, [id]: pos };
-                    setSaved(next);
-                    settings.set(layoutKey, next);
-                  }
-            }
-          />
-        </div>
-      )}
+      <div className="min-h-0 flex-1">
+        <EntityCanvas
+          key={canvasKey}
+          initialNodes={nodes}
+          // 归属筛选只连归属线，关系筛选只连关系线，两个维度互斥
+          edges={activePick ? edges : linkEdges}
+          onPersist={
+            activePick || activeLink
+              ? undefined
+              : (id, pos) => {
+                  const next = { ...saved, [id]: pos };
+                  setSaved(next);
+                  settings.set(layoutKey, next);
+                }
+          }
+        />
+      </div>
     </div>
   );
 }
+
+const EntityView = memo(EntityViewInner);
 
 export default App;
