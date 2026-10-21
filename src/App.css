@@ -40,13 +40,3 @@ body,
   padding: 8px;
   font-size: 12px;
 }
-
-.pane textarea {
-  flex: 1;
-  resize: none;
-  border: none;
-  padding: 8px;
-  font-family: ui-monospace, monospace;
-  font-size: 13px;
-  outline: none;
-}
