@@ -4,6 +4,14 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { asLang, initialLang, type Lang, strings } from "./i18n";
@@ -142,22 +150,22 @@ function App() {
     return (
       <main className="welcome">
         <h1>weft</h1>
-        <button type="button" className="open-button" onClick={openFile}>
+        <Button size="lg" onClick={openFile}>
           {strings[lang].open}
-        </button>
+        </Button>
         {recents.length > 0 && (
           <>
             <h2>{strings[lang].recent}</h2>
             <ul>
               {recents.map((p) => (
                 <li key={p}>
-                  <button
-                    type="button"
-                    className="recent-button"
+                  <Button
+                    variant="link"
+                    className="h-auto max-w-[560px] overflow-hidden px-1 text-ellipsis whitespace-nowrap"
                     onClick={() => bind(p)}
                   >
                     {p}
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>
@@ -227,26 +235,25 @@ function EntityView({ doc, lang }: { doc: StoryDoc | null; lang: Lang }) {
   );
   if (entities.length === 0) return null;
   return (
-    <ul className="entity-list">
+    <div className="flex flex-col gap-3">
       {entities.map(([id, e]) => (
-        <li key={id}>
-          <div className="entity-head">
-            <span className="entity-name">{e.name ?? id}</span>
-            {e.belong_to && (
-              <span className="entity-meta">
-                {t.belongTo}: {e.belong_to}
-              </span>
-            )}
-            {e.base_time !== undefined && (
-              <span className="entity-meta">
-                {t.baseTime}: {String(e.base_time)}
-              </span>
-            )}
-          </div>
-          {e.description && <p className="entity-desc">{e.description}</p>}
-        </li>
+        <Card key={id} size="sm">
+          <CardHeader>
+            <CardTitle>{e.name ?? id}</CardTitle>
+            <CardDescription>
+              {[
+                e.belong_to && `${t.belongTo}: ${e.belong_to}`,
+                e.base_time !== undefined &&
+                  `${t.baseTime}: ${String(e.base_time)}`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </CardDescription>
+          </CardHeader>
+          {e.description && <CardContent>{e.description}</CardContent>}
+        </Card>
       ))}
-    </ul>
+    </div>
   );
 }
 
