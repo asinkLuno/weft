@@ -36,10 +36,11 @@ fn parse(content: &str) -> Result<Value, String> {
     serde_json::to_value(yaml).map_err(|e| e.to_string())
 }
 
-fn read_doc(path: &Path) -> Result<(String, Value), String> {
+fn read_doc(path: &Path) -> Result<(String, Result<Value, String>), String> {
     let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let doc = parse(&content)?;
-    Ok((content, doc))
+    // 语法错误不算绑定失败：正常进入展示页，错误原样带给前端
+    let parsed = parse(&content);
+    Ok((content, parsed))
 }
 
 // watcher 线程里调用：读文件、回声抑制、把解析结果推给前端
@@ -78,7 +79,7 @@ pub fn bind_document(
     path: String,
 ) -> Result<DocumentPayload, String> {
     let path = PathBuf::from(path);
-    let (content, doc) = read_doc(&path)?;
+    let (content, parsed) = read_doc(&path)?;
 
     // 监听父目录再按路径过滤：直接 watch 单文件会漏掉 rename 型写入（我们的原子写就是 rename）
     let target = path.clone();
@@ -106,10 +107,17 @@ pub fn bind_document(
     st.last_written = None;
     st._watcher = Some(debouncer);
 
-    Ok(DocumentPayload {
-        doc: Some(doc),
-        content: Some(content),
-        error: None,
+    Ok(match parsed {
+        Ok(doc) => DocumentPayload {
+            doc: Some(doc),
+            content: Some(content),
+            error: None,
+        },
+        Err(error) => DocumentPayload {
+            doc: None,
+            content: Some(content),
+            error: Some(error),
+        },
     })
 }
 

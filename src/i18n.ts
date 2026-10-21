@@ -4,9 +4,13 @@ export type Lang = "zh" | "en";
 export const strings = {
   zh: {
     parseView: "解析视图",
+    open: "打开 YAML 文件",
+    recent: "最近打开",
   },
   en: {
     parseView: "Parse View",
+    open: "Open YAML File",
+    recent: "Recent",
   },
 } as const;
 
