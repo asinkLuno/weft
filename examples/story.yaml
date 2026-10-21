@@ -140,3 +140,10 @@ event:
       end_time: [0, 0, 6, 0, *basilisk] # 锚点：自己开始后 6 小时
       entities: [金妮·韦斯莱]
       description: 金妮被里德的日记控制，打开密室。
+
+# 叙事线：subject 引用事件（`组名/标题` 全 id，或裸标题——事件标题全局唯一），
+# observer 引用实体；事件按 observer 的 base_time 展开成相对偏移时间轴
+narrative:
+  哈利的第一学年:
+    subject: [入学之夜/分院帽晚宴, 入学之夜/厄里斯魔镜, 密室事件/蛇怪袭击]
+    observer: 哈利·波特

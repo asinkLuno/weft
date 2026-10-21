@@ -123,6 +123,36 @@ fn parse(content: &str, base: &Path) -> Result<Value, String> {
         }
         events.sort_by_key(|e| e.start_tick.unwrap_or(i64::MAX));
     }
+    // 叙事线：subject 事件相对 observer base_time 的偏移（tick 定位 + humanize 展示）
+    let StoryDoc {
+        entity, event, narrative, ..
+    } = &mut doc;
+    for nar in narrative.values_mut() {
+        let base = resolve_base(entity, &nar.observer);
+        let base_tick = base.map(|b| cal.to_tick(b)).transpose()?;
+        for s in &mut nar.subject {
+            let Some((g, t)) = s.event.split_once('/') else {
+                continue;
+            };
+            let Some(ev) = event
+                .get(g)
+                .and_then(|evs| evs.iter().find(|e| e.title == t))
+            else {
+                continue;
+            };
+            s.start_tick = base_tick.zip(ev.start_tick).map(|(b, t)| t - b);
+            s.end_tick = base_tick.zip(ev.end_tick).map(|(b, t)| t - b);
+            s.start = match (base, &ev.start) {
+                (Some(b), Some(t)) => Some(offset_display(&cal, t, b)?),
+                _ => None,
+            };
+            s.end = match (base, &ev.end) {
+                (Some(b), Some(t)) => Some(offset_display(&cal, t, b)?),
+                _ => None,
+            };
+        }
+        nar.subject.sort_by_key(|s| s.start_tick.unwrap_or(i64::MAX));
+    }
     serde_json::to_value(doc).map_err(|e| e.to_string())
 }
 

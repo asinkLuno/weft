@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -30,6 +30,9 @@ pub struct StoryDoc {
     // 事件分组：组名 → 按 tick 排序的事件列表（解析在 document.rs 完成）
     #[serde(default)]
     pub event: BTreeMap<String, Vec<EventItem>>,
+    // 叙事线：组名 → 相对 observer base_time 展开的事件时间轴（解析在 document.rs 完成）
+    #[serde(default)]
+    pub narrative: BTreeMap<String, Narrative>,
     // 运行时填充：story.date_mode 所指历法的元数据，不来自 YAML
     #[serde(skip_serializing_if = "Option::is_none")]
     pub calendar_meta: Option<CalendarMetadata>,
@@ -47,19 +50,25 @@ impl<'de> Deserialize<'de> for StoryDoc {
             #[serde(default)]
             event: HashMap<String, HashMap<String, RawEvent>>,
             #[serde(default)]
+            narrative: HashMap<String, RawNarrative>,
+            #[serde(default)]
             calendar: HashMap<String, CalendarSpec>,
         }
         let raw = Raw::deserialize(d)?;
+        // 事件标题全局唯一：跨组同名也算重复，subject 等引用才能省略组名
+        let mut seen = HashSet::new();
+        for events in raw.event.values() {
+            for title in events.keys() {
+                if !seen.insert(title.as_str()) {
+                    return Err(de::Error::custom(format!("事件标题 `{title}` 重复")));
+                }
+            }
+        }
         // 引用按 id 或名称对回实体（与 belong_to 的 id 校验同理，名称匹配放宽给手写 YAML）
         for (group, links) in &raw.entity_link {
             for link in links {
                 for r in [&link.entities.0, &link.entities.1] {
-                    let ok = raw.entity.contains_key(r)
-                        || raw
-                            .entity
-                            .values()
-                            .any(|e| e.name.as_deref() == Some(r.as_str()));
-                    if !ok {
+                    if !entity_exists(&raw.entity, r) {
                         return Err(de::Error::custom(format!(
                             "entity_link `{group}` 引用了不存在的实体 `{r}`"
                         )));
@@ -71,18 +80,39 @@ impl<'de> Deserialize<'de> for StoryDoc {
         for (group, events) in &raw.event {
             for (title, ev) in events {
                 for r in &ev.entities {
-                    let ok = raw.entity.contains_key(r)
-                        || raw
-                            .entity
-                            .values()
-                            .any(|e| e.name.as_deref() == Some(r.as_str()));
-                    if !ok {
+                    if !entity_exists(&raw.entity, r) {
                         return Err(de::Error::custom(format!(
                             "event `{group}/{title}` 引用了不存在的实体 `{r}`"
                         )));
                     }
                 }
             }
+        }
+        // narrative：observer 对回实体、subject 对回事件，校验时顺带重写成事件 id
+        let mut narrative = BTreeMap::new();
+        for (name, nar) in raw.narrative {
+            if !entity_exists(&raw.entity, &nar.observer) {
+                return Err(de::Error::custom(format!(
+                    "narrative `{name}` 引用了不存在的实体 `{}`",
+                    nar.observer
+                )));
+            }
+            let mut subject = Vec::with_capacity(nar.subject.len());
+            for r in nar.subject {
+                let Some((g, t)) = resolve_event(&raw.event, &r) else {
+                    return Err(de::Error::custom(format!(
+                        "narrative `{name}` 的 subject 引用了不存在的事件 `{r}`"
+                    )));
+                };
+                subject.push(NarrativeSubject {
+                    event: format!("{g}/{t}"),
+                    start_tick: None,
+                    end_tick: None,
+                    start: None,
+                    end: None,
+                });
+            }
+            narrative.insert(name, Narrative { observer: nar.observer, subject });
         }
         // 事件 id = `组名/标题`；时间解析要等历法加载，document.rs 里做
         let mut event: BTreeMap<String, Vec<EventItem>> = BTreeMap::new();
@@ -112,6 +142,7 @@ impl<'de> Deserialize<'de> for StoryDoc {
             entity: raw.entity,
             entity_link: raw.entity_link,
             event,
+            narrative,
             calendar: raw.calendar,
             calendar_meta: None,
         })
@@ -236,6 +267,59 @@ pub struct EventItem {
     pub start_display: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_display: Option<String>,
+}
+
+// 叙事线：subject 事件按 observer 的 base_time 展开成相对时间轴（与 event 的绝对时间轴相反）
+#[derive(Debug, Serialize)]
+pub struct Narrative {
+    // 观察者，原样保留 YAML 引用（id 或名称）
+    pub observer: String,
+    // 按 document.rs 填充的相对开始时间排序
+    pub subject: Vec<NarrativeSubject>,
+}
+
+// subject 事件：event 为事件 id（`组名/标题`），tick 与展示均为相对 observer base 的偏移
+#[derive(Debug, Serialize)]
+pub struct NarrativeSubject {
+    pub event: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_tick: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_tick: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<String>,
+}
+
+// YAML 里的叙事线原始形态：subject 引用事件、observer 引用实体，校验后重写成 Narrative
+#[derive(Debug, Deserialize)]
+struct RawNarrative {
+    subject: Vec<String>,
+    observer: String,
+}
+
+// 引用按 id 或名称对回实体（entity_link / event / narrative 同规则）
+fn entity_exists(entity: &HashMap<String, Entity>, r: &str) -> bool {
+    entity.contains_key(r)
+        || entity.values().any(|e| e.name.as_deref() == Some(r))
+}
+
+// 事件引用：`组名/标题` 全 id，或裸标题（标题已全局唯一校验）
+fn resolve_event(
+    event: &HashMap<String, HashMap<String, RawEvent>>,
+    r: &str,
+) -> Option<(String, String)> {
+    if let Some((g, t)) = r.split_once('/') {
+        return event
+            .get(g)
+            .is_some_and(|evs| evs.contains_key(t))
+            .then(|| (g.to_string(), t.to_string()));
+    }
+    event
+        .iter()
+        .find(|(_, evs)| evs.contains_key(r))
+        .map(|(g, _)| (g.clone(), r.to_string()))
 }
 
 // base_time 写单个整数（只有年份的场合）等价于单分量列表；空值即无时间

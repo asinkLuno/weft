@@ -79,6 +79,23 @@ type StoryDoc = {
   >;
   // 事件分组：组名 → 按 tick 升序的事件
   event?: Record<string, EventItem[]>;
+  // 叙事线：组名 → 相对观察者展开的事件时间轴
+  narrative?: Record<string, Narrative>;
+};
+
+type NarrativeSubject = {
+  event: string;
+  // 相对 observer base_time 的 tick
+  start_tick?: number;
+  end_tick?: number;
+  // 相对 observer base_time 的偏移展示
+  start?: string;
+  end?: string;
+};
+
+type Narrative = {
+  observer: string;
+  subject: NarrativeSubject[];
 };
 
 type EventItem = {
@@ -252,6 +269,9 @@ function App() {
           </TabsContent>
           <TabsContent value="tab3" className="pane">
             <EventView doc={doc} lang={lang} />
+          </TabsContent>
+          <TabsContent value="tab4" className="pane">
+            <NarrativeView doc={doc} lang={lang} />
           </TabsContent>
         </main>
       </Tabs>
@@ -809,5 +829,201 @@ function EventViewInner({ doc, lang }: { doc: StoryDoc | null; lang: Lang }) {
 }
 
 const EventView = memo(EventViewInner);
+
+// 叙事线 gantt（复用事件页的视觉）：x 轴原点是 observer 的 base_time，
+// 事件按相对 observer 的偏移摆位；observer 无 base_time 时退化为纯列表
+function NarrativeGantt({
+  name,
+  nar,
+  byId,
+  doc,
+  nameOf,
+  t,
+}: {
+  name: string;
+  nar: Narrative;
+  byId: Map<string, EventItem>;
+  doc: StoryDoc | null;
+  nameOf: (r: string) => string;
+  t: (typeof strings)[Lang];
+}) {
+  const rows = nar.subject.map((s) => ({ s, ev: byId.get(s.event) }));
+  // observer 按 id 或名称对回实体（与后端同规则，同名取排序靠前的由 find 顺序兜底）
+  const observer =
+    doc?.entity?.[nar.observer] ??
+    Object.values(doc?.entity ?? {}).find((e) => e.name === nar.observer);
+  const based = rows.some(({ s }) => s.start_tick !== undefined);
+  // 0 = observer 的 base_time，纳入范围让原点可见
+  const ticks = based
+    ? rows
+        .flatMap(({ s }) => [s.start_tick, s.end_tick])
+        .filter((x): x is number => x !== undefined)
+    : [];
+  const min = Math.min(0, ...ticks);
+  const max = Math.max(0, ...ticks);
+  const range = Math.max(max - min, 1);
+  const zero = ((0 - min) / range) * 100;
+  const last = rows[rows.length - 1]?.s;
+
+  // 时间/偏移/描述共用一张 hover 卡
+  const card = (s: NarrativeSubject, trigger: ReactNode) => {
+    const ev = byId.get(s.event);
+    return (
+      <HoverCard>
+        <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
+        <HoverCardContent className="w-80">
+          <div className="text-sm font-medium">{ev?.title ?? s.event}</div>
+          <div className="mt-0.5 font-mono text-xs text-muted-foreground">
+            {ev?.start_display}
+            {ev?.end_display && ` – ${ev.end_display}`}
+          </div>
+          {(s.start || s.end) && (
+            <div className="mt-1 font-mono text-xs text-muted-foreground">
+              Δ {s.start}
+              {s.end && ` — ${s.end}`}
+            </div>
+          )}
+          {ev?.description && (
+            <p className="mt-2 text-sm whitespace-pre-wrap">{ev.description}</p>
+          )}
+        </HoverCardContent>
+      </HoverCard>
+    );
+  };
+
+  return (
+    <section className="min-w-0">
+      <h2 className="mb-1 text-lg font-medium">{name}</h2>
+      <p className="mb-2 text-sm text-muted-foreground">
+        {t.observer}: {nameOf(nar.observer)}
+        {observer?.base_time_display &&
+          ` · ${t.baseTime} ${observer.base_time_display}`}
+      </p>
+      <div className="overflow-hidden rounded-lg border bg-card">
+        <div className="grid grid-cols-[220px_1fr] border-b bg-muted/50 text-xs text-muted-foreground">
+          <div className="h-9 border-r px-3 leading-9">{t.ganttEvent}</div>
+          {based ? (
+            <div className="relative h-9">
+              <span
+                className="absolute bottom-1 -translate-x-1/2 font-mono"
+                style={{ left: `${zero}%` }}
+              >
+                {observer?.base_time_display}
+              </span>
+              {last && (last.end ?? last.start) && (
+                <span className="absolute right-3 bottom-1 font-mono">
+                  Δ {last.end ?? last.start}
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="h-9 px-3 leading-9">{t.noBaseTime}</div>
+          )}
+        </div>
+        {rows.map(({ s, ev }) => {
+          const start = s.start_tick ?? 0;
+          const end = s.end_tick ?? start;
+          const left = ((start - min) / range) * 100;
+          const width = ((end - start) / range) * 100;
+          return (
+            <div
+              key={s.event}
+              className="grid min-h-14 grid-cols-[220px_1fr] border-b last:border-b-0"
+            >
+              <div className="min-w-0 border-r px-3 py-2">
+                {card(
+                  s,
+                  <button
+                    type="button"
+                    className="block w-full truncate text-left text-sm font-medium outline-none hover:underline"
+                  >
+                    {ev?.title ?? s.event}
+                  </button>,
+                )}
+                {ev?.start_display && (
+                  <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {ev.start_display}
+                  </div>
+                )}
+              </div>
+              {based ? (
+                <div className="relative bg-[linear-gradient(to_right,color-mix(in_oklab,var(--border)_55%,transparent)_1px,transparent_1px)] bg-[size:25%_100%]">
+                  <span
+                    className="absolute inset-y-0 w-px bg-primary/30"
+                    style={{ left: `${zero}%` }}
+                  />
+                  {card(
+                    s,
+                    s.end_tick === undefined ? (
+                      <span
+                        className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border border-primary bg-primary shadow-sm"
+                        style={{
+                          left: `clamp(6px, ${left}%, calc(100% - 6px))`,
+                        }}
+                      />
+                    ) : (
+                      <span
+                        className="absolute top-1/2 h-6 min-w-1 -translate-y-1/2 rounded-[4px] border border-primary/25 bg-primary/85 shadow-sm"
+                        style={{ left: `${left}%`, width: `${width}%` }}
+                      />
+                    ),
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center px-3 py-2 text-xs text-muted-foreground">
+                  {t.noBaseTime}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function NarrativeViewInner({
+  doc,
+  lang,
+}: {
+  doc: StoryDoc | null;
+  lang: Lang;
+}) {
+  const t = strings[lang];
+  const nameOf = (r: string) => doc?.entity?.[r]?.name ?? r;
+  // 事件索引：id → 事件（subject 只存 id，展示数据从这里取）
+  const byId = new Map(
+    Object.values(doc?.event ?? {})
+      .flat()
+      .map((ev) => [ev.id, ev]),
+  );
+  const entries = Object.entries(doc?.narrative ?? {})
+    .filter(([, nar]) => nar.subject.length > 0)
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center text-muted-foreground">
+        {t.narrativeEmpty}
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-full flex-col gap-5 overflow-auto p-4">
+      {entries.map(([name, nar]) => (
+        <NarrativeGantt
+          key={name}
+          name={name}
+          nar={nar}
+          byId={byId}
+          doc={doc}
+          nameOf={nameOf}
+          t={t}
+        />
+      ))}
+    </div>
+  );
+}
+
+const NarrativeView = memo(NarrativeViewInner);
 
 export default App;
