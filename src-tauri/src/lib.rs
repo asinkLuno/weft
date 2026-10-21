@@ -1,4 +1,5 @@
 mod document;
+mod model;
 
 use std::sync::Mutex;
 use serde_json::json;

@@ -2,49 +2,14 @@
 # 后端对 schema 无感知（YAML↔JSON 透传），此结构是渲染器/前端的约定
 story:
   title: 织名
-  logline: 一个能织出名字的少女，在语言崩坏的城市里寻找自己的真名。
-  tags: [奇幻, 群像]
+  description: 一个能织出名字的少女，在语言崩坏的城市里寻找自己的真名。
 
-characters:
-  - id: rin # 稳定 ID，relationships / outline 用它引用
+entity:
+  rin:
     name: 凛
-    role: protagonist
-    tags: [猫耳, 左撇子]
-    appearance: # 渲染器消费的视觉字段，键开放
-      hair: 银白长发
-      eyes: 金色竖瞳
-      outfit: 深蓝斗篷
-    personality: [执拗, 怕生]
-    bio: 织名的最后传人，能看见万物真正的名字。
-    relationships:
-      - with: kai
-        type: 挚敌
-
-  - id: kai
-    name: 凯
-    role: antagonist
-    tags: [失名者]
-    appearance:
-      hair: 焦黑短发
-      eyes: 灰白
-      outfit: 打满补丁的风衣
-    personality: [偏执, 温柔]
-    bio: 名字被城市吞噬的旧识，坚信无名者才能自由。
-    relationships:
-      - with: rin
-        type: 旧友
-
-outline:
-  - act: 第一幕
-    chapters:
-      - title: 雨夜
-        summary: 凛在雨夜的桥下捡到一枚没有名字的怀表。
-        characters: [rin, kai]
-      - title: 织室
-        summary: 凛发现怀表里的名字线正在被人拆解。
-        characters: [rin]
-  - act: 第二幕
-    chapters:
-      - title: 失名街
-        summary: 追踪线索的凛闯入失名者聚居的街区。
-        characters: [rin, kai]
+    description: 一个能织出名字的少女，拥有神秘的能力。
+    base_time: 2024-01-01
+  rin2:
+    name: 凛2
+    description: 一个能织出名字的少女，拥有神秘的能力。
+    base_time: 2024-01-01

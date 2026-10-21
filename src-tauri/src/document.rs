@@ -7,9 +7,11 @@ use std::{
 
 use notify::RecursiveMode;
 use notify_debouncer_full::{Debouncer, FileIdMap, new_debouncer};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
+
+use crate::model::StoryDoc;
 
 const EVENT: &str = "document-changed";
 // 删除/移走哨兵：前端按当前语言翻译这条错误
@@ -35,7 +37,9 @@ pub struct DocumentPayload {
 fn parse(content: &str) -> Result<Value, String> {
     let yaml: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(content).map_err(|e| e.to_string())?;
-    serde_json::to_value(yaml).map_err(|e| e.to_string())
+    // 序列化 model.rs 声明过的结构：未知键在这里被滤掉
+    let doc = StoryDoc::deserialize(&yaml).map_err(|e| e.to_string())?;
+    serde_json::to_value(doc).map_err(|e| e.to_string())
 }
 
 fn read_doc(path: &Path) -> Result<(String, Result<Value, String>), String> {

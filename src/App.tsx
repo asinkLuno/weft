@@ -5,7 +5,7 @@ import { LazyStore } from "@tauri-apps/plugin-store";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { asLang, initialLang, type Lang, strings } from "./i18n";
 import "./App.css";
 
@@ -15,6 +15,24 @@ type DocumentPayload = {
   doc?: unknown;
   content?: string;
   error?: string;
+};
+
+// 后端已按 src-tauri/src/model.rs 校验并滤掉未声明键，这里只读序列化结果
+type StoryDoc = {
+  story?: {
+    title?: string;
+    description?: string;
+    author?: string;
+  };
+  entity?: Record<
+    string,
+    {
+      name?: string;
+      description?: string;
+      belong_to?: string;
+      base_time?: unknown;
+    }
+  >;
 };
 
 const YAML_FILTER = { name: "YAML", extensions: ["yaml", "yml"] };
@@ -30,6 +48,7 @@ function showError(message: string) {
 
 function App() {
   const [path, setPath] = useState<string | null>(null);
+  const [doc, setDoc] = useState<StoryDoc | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("tab1");
   const [lang, setLang] = useState<Lang>(initialLang);
   const [recents, setRecents] = useState<string[]>([]);
@@ -63,14 +82,15 @@ function App() {
   useEffect(() => {
     if (!path) return;
     const unlisten = listen<DocumentPayload>("document-changed", (e) => {
-      const { doc, error } = e.payload;
+      const { doc: nextDoc, error } = e.payload;
       if (error) {
         showError(error === "deleted" ? strings[lang].deleted : error);
         return;
       }
       toast.dismiss();
       // 有解析结果说明文件内容更新了，短暂变色提示
-      if (doc !== undefined) {
+      if (nextDoc !== undefined) {
+        setDoc((nextDoc as StoryDoc) ?? null);
         setFlash(true);
         clearTimeout(flashTimer.current);
         flashTimer.current = setTimeout(() => setFlash(false), 400);
@@ -104,6 +124,7 @@ function App() {
         path: p,
       });
       setPath(p);
+      setDoc((payload.doc as StoryDoc) ?? null);
       if (payload.error) showError(payload.error);
       remember(p);
     } catch (err) {
@@ -163,7 +184,14 @@ function App() {
             ))}
           </TabsList>
         </div>
-        <main className="content" />
+        <main className="content">
+          <TabsContent value="tab1" className="pane">
+            {doc?.story && <StoryView doc={doc} lang={lang} />}
+          </TabsContent>
+          <TabsContent value="tab2" className="pane">
+            <EntityView doc={doc} lang={lang} />
+          </TabsContent>
+        </main>
       </Tabs>
       <Toaster richColors position="bottom-right" offset={40} />
       <footer className={flash ? "statusbar flash" : "statusbar"}>
@@ -171,6 +199,54 @@ function App() {
         <span>YAML</span>
       </footer>
     </div>
+  );
+}
+
+function StoryView({ doc, lang }: { doc: StoryDoc; lang: Lang }) {
+  const t = strings[lang];
+  const story = doc.story;
+  if (!story) return null;
+  return (
+    <div className="story-body">
+      <h1>{story.title}</h1>
+      {story.description && <p className="story-desc">{story.description}</p>}
+      {story.author && (
+        <p className="story-author">
+          {t.author}: {story.author}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function EntityView({ doc, lang }: { doc: StoryDoc | null; lang: Lang }) {
+  const t = strings[lang];
+  // HashMap 无序，按 id 排序保证两次渲染顺序一致
+  const entities = Object.entries(doc?.entity ?? {}).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  if (entities.length === 0) return null;
+  return (
+    <ul className="entity-list">
+      {entities.map(([id, e]) => (
+        <li key={id}>
+          <div className="entity-head">
+            <span className="entity-name">{e.name ?? id}</span>
+            {e.belong_to && (
+              <span className="entity-meta">
+                {t.belongTo}: {e.belong_to}
+              </span>
+            )}
+            {e.base_time !== undefined && (
+              <span className="entity-meta">
+                {t.baseTime}: {String(e.base_time)}
+              </span>
+            )}
+          </div>
+          {e.description && <p className="entity-desc">{e.description}</p>}
+        </li>
+      ))}
+    </ul>
   );
 }
 
