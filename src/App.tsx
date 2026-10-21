@@ -522,7 +522,7 @@ function EntityViewInner({
       .map((p) => ({ id: `${p}->${id}`, source: p, target: id })),
   );
 
-  // 关系对在平铺和关系筛选视图展示；端点不在当前过滤集时整条隐藏
+  // 关系对只在关系筛选视图展示；端点不在当前过滤集时整条隐藏
   const linkEdges: Edge[] = Object.entries(doc?.entity_link ?? {}).flatMap(
     ([group, links]) =>
       links.flatMap(({ entities: [a, b], relations }, i) => {
@@ -587,8 +587,8 @@ function EntityViewInner({
         <EntityCanvas
           key={canvasKey}
           initialNodes={nodes}
-          // 归属筛选只连归属线，关系筛选只连关系线，两个维度互斥
-          edges={activePick ? edges : linkEdges}
+          // 归属筛选只连归属线，关系筛选只连关系线，无筛选不连线，两个维度互斥
+          edges={activePick ? edges : activeLink ? linkEdges : []}
           onPersist={
             activePick || activeLink
               ? undefined
