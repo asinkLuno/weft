@@ -35,7 +35,7 @@ where
             }
             // 引用完整性：belong_to 必须指向表里已有的 entity
             for (id, entity) in &out {
-                if let Some(target) = &entity.belong_to {
+                for target in &entity.belong_to {
                     if !out.contains_key(target) {
                         return Err(de::Error::custom(format!(
                             "entity `{id}` belong_to unknown entity `{target}`"
@@ -64,6 +64,7 @@ pub struct Entity {
     // shortcut: 类型未定，先不校验；确定后收紧
     pub base_time: Option<Value>,
     pub description: Option<String>,
-    // 归属的上层实体 id（如人物 → 团体）
-    pub belong_to: Option<String>,
+    // 归属的上层实体 id 列表（如人物 → 团体）
+    #[serde(default)]
+    pub belong_to: Vec<String>,
 }

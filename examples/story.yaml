@@ -1,15 +1,88 @@
 # weft 故事文档示例 —— 本文件即 YAML 数据模型 v0 的设计
 # 后端对 schema 无感知（YAML↔JSON 透传），此结构是渲染器/前端的约定
 story:
-  title: 织名
-  description: 一个能织出名字的少女，在语言崩坏的城市里寻找自己的真名。
+  title: 哈利·波特与魔法石
+  author: J.K. 罗琳
+  description: >-
+    十一岁的哈利·波特进入霍格沃茨魔法学校，
+    与同伴一起揭开魔法石的秘密。
 
 entity:
-  rin:
-    name: 凛
-    description: 一个能织出名字的少女，拥有神秘的能力。
-    base_time: 2024-01-01
-  rin2:
-    name: 凛2
-    description: 一个能织出名字的少女，拥有神秘的能力。
-    base_time: 2024-01-01
+  hogwarts:
+    name: 霍格沃茨魔法学校
+    description: 英国的魔法学校，下设四大学院。
+
+  gryffindor:
+    name: 格兰芬多
+    description: 以勇气著称的学院，院徽为狮子。
+    belong_to: [hogwarts]
+  slytherin:
+    name: 斯莱特林
+    description: 以野心著称的学院，院徽为蛇。
+    belong_to: [hogwarts]
+  ravenclaw:
+    name: 拉文克劳
+    description: 以智慧著称的学院，院徽为鹰。
+    belong_to: [hogwarts]
+  hufflepuff:
+    name: 赫奇帕奇
+    description: 以忠诚著称的学院，院徽为獾。
+    belong_to: [hogwarts]
+
+  harry:
+    name: 哈利·波特
+    description: 大难不死的男孩，入学当晚被分院帽分入格兰芬多。
+    base_time: 1980-07-31
+    belong_to: [gryffindor]
+  ron:
+    name: 罗恩·韦斯莱
+    description: 哈利在火车上结识的好友，韦斯莱家幼子。
+    base_time: 1980-03-01
+    belong_to: [gryffindor]
+  hermione:
+    name: 赫敏·格兰杰
+    description: 麻瓜出身、成绩拔尖的女巫，与哈利罗恩同寝。
+    base_time: 1979-09-19
+    belong_to: [gryffindor]
+  neville:
+    name: 纳威·隆巴顿
+    description: 健忘胆小的同院同学，蟾蜍莱夫总在跑丢。
+    base_time: 1980-07-30
+    belong_to: [gryffindor]
+  ginny:
+    name: 金妮·韦斯莱
+    description: 韦斯莱家的小女儿，在国王十字车站送哥哥上学。
+    base_time: 1981-08-11
+    belong_to: [gryffindor]
+
+  draco:
+    name: 德拉科·马尔福
+    description: 纯血世家出身的傲慢男生，入学前就想拉拢哈利。
+    base_time: 1980-06-05
+    belong_to: [slytherin]
+  crabbe:
+    name: 文森特·克拉布
+    description: 德拉科的跟班，胳膊粗脑子钝。
+    belong_to: [slytherin]
+  goyle:
+    name: 格雷戈里·高尔
+    description: 德拉科的跟班，与克拉布形影不离。
+    belong_to: [slytherin]
+
+  padma:
+    name: 帕德玛·佩蒂尔
+    description: 帕瓦蒂的双胞胎妹妹，分院礼上被分入拉文克劳。
+    belong_to: [ravenclaw]
+
+  hannah:
+    name: 汉娜·艾博
+    description: 分院礼上被分入赫奇帕奇的女生。
+    belong_to: [hufflepuff]
+  susan:
+    name: 苏珊·博恩斯
+    description: 分院礼上被分入赫奇帕奇的女生。
+    belong_to: [hufflepuff]
+  justin:
+    name: 贾斯廷·芬列里
+    description: 放弃麻瓜私立名校来读霍格沃茨的赫奇帕奇学生。
+    belong_to: [hufflepuff]

@@ -5,6 +5,7 @@ import { LazyStore } from "@tauri-apps/plugin-store";
 import { X as XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { asLang, initialLang, type Lang, strings } from "./i18n";
 import "./App.css";
@@ -37,7 +39,7 @@ type StoryDoc = {
     {
       name?: string;
       description?: string;
-      belong_to?: string;
+      belong_to?: string[];
       base_time?: unknown;
     }
   >;
@@ -238,30 +240,88 @@ function StoryView({ doc, lang }: { doc: StoryDoc; lang: Lang }) {
 
 function EntityView({ doc, lang }: { doc: StoryDoc | null; lang: Lang }) {
   const t = strings[lang];
+  const [query, setQuery] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+
   // HashMap 无序，按 id 排序保证两次渲染顺序一致
   const entities = Object.entries(doc?.entity ?? {}).sort(([a], [b]) =>
     a.localeCompare(b),
   );
   if (entities.length === 0) return null;
+
+  const nameOf = (id: string) => doc?.entity?.[id]?.name ?? id;
+
+  // 出现过的所有归属目标；已不存在的选中项视为无效，不参与过滤
+  const targets = [...new Set(entities.flatMap(([, e]) => e.belong_to ?? []))];
+  const activePicks = [...picked].filter((p) => targets.includes(p));
+
+  const q = query.trim().toLowerCase();
+  const filtered = entities.filter(([id, e]) => {
+    if (activePicks.some((p) => !e.belong_to?.includes(p))) return false;
+    if (
+      q &&
+      !`${e.name ?? ""} ${id} ${e.description ?? ""}`.toLowerCase().includes(q)
+    )
+      return false;
+    return true;
+  });
+
   return (
     <div className="flex flex-col gap-3">
-      {entities.map(([id, e]) => (
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t.search}
+          className="max-w-64"
+        />
+        {targets.sort().map((tg) => (
+          <Button
+            key={tg}
+            size="xs"
+            variant={picked.has(tg) ? "default" : "outline"}
+            aria-pressed={picked.has(tg)}
+            onClick={() =>
+              setPicked((prev) => {
+                const next = new Set(prev);
+                if (next.has(tg)) next.delete(tg);
+                else next.add(tg);
+                return next;
+              })
+            }
+          >
+            {nameOf(tg)}
+          </Button>
+        ))}
+      </div>
+      {filtered.map(([id, e]) => (
         <Card key={id} size="sm">
           <CardHeader>
-            <CardTitle>{e.name ?? id}</CardTitle>
-            <CardDescription>
-              {[
-                e.belong_to && `${t.belongTo}: ${e.belong_to}`,
-                e.base_time !== undefined &&
-                  `${t.baseTime}: ${String(e.base_time)}`,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </CardDescription>
+            <CardTitle>{nameOf(id)}</CardTitle>
+            {e.base_time !== undefined && (
+              <CardDescription>
+                {`${t.baseTime}: ${String(e.base_time)}`}
+              </CardDescription>
+            )}
           </CardHeader>
+          {(e.belong_to?.length ?? 0) > 0 && (
+            <CardContent className="flex flex-wrap items-center gap-1.5">
+              <span className="text-muted-foreground text-xs">
+                {t.belongTo}
+              </span>
+              {e.belong_to?.map((b) => (
+                <Badge key={b} variant="secondary">
+                  {nameOf(b)}
+                </Badge>
+              ))}
+            </CardContent>
+          )}
           {e.description && <CardContent>{e.description}</CardContent>}
         </Card>
       ))}
+      {filtered.length === 0 && (
+        <p className="text-muted-foreground text-sm">{t.noMatch}</p>
+      )}
     </div>
   );
 }
