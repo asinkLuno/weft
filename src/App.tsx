@@ -3,6 +3,9 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { Toaster } from "@/components/ui/sonner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { asLang, initialLang, type Lang, strings } from "./i18n";
 import "./App.css";
 
@@ -16,27 +19,18 @@ type DocumentPayload = {
 
 const YAML_FILTER = { name: "YAML", extensions: ["yaml", "yml"] };
 
-function ErrorToast({
-  message,
-  onClose,
-}: {
-  message: string;
-  onClose: () => void;
-}) {
-  return (
-    <div className="error-toast">
-      <span>{message}</span>
-      <button type="button" onClick={onClose} aria-label="close">
-        ×
-      </button>
-    </div>
-  );
+// 四个标签页，名字在 i18n 里改
+const TABS = ["tab1", "tab2", "tab3", "tab4"] as const;
+type Tab = (typeof TABS)[number];
+
+// 常驻错误提示：不自动消失，可手动关闭，下一条正常事件时清除
+function showError(message: string) {
+  toast.error(message, { duration: Infinity, closeButton: true });
 }
 
 function App() {
   const [path, setPath] = useState<string | null>(null);
-  const [doc, setDoc] = useState<unknown>(null);
-  const [error, setError] = useState("");
+  const [activeTab, setActiveTab] = useState<Tab>("tab1");
   const [lang, setLang] = useState<Lang>(initialLang);
   const [recents, setRecents] = useState<string[]>([]);
   const [flash, setFlash] = useState(false);
@@ -71,13 +65,12 @@ function App() {
     const unlisten = listen<DocumentPayload>("document-changed", (e) => {
       const { doc, error } = e.payload;
       if (error) {
-        setError(error);
+        showError(error === "deleted" ? strings[lang].deleted : error);
         return;
       }
-      setError("");
+      toast.dismiss();
+      // 有解析结果说明文件内容更新了，短暂变色提示
       if (doc !== undefined) {
-        setDoc(doc);
-        // 短暂变色提示内容已更新
         setFlash(true);
         clearTimeout(flashTimer.current);
         flashTimer.current = setTimeout(() => setFlash(false), 400);
@@ -86,7 +79,7 @@ function App() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [path]);
+  }, [path, lang]);
 
   function remember(p: string) {
     setRecents((prev) => {
@@ -111,11 +104,10 @@ function App() {
         path: p,
       });
       setPath(p);
-      setDoc(payload.doc ?? null);
-      setError(payload.error ?? "");
+      if (payload.error) showError(payload.error);
       remember(p);
     } catch (err) {
-      setError(String(err));
+      showError(String(err));
       forget(p);
     }
   }
@@ -150,25 +142,31 @@ function App() {
             </ul>
           </>
         )}
-        {error && <ErrorToast message={error} onClose={() => setError("")} />}
+        <Toaster richColors position="bottom-right" offset={40} />
       </main>
     );
   }
 
   return (
     <div className="app">
-      <main className="panes">
-        <section className="pane">
-          <header>
-            <span>{strings[lang].parseView}</span>
-          </header>
-          <pre className={flash ? "flash" : ""}>
-            {JSON.stringify(doc, null, 2)}
-          </pre>
-        </section>
-      </main>
-      {error && <ErrorToast message={error} onClose={() => setError("")} />}
-      <footer className="statusbar">
+      <Tabs
+        value={activeTab}
+        onValueChange={(v) => setActiveTab(v as Tab)}
+        className="tabbody"
+      >
+        <div className="tabbar">
+          <TabsList variant="line">
+            {TABS.map((tab) => (
+              <TabsTrigger key={tab} value={tab}>
+                {strings[lang][tab]}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+        <main className="content" />
+      </Tabs>
+      <Toaster richColors position="bottom-right" offset={40} />
+      <footer className={flash ? "statusbar flash" : "statusbar"}>
         <span className="statusbar-path">{path}</span>
         <span>YAML</span>
       </footer>

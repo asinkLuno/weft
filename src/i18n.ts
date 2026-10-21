@@ -3,14 +3,22 @@ export type Lang = "zh" | "en";
 // 文案多到难维护时再换 i18next，字典结构可以原样搬过去
 export const strings = {
   zh: {
-    parseView: "解析视图",
+    tab1: "标签页 1",
+    tab2: "标签页 2",
+    tab3: "标签页 3",
+    tab4: "标签页 4",
     open: "打开 YAML 文件",
     recent: "最近打开",
+    deleted: "文件已删除或被移走",
   },
   en: {
-    parseView: "Parse View",
+    tab1: "Tab 1",
+    tab2: "Tab 2",
+    tab3: "Tab 3",
+    tab4: "Tab 4",
     open: "Open YAML File",
     recent: "Recent",
+    deleted: "File deleted or moved",
   },
 } as const;
 

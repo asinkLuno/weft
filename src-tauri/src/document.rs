@@ -12,6 +12,8 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const EVENT: &str = "document-changed";
+// 删除/移走哨兵：前端按当前语言翻译这条错误
+const DELETED: &str = "deleted";
 
 #[derive(Default)]
 pub struct DocumentState {
@@ -45,8 +47,18 @@ fn read_doc(path: &Path) -> Result<(String, Result<Value, String>), String> {
 
 // watcher 线程里调用：读文件、回声抑制、把解析结果推给前端
 fn push_changed(app: &AppHandle, path: &Path) {
-    // 写入中途的瞬时状态可能读不到，等下一个防抖事件
     let Ok(content) = fs::read_to_string(path) else {
+        // 读失败但文件还在：写入中途的瞬时状态，等下一个防抖事件；不在了就是被删/移走
+        if !path.exists() {
+            let _ = app.emit(
+                EVENT,
+                DocumentPayload {
+                    doc: None,
+                    content: None,
+                    error: Some(DELETED.to_string()),
+                },
+            );
+        }
         return;
     };
     let state = app.state::<Mutex<DocumentState>>();
