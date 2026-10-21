@@ -43,11 +43,39 @@ where
                     }
                 }
             }
+            check_acyclic(&out).map_err(de::Error::custom)?;
             Ok(out)
         }
     }
 
     d.deserialize_map(EntityMap)
+}
+
+// 归属图不许成环（如 a belong_to b、b belong_to a），否则按层级递归展示无法终止。
+// DFS 三色标记：0 未访问 / 1 在当前路径上 / 2 已完成
+fn check_acyclic(graph: &HashMap<String, Entity>) -> Result<(), String> {
+    fn visit(
+        id: &str,
+        graph: &HashMap<String, Entity>,
+        state: &mut HashMap<String, u8>,
+    ) -> Result<(), String> {
+        match state.get(id) {
+            Some(1) => return Err(format!("entity `{id}` belong_to forms a cycle")),
+            Some(2) => return Ok(()),
+            _ => {}
+        }
+        state.insert(id.to_string(), 1);
+        for parent in &graph[id].belong_to {
+            visit(parent, graph, state)?;
+        }
+        state.insert(id.to_string(), 2);
+        Ok(())
+    }
+    let mut state = HashMap::new();
+    for id in graph.keys() {
+        visit(id, graph, &mut state)?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Serialize, Deserialize)]

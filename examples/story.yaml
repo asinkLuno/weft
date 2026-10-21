@@ -29,6 +29,13 @@ entity:
     description: 以忠诚著称的学院，院徽为獾。
     belong_to: [hogwarts]
 
+  dumbledore:
+    name: 阿不思·邓布利多
+    description: 霍格沃茨校长，巧克力蛙卡片上的著名巫师，开学致辞常常只有几个词。
+    base_time: 1881
+    # 多父归属示例：既是格兰芬多出身，也直属霍格沃茨
+    belong_to: [gryffindor, hogwarts]
+
   harry:
     name: 哈利·波特
     description: 大难不死的男孩，入学当晚被分院帽分入格兰芬多。
