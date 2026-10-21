@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { LazyStore } from "@tauri-apps/plugin-store";
+import { X as XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -198,7 +199,21 @@ function App() {
       </Tabs>
       <footer className={flash ? "statusbar flash" : "statusbar"}>
         <span className="statusbar-path">{path}</span>
-        <span>YAML</span>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="text-white hover:bg-white/20 hover:text-white"
+          aria-label={strings[lang].close}
+          title={strings[lang].close}
+          onClick={async () => {
+            await invoke("unbind_document");
+            setPath(null);
+            setDoc(null);
+            setActiveTab("tab1");
+          }}
+        >
+          <XIcon />
+        </Button>
       </footer>
     </div>
   );

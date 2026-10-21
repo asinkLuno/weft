@@ -80,7 +80,7 @@ body,
   white-space: nowrap;
 }
 
-.statusbar span:last-child {
+.statusbar > :last-child {
   margin-left: auto;
 }
 

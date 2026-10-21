@@ -13,6 +13,7 @@ export const strings = {
     open: "打开 YAML 文件",
     recent: "最近打开",
     deleted: "文件已删除或被移走",
+    close: "关闭文件",
   },
   en: {
     tab1: "Story",
@@ -25,6 +26,7 @@ export const strings = {
     open: "Open YAML File",
     recent: "Recent",
     deleted: "File deleted or moved",
+    close: "Close File",
   },
 } as const;
 
