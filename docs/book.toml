@@ -1,0 +1,9 @@
+[book]
+title = "Weft 开发文档"
+description = "Weft 故事文档与 Rhai 插件接口"
+authors = ["Weft contributors"]
+language = "zh"
+src = "src"
+
+[build]
+build-dir = "book"

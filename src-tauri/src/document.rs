@@ -36,22 +36,19 @@ pub struct DocumentPayload {
 }
 
 // base 是故事文件所在目录，自定义历法的脚本路径相对它
-// 事件引用按 id 或名称对回实体，取其 base_time
+// 事件引用按 id 对回实体，取其 base_time
 fn resolve_base<'a>(
     entity: &'a std::collections::HashMap<String, crate::model::Entity>,
     r: &str,
 ) -> Option<&'a Vec<i64>> {
-    entity
-        .get(r)
-        .or_else(|| entity.values().find(|e| e.name.as_deref() == Some(r)))
-        .and_then(|e| e.base_time.as_ref())
+    entity.get(r).and_then(|e| e.base_time.as_ref())
 }
 
 fn offset_display(cal: &Calendar, time: &[i64], base: &[i64]) -> Result<String, DocumentError> {
     cal.offset_display(time, base)
 }
 
-fn parse(content: &str, base: &Path) -> Result<Value, DocumentError> {
+fn parse(content: &str, base: &Path, lang: &str) -> Result<Value, DocumentError> {
     let yaml: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(content).map_err(DocumentError::raw)?;
     // 序列化 model.rs 声明过的结构：未知键在这里被滤掉
@@ -63,7 +60,7 @@ fn parse(content: &str, base: &Path) -> Result<Value, DocumentError> {
         .clone()
         .unwrap_or_else(|| "gregorian".into());
     let spec = doc.calendar.get(&mode);
-    let cal = Calendar::load(&mode, spec, base)?;
+    let cal = Calendar::load(&mode, spec, base, lang)?;
     doc.calendar_meta = Some(cal.metadata());
     for entity in doc.entity.values_mut() {
         if let Some(values) = &entity.base_time {
@@ -72,7 +69,7 @@ fn parse(content: &str, base: &Path) -> Result<Value, DocumentError> {
             entity.base_time = Some(normalized);
         }
     }
-    apply_calculable_tags(&mut doc, base, &mode)?;
+    apply_calculable_tags(&mut doc, base, &mode, lang)?;
     // 事件：展平相对时间 → 归一化 → tick（排序与先后校验的基准）→ humanize
     for events in doc.event.values_mut() {
         for ev in &mut *events {
@@ -170,7 +167,12 @@ fn parse(content: &str, base: &Path) -> Result<Value, DocumentError> {
 }
 
 // 可计算标签：按各实体 base_time 执行脚本，归属链 chain[0] 并入 belong_to，其余逐级生成缺失实体
-fn apply_calculable_tags(doc: &mut StoryDoc, base: &Path, mode: &str) -> Result<(), DocumentError> {
+fn apply_calculable_tags(
+    doc: &mut StoryDoc,
+    base: &Path,
+    mode: &str,
+    lang: &str,
+) -> Result<(), DocumentError> {
     if doc.calculable_tag.is_empty() && doc.entity.values().all(|e| e.calculable_tags.is_empty()) {
         return Ok(());
     }
@@ -182,6 +184,7 @@ fn apply_calculable_tags(doc: &mut StoryDoc, base: &Path, mode: &str) -> Result<
             let context = serde_json::json!({
                 "api": 1,
                 "date_mode": mode,
+                "language": lang,
                 "entity": {
                     "id": id,
                     "name": entity.name,
@@ -236,10 +239,13 @@ fn apply_chain(
     Ok(())
 }
 
-fn read_doc(path: &Path) -> Result<(String, Result<Value, DocumentError>), DocumentError> {
+fn read_doc(
+    path: &Path,
+    lang: &str,
+) -> Result<(String, Result<Value, DocumentError>), DocumentError> {
     let content = fs::read_to_string(path).map_err(DocumentError::raw)?;
     // 语法错误不算绑定失败：正常进入展示页，错误原样带给前端
-    let parsed = parse(&content, path.parent().unwrap_or(Path::new(".")));
+    let parsed = parse(&content, path.parent().unwrap_or(Path::new(".")), lang);
     Ok((content, parsed))
 }
 
@@ -268,7 +274,11 @@ fn push_changed(app: &AppHandle, path: &Path) {
             return;
         }
     }
-    let payload = match parse(&content, path.parent().unwrap_or(Path::new("."))) {
+    let payload = match parse(
+        &content,
+        path.parent().unwrap_or(Path::new(".")),
+        &crate::current_lang(app),
+    ) {
         Ok(doc) => DocumentPayload {
             doc: Some(doc),
             content: Some(content),
@@ -289,6 +299,29 @@ fn push_changed(app: &AppHandle, path: &Path) {
     let _ = app.emit(EVENT, payload);
 }
 
+// 切换应用语言后，立即用同一份文件重新生成日期和可计算标签的展示值。
+pub fn refresh_language(app: &AppHandle) {
+    let path = {
+        let state = app.state::<Mutex<DocumentState>>();
+        let st = state.lock().unwrap_or_else(|p| p.into_inner());
+        st.path.clone()
+    };
+    let Some(path) = path else { return };
+    let payload = match read_doc(&path, &crate::current_lang(app)) {
+        Ok((content, Ok(doc))) => DocumentPayload {
+            doc: Some(doc),
+            content: Some(content),
+            error: None,
+        },
+        Ok((_, Err(error))) | Err(error) => DocumentPayload {
+            doc: None,
+            content: None,
+            error: Some(error),
+        },
+    };
+    let _ = app.emit(EVENT, payload);
+}
+
 #[tauri::command]
 pub fn bind_document(
     app: AppHandle,
@@ -296,7 +329,7 @@ pub fn bind_document(
     path: String,
 ) -> Result<DocumentPayload, DocumentError> {
     let path = PathBuf::from(path);
-    let (content, parsed) = read_doc(&path).inspect_err(|error| {
+    let (content, parsed) = read_doc(&path, &crate::current_lang(&app)).inspect_err(|error| {
         error!("failed to read document {}: {error}", path.display());
     })?;
 
@@ -357,6 +390,7 @@ pub fn bind_document(
 
 #[tauri::command]
 pub fn save_document(
+    app: AppHandle,
     state: State<'_, Mutex<DocumentState>>,
     content: String,
 ) -> Result<(), DocumentError> {
@@ -369,7 +403,7 @@ pub fn save_document(
         .map(Path::to_path_buf)
         .unwrap_or_default();
     drop(st_guard);
-    parse(&content, &base).inspect_err(|error| {
+    parse(&content, &base, &crate::current_lang(&app)).inspect_err(|error| {
         error!("failed to validate document before saving: {error}");
     })?;
     let mut st = state.lock().unwrap_or_else(|p| p.into_inner());

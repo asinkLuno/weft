@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -6,13 +6,6 @@ use serde_yaml_ng::Value;
 
 use crate::calendar::CalendarMetadata;
 use crate::validation::{DocumentError, ValidationError};
-
-// 实体关系对：entities 恰好两个（YAML 列表反序列化成元组，天然限定一对），relations 是关系名
-#[derive(Debug, Serialize, Deserialize)]
-pub struct EntityLink {
-    pub entities: (String, String),
-    pub relations: String,
-}
 
 // YAML 数据模型：顶层键逐个补齐，未知键在反序列化时滤掉。
 #[derive(Debug, Serialize)]
@@ -59,77 +52,32 @@ struct RawStoryDoc {
 impl StoryDoc {
     pub fn from_yaml(yaml: &Value) -> Result<Self, DocumentError> {
         let raw = RawStoryDoc::deserialize(yaml).map_err(DocumentError::raw)?;
-        for (id, entity) in &raw.entity {
-            for target in &entity.belong_to {
-                if !raw.entity.contains_key(target) {
-                    return Err(ValidationError::EntityUnknownParent {
-                        entity: id.clone(),
-                        target: target.clone(),
-                    }
-                    .into());
-                }
-            }
-        }
+        // 所有「引用的 id 不存在」检查集中在最先：引用断了，后面的结构检查没有报告价值
+        check_references(&raw)?;
         check_acyclic(&raw.entity)?;
-        // 事件标题全局唯一：跨组同名也算重复，subject 等引用才能省略组名
-        let mut seen = HashSet::new();
-        for events in raw.event.values() {
-            for title in events.keys() {
-                if !seen.insert(title.as_str()) {
-                    return Err(ValidationError::DuplicateEventTitle {
-                        title: title.clone(),
-                    }
-                    .into());
-                }
-            }
-        }
-        // 引用按 id 或名称对回实体（与 belong_to 的 id 校验同理，名称匹配放宽给手写 YAML）
-        for (group, links) in &raw.entity_link {
-            for link in links {
-                for r in [&link.entities.0, &link.entities.1] {
-                    if !entity_exists(&raw.entity, r) {
-                        return Err(ValidationError::UnknownLinkEntity {
-                            group: group.clone(),
-                            entity: r.clone(),
-                        }
-                        .into());
-                    }
-                }
-            }
-        }
-        // 事件的实体引用按 id 或名称对回实体表（与 entity_link 同规则）
+        // 事件标题全局唯一：跨组同名也算重复，subject 等引用才能省略组名。
+        // 建标题 → 组名索引，按标题排序后查重：报哪个标题、组名顺序都不随 HashMap 迭代漂移
+        let mut by_title: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for (group, events) in &raw.event {
-            for (title, ev) in events {
-                for r in &ev.entities {
-                    if !entity_exists(&raw.entity, r) {
-                        return Err(ValidationError::UnknownEventEntity {
-                            event: format!("{group}/{title}"),
-                            entity: r.clone(),
-                        }
-                        .into());
-                    }
-                }
+            for title in events.keys() {
+                by_title.entry(title.as_str()).or_default().push(group);
             }
         }
-        // narrative：observer 对回实体、subject 对回事件，校验时顺带重写成事件 id
+        if let Some((title, groups)) = by_title.iter().find(|(_, groups)| groups.len() > 1) {
+            let mut names: Vec<&str> = groups.iter().copied().collect();
+            names.sort_unstable();
+            return Err(ValidationError::DuplicateEventTitle {
+                title: title.to_string(),
+                groups: names.join(", "),
+            }
+            .into());
+        }
+        // narrative：引用已在 check_references 校验，这里把 subject 重写成事件 id
         let mut narrative = BTreeMap::new();
         for (name, nar) in raw.narrative {
-            if !entity_exists(&raw.entity, &nar.observer) {
-                return Err(ValidationError::UnknownObserver {
-                    narrative: name.clone(),
-                    entity: nar.observer.clone(),
-                }
-                .into());
-            }
             let mut subject = Vec::with_capacity(nar.subject.len());
             for r in nar.subject {
-                let Some((g, t)) = resolve_event(&raw.event, &r) else {
-                    return Err(ValidationError::UnknownSubjectEvent {
-                        narrative: name.clone(),
-                        event: r,
-                    }
-                    .into());
-                };
+                let (g, t) = resolve_event(&raw.event, &r).expect("subject 引用已校验");
                 subject.push(NarrativeSubject {
                     event: format!("{g}/{t}"),
                     start_tick: None,
@@ -179,6 +127,64 @@ impl StoryDoc {
             calculable_tag: raw.calculable_tag,
             calendar_meta: None,
         })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Story {
+    pub title: String,
+    pub description: Option<String>,
+    pub author: Option<String>,
+    // 历法名：内置 gregorian，或顶层 calendar 的注册名；缺省 gregorian
+    pub date_mode: Option<String>,
+}
+
+// 抽象实体：人物、团体、地点、道具……都算
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Entity {
+    pub name: Option<String>,
+    // 时间分量列表（按历法的分量顺序，可省略末尾分量），解析时按历法归一化；
+    // 单个整数（如 base_time: 1881）等价于单分量列表
+    #[serde(default, deserialize_with = "int_or_seq")]
+    pub base_time: Option<Vec<i64>>,
+    // humanize 结果，document.rs 加载历法后填充，不来自 YAML
+    #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub base_time_display: Option<String>,
+    pub description: Option<String>,
+    // 归属的上层实体 id 列表（如人物 → 团体）；可计算标签算出的归属也并到这里，不单独存
+    #[serde(default)]
+    pub belong_to: Vec<String>,
+    // 可计算标签列表：document.rs 按 base_time 执行后把归属链写进 belong_to，不来自展示数据
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calculable_tags: Vec<String>,
+}
+
+// 实体关系对：entities 恰好两个（YAML 列表反序列化成元组，天然限定一对），relations 是关系名
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EntityLink {
+    pub entities: (String, String),
+    pub relations: String,
+}
+
+// 顶层 calendar / calculable_tag 共用的插件清单：rhai 脚本 + 固定入口约定
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CalendarSpec {
+    pub runtime: String,
+    pub kind: String,
+    pub api: i64,
+    // 脚本路径，相对故事文件所在目录
+    pub source: String,
+}
+
+impl CalendarSpec {
+    pub fn validate(&self, name: &str, kind: &str) -> Result<(), ValidationError> {
+        if self.runtime != "rhai" || self.kind != kind || self.api != 1 {
+            return Err(ValidationError::InvalidPluginSpec {
+                name: name.to_string(),
+                kind: kind.to_string(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -234,36 +240,16 @@ impl Phase {
     }
 }
 
-// YAML 里的事件原始形态，解析成 EventItem 要等历法加载
-#[derive(Debug, Deserialize)]
-struct RawEvent {
-    start_time: Value,
-    end_time: Option<Value>,
-    #[serde(default)]
-    entities: Vec<String>,
-    description: Option<String>,
-}
-
-// 参与者相对其 base_time 的偏移展示；start/end 为 None 表示该实体没有 base_time
-#[derive(Debug, Serialize)]
-pub struct EntityOffset {
-    pub entity: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub start: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub end: Option<String>,
-}
-
-// 事件（旧版 drift）：按组组织，id = `组名/标题`
+// 事件：按组组织，id = `组名/标题`
 #[derive(Debug, Serialize)]
 pub struct EventItem {
     pub id: String,
     pub title: String,
     pub description: Option<String>,
-    // 参与实体，原样保留 YAML 引用（id 或名称）
+    // 参与实体，原样保留 YAML 引用（实体 id）
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub entities: Vec<String>,
-    // 每个参与实体相对其 base_time 的偏移（document.rs 填充，旧版 journal）
+    // 每个参与实体相对其 base_time 的偏移（document.rs 填充）
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub offsets: Vec<EntityOffset>,
     // 以下由 document.rs 加载历法后填充
@@ -285,10 +271,30 @@ pub struct EventItem {
     pub end_display: Option<String>,
 }
 
+// 参与者相对其 base_time 的偏移展示；start/end 为 None 表示该实体没有 base_time
+#[derive(Debug, Serialize)]
+pub struct EntityOffset {
+    pub entity: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<String>,
+}
+
+// YAML 里的事件原始形态，解析成 EventItem 要等历法加载
+#[derive(Debug, Deserialize)]
+struct RawEvent {
+    start_time: Value,
+    end_time: Option<Value>,
+    #[serde(default)]
+    entities: Vec<String>,
+    description: Option<String>,
+}
+
 // 叙事线：subject 事件按 observer 的 base_time 展开成相对时间轴（与 event 的绝对时间轴相反）
 #[derive(Debug, Serialize)]
 pub struct Narrative {
-    // 观察者，原样保留 YAML 引用（id 或名称）
+    // 观察者，原样保留 YAML 引用（实体 id）
     pub observer: String,
     // 按 document.rs 填充的相对开始时间排序
     pub subject: Vec<NarrativeSubject>,
@@ -315,11 +321,6 @@ struct RawNarrative {
     observer: String,
 }
 
-// 引用按 id 或名称对回实体（entity_link / event / narrative 同规则）
-fn entity_exists(entity: &HashMap<String, Entity>, r: &str) -> bool {
-    entity.contains_key(r) || entity.values().any(|e| e.name.as_deref() == Some(r))
-}
-
 // 事件引用：`组名/标题` 全 id，或裸标题（标题已全局唯一校验）
 fn resolve_event(
     event: &HashMap<String, HashMap<String, RawEvent>>,
@@ -335,6 +336,99 @@ fn resolve_event(
         .iter()
         .find(|(_, evs)| evs.contains_key(r))
         .map(|(g, _)| (g.clone(), r.to_string()))
+}
+
+// 所有「引用的 id 不存在」检查集中在此：belong_to、entity_link、event 参与实体、
+// narrative 的 observer 与 subject。先于结构检查（成环、标题重复）报告
+fn check_references(raw: &RawStoryDoc) -> Result<(), DocumentError> {
+    for (id, entity) in &raw.entity {
+        for target in &entity.belong_to {
+            if !raw.entity.contains_key(target) {
+                return Err(ValidationError::EntityUnknownParent {
+                    entity: id.clone(),
+                    target: target.clone(),
+                }
+                .into());
+            }
+        }
+    }
+    for (group, links) in &raw.entity_link {
+        for link in links {
+            for r in [&link.entities.0, &link.entities.1] {
+                if !raw.entity.contains_key(r) {
+                    return Err(ValidationError::UnknownLinkEntity {
+                        group: group.clone(),
+                        entity: r.clone(),
+                    }
+                    .into());
+                }
+            }
+        }
+    }
+    for (group, events) in &raw.event {
+        for (title, ev) in events {
+            for r in &ev.entities {
+                if !raw.entity.contains_key(r) {
+                    return Err(ValidationError::UnknownEventEntity {
+                        event: format!("{group}/{title}"),
+                        entity: r.clone(),
+                    }
+                    .into());
+                }
+            }
+        }
+    }
+    for (name, nar) in &raw.narrative {
+        if !raw.entity.contains_key(&nar.observer) {
+            return Err(ValidationError::UnknownObserver {
+                narrative: name.clone(),
+                entity: nar.observer.clone(),
+            }
+            .into());
+        }
+        for r in &nar.subject {
+            if resolve_event(&raw.event, r).is_none() {
+                return Err(ValidationError::UnknownSubjectEvent {
+                    narrative: name.clone(),
+                    event: r.clone(),
+                }
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
+// 归属图不许成环（如 a belong_to b、b belong_to a），否则按层级递归展示无法终止。
+// 可计算标签算出的归属也要复查，所以开放给 document.rs。DFS 三色标记：0 未访问 / 1 在当前路径上 / 2 已完成
+pub(crate) fn check_acyclic(graph: &HashMap<String, Entity>) -> Result<(), DocumentError> {
+    fn visit(
+        id: &str,
+        graph: &HashMap<String, Entity>,
+        state: &mut HashMap<String, u8>,
+    ) -> Result<(), DocumentError> {
+        match state.get(id) {
+            Some(1) => {
+                return Err(ValidationError::EntityCycle {
+                    entity: id.to_string(),
+                }
+                .into());
+            }
+            Some(2) => return Ok(()),
+            _ => {}
+        }
+        state.insert(id.to_string(), 1);
+        for parent in &graph[id].belong_to {
+            visit(parent, graph, state)?;
+        }
+        state.insert(id.to_string(), 2);
+        Ok(())
+    }
+    let mut state = HashMap::new();
+    for id in graph.keys() {
+        visit(id, graph, &mut state)?;
+    }
+    Ok(())
 }
 
 // base_time 写单个整数（只有年份的场合）等价于单分量列表；空值即无时间
@@ -373,87 +467,4 @@ where
     }
 
     d.deserialize_any(IntOrSeq)
-}
-
-// 顶层 calendar / calculable_tag 共用的插件清单，格式沿旧版：rhai 脚本 + 固定入口约定
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CalendarSpec {
-    pub runtime: String,
-    pub kind: String,
-    pub api: i64,
-    // 脚本路径，相对故事文件所在目录
-    pub source: String,
-}
-
-impl CalendarSpec {
-    pub fn validate(&self, name: &str, kind: &str) -> Result<(), ValidationError> {
-        if self.runtime != "rhai" || self.kind != kind || self.api != 1 {
-            return Err(ValidationError::InvalidPluginSpec {
-                name: name.to_string(),
-                kind: kind.to_string(),
-            });
-        }
-        Ok(())
-    }
-}
-
-// 归属图不许成环（如 a belong_to b、b belong_to a），否则按层级递归展示无法终止。
-// 可计算标签算出的归属也要复查，所以开放给 document.rs。DFS 三色标记：0 未访问 / 1 在当前路径上 / 2 已完成
-pub(crate) fn check_acyclic(graph: &HashMap<String, Entity>) -> Result<(), DocumentError> {
-    fn visit(
-        id: &str,
-        graph: &HashMap<String, Entity>,
-        state: &mut HashMap<String, u8>,
-    ) -> Result<(), DocumentError> {
-        match state.get(id) {
-            Some(1) => {
-                return Err(ValidationError::EntityCycle {
-                    entity: id.to_string(),
-                }
-                .into());
-            }
-            Some(2) => return Ok(()),
-            _ => {}
-        }
-        state.insert(id.to_string(), 1);
-        for parent in &graph[id].belong_to {
-            visit(parent, graph, state)?;
-        }
-        state.insert(id.to_string(), 2);
-        Ok(())
-    }
-    let mut state = HashMap::new();
-    for id in graph.keys() {
-        visit(id, graph, &mut state)?;
-    }
-    Ok(())
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Story {
-    pub title: String,
-    pub description: Option<String>,
-    pub author: Option<String>,
-    // 历法名：内置 gregorian / gregorian_en，或顶层 calendar 的注册名；缺省 gregorian
-    pub date_mode: Option<String>,
-}
-
-// 抽象实体：人物、团体、地点、道具……都算
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Entity {
-    pub name: Option<String>,
-    // 时间分量列表（按历法的分量顺序，可省略末尾分量），解析时按历法归一化；
-    // 单个整数（如 base_time: 1881）等价于单分量列表
-    #[serde(default, deserialize_with = "int_or_seq")]
-    pub base_time: Option<Vec<i64>>,
-    // humanize 结果，document.rs 加载历法后填充，不来自 YAML
-    #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
-    pub base_time_display: Option<String>,
-    pub description: Option<String>,
-    // 归属的上层实体 id 列表（如人物 → 团体）；可计算标签算出的归属也并到这里，不单独存
-    #[serde(default)]
-    pub belong_to: Vec<String>,
-    // 可计算标签列表：document.rs 按 base_time 执行后把归属链写进 belong_to，不来自展示数据
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub calculable_tags: Vec<String>,
 }

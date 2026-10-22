@@ -172,7 +172,7 @@ function App() {
   );
 
   useEffect(() => {
-    settings.get<unknown>("language").then((v) => {
+    invoke<unknown>("get_language").then((v) => {
       const saved = asLang(v);
       if (saved) setLang(saved);
     });
@@ -574,12 +574,8 @@ function EntityViewInner({
 
   const nameOf = (id: string) => doc?.entity?.[id]?.name ?? id;
 
-  // entity_link 的引用按 id 或名称对回实体 id；同名取排序靠前的（entities 已排序）
-  const idByName = new Map<string, string>();
-  for (const [id, e] of entities)
-    if (e.name !== undefined && !idByName.has(e.name)) idByName.set(e.name, id);
-  const idOf = (r: string) =>
-    doc?.entity && r in doc.entity ? r : (idByName.get(r) ?? null);
+  // entity_link 的引用按 id 对回实体；未知引用取 null 丢弃（后端已校验，防御手滑）
+  const idOf = (r: string) => (doc?.entity && r in doc.entity ? r : null);
 
   // id 的全部上层归属（跨多级）；后端已保证无环，先占位只是防手滑自环
   const cache = new Map<string, Set<string>>();
@@ -755,7 +751,7 @@ function EntityViewInner({
 
 const EntityView = memo(EntityViewInner);
 
-// 事件时间轴（精简自旧版 drift gantt）：左列事件名，右列按 tick 比例摆条/点
+// 事件时间轴：左列事件名，右列按 tick 比例摆条/点
 function EventGantt({
   group,
   events,
@@ -937,10 +933,8 @@ function NarrativeGantt({
   t: (typeof strings)[Lang];
 }) {
   const rows = nar.subject.map((s) => ({ s, ev: byId.get(s.event) }));
-  // observer 按 id 或名称对回实体（与后端同规则，同名取排序靠前的由 find 顺序兜底）
-  const observer =
-    doc?.entity?.[nar.observer] ??
-    Object.values(doc?.entity ?? {}).find((e) => e.name === nar.observer);
+  // observer 按 id 对回实体（后端已校验）
+  const observer = doc?.entity?.[nar.observer];
   const based = rows.some(({ s }) => s.start_tick !== undefined);
   // 0 = observer 的 base_time，纳入范围让原点可见
   const ticks = based

@@ -12,8 +12,8 @@ pub enum ValidationError {
     DocumentNotBound,
     #[error("invalid path")]
     InvalidPath,
-    #[error("duplicate event title: {title}")]
-    DuplicateEventTitle { title: String },
+    #[error("duplicate event title: {title} in {groups}")]
+    DuplicateEventTitle { title: String, groups: String },
     #[error("entity link {group} refers to unknown entity {entity}")]
     UnknownLinkEntity { group: String, entity: String },
     #[error("event {event} refers to unknown entity {entity}")]

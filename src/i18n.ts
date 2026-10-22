@@ -13,7 +13,7 @@ const validationMessages = {
     file_deleted: "文件已删除或被移走",
     document_not_bound: "尚未绑定文档",
     invalid_path: "无效路径",
-    duplicate_event_title: "事件标题 `{title}` 重复",
+    duplicate_event_title: "事件标题 `{title}` 在分组 {groups} 中重复",
     unknown_link_entity: "entity_link `{group}` 引用了不存在的实体 `{entity}`",
     unknown_event_entity: "event `{event}` 引用了不存在的实体 `{entity}`",
     unknown_observer: "narrative `{narrative}` 引用了不存在的实体 `{entity}`",
@@ -47,7 +47,7 @@ const validationMessages = {
     file_deleted: "File deleted or moved",
     document_not_bound: "No document is bound",
     invalid_path: "Invalid path",
-    duplicate_event_title: "Duplicate event title `{title}`",
+    duplicate_event_title: "Duplicate event title `{title}` in groups {groups}",
     unknown_link_entity:
       "entity_link `{group}` refers to unknown entity `{entity}`",
     unknown_event_entity: "event `{event}` refers to unknown entity `{entity}`",

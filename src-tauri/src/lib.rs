@@ -57,6 +57,12 @@ fn apply_lang(app: &AppHandle, lang: &str) {
         let _ = app.set_menu(menu);
     }
     let _ = app.emit("settings-changed", json!({ "language": lang }));
+    document::refresh_language(app);
+}
+
+#[tauri::command]
+fn get_language(app: AppHandle) -> String {
+    current_lang(&app)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -78,6 +84,7 @@ pub fn run() {
             document::bind_document,
             document::save_document,
             document::unbind_document,
+            get_language,
         ])
         .setup(|app| {
             let lang = current_lang(app.handle());

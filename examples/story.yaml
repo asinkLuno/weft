@@ -111,26 +111,31 @@ entity:
     belong_to: [hufflepuff]
 
 # 可计算标签：注册名 → rhai 脚本清单（相对故事文件），与 calendar 同构；
-# 脚本入口固定 fn calculable_tag(ctx)，ctx = { api, date_mode, entity: { id, name, base_time, … } }，
-# 返回字符串列表当归属链：实体 → chain[0] → chain[1] …，缺失的环上实体自动生成。
-# 内置 constellation / constellation_cn / constellation_en 免注册，按 base_time 算十二星座（需写全 年月日）。
+# 计算入口 fn calculable_tag(ctx)，ctx = { api, date_mode, language, entity: { id, name, base_time, … } }；
+# 返回不随语言变化的字符串 ID 列表。展示入口 fn humanizer(kind, value, language)，
+# kind 为 "chain" 时把 ID 列表变为归属名称：实体 → chain[0] → chain[1] …。
+# 缺失的环上实体自动生成。
+# 内置 constellation 免注册，按 base_time 算十二星座（需写全 年月日），名称跟随应用语言。
+# 自定义 calendar 脚本用 metadata()/normalize(values)/to_tick(values) 计算，
+# 用 humanizer(kind, value, language) 展示；kind 为 "metadata"、"time" 或 "duration"。
+# 加载脚本时会检查这些公开函数的名称和参数个数；返回值在调用时校验。
 calculable_tag: {}
 
-# 实体关系：按组组织，每组是一批关系对；引用写实体 id 或名称都行
+# 实体关系：按组组织，每组是一批关系对；引用写实体 id
 entity_link:
   波特一家:
-    - entities: [哈利·波特, 莉莉·波特]
+    - entities: [harry, lily]
       relations: 母子
-    - entities: [哈利·波特, 詹姆·波特]
+    - entities: [harry, james]
       relations: 父子
-    - entities: [莉莉·波特, 詹姆·波特]
+    - entities: [lily, james]
       relations: 夫妻
   格兰芬多伙伴:
-    - entities: [哈利·波特, 罗恩·韦斯莱]
+    - entities: [harry, ron]
       relations: 同学与朋友
-    - entities: [哈利·波特, 赫敏·格兰杰]
+    - entities: [harry, hermione]
       relations: 同学与朋友
-    - entities: [罗恩·韦斯莱, 赫敏·格兰杰]
+    - entities: [ron, hermione]
       relations: 同学与朋友
 
 # 事件：按组组织，组内按开始时间排序；时间列表末尾嵌套列表表示锚点相对时间
@@ -139,17 +144,17 @@ event:
     分院帽晚宴:
       start_time: &feast [1991, 9, 1, 19]
       end_time: [0, 0, 0, 2, *feast] # 宴会两小时后结束
-      entities: [哈利·波特, 罗恩·韦斯莱, 赫敏·格兰杰, 德拉科·马尔福]
+      entities: [harry, ron, hermione, draco]
       description: 开学宴会上分院帽把新生分入四大学院。
     厄里斯魔镜:
       start_time: [1991, 12, 25, 21]
-      entities: [哈利·波特]
+      entities: [harry]
       description: 圣诞夜哈利在镜中看见了家人。
   密室事件:
     蛇怪袭击:
       start_time: &basilisk [1993, 4, 20, 8]
       end_time: [0, 0, 6, 0, *basilisk] # 锚点：自己开始后 6 小时
-      entities: [金妮·韦斯莱]
+      entities: [ginny]
       description: 金妮被里德的日记控制，打开密室。
 
 # 叙事线：subject 引用事件（`组名/标题` 全 id，或裸标题——事件标题全局唯一），
@@ -157,4 +162,4 @@ event:
 narrative:
   哈利的第一学年:
     subject: [入学之夜/分院帽晚宴, 入学之夜/厄里斯魔镜, 密室事件/蛇怪袭击]
-    observer: 哈利·波特
+    observer: harry

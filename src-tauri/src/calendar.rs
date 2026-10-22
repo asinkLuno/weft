@@ -1,5 +1,5 @@
 use rhai::serde::from_dynamic;
-use rhai::{AST, Dynamic, Engine, Scope};
+use rhai::{AST, Dynamic, Engine, FnAccess, Scope};
 use serde::Serialize;
 use serde_json::Value;
 use std::{fs, path::Path};
@@ -7,9 +7,21 @@ use std::{fs, path::Path};
 use crate::model::CalendarSpec;
 use crate::validation::{DocumentError, ValidationError};
 
-const GREGORIAN_CORE: &str = include_str!("../rhai/gregorian_core.rhai");
-const GREGORIAN_CN: &str = include_str!("../rhai/gregorian_cn.rhai");
-const GREGORIAN_EN: &str = include_str!("../rhai/gregorian_en.rhai");
+const GREGORIAN: &str = include_str!("../rhai/gregorian.rhai");
+
+pub(crate) fn missing_rhai_functions(ast: &AST, required: &[(&str, usize)]) -> Vec<String> {
+    required
+        .iter()
+        .filter(|(name, arity)| {
+            !ast.iter_functions().any(|function| {
+                function.name == *name
+                    && function.params.len() == *arity
+                    && function.access == FnAccess::Public
+            })
+        })
+        .map(|(name, arity)| format!("{name}/{arity}"))
+        .collect()
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CalendarMetadata {
@@ -24,6 +36,7 @@ pub struct RhaiCalendar {
     engine: Engine,
     ast: AST,
     name: String,
+    lang: String,
 }
 
 impl std::fmt::Debug for RhaiCalendar {
@@ -35,27 +48,45 @@ impl std::fmt::Debug for RhaiCalendar {
 }
 
 impl RhaiCalendar {
-    pub fn load(name: &str, path: &Path) -> Result<Self, ValidationError> {
+    pub fn load(name: &str, path: &Path, lang: &str) -> Result<Self, ValidationError> {
         let script =
             fs::read_to_string(path).map_err(|error| ValidationError::CalendarFileRead {
                 calendar: name.into(),
                 details: error.to_string(),
             })?;
-        Self::load_script(name, &script)
+        Self::load_script(name, &script, lang)
     }
 
-    pub fn load_script(name: &str, script: &str) -> Result<Self, ValidationError> {
-        let engine = limited_engine();
+    pub fn load_script(name: &str, script: &str, lang: &str) -> Result<Self, ValidationError> {
+        let mut engine = limited_engine();
+        let language = lang.to_owned();
+        engine.register_fn("language", move || language.clone());
         let ast = engine
             .compile(script)
             .map_err(|error| ValidationError::CalendarCompile {
                 calendar: name.into(),
                 details: error.to_string(),
             })?;
+        let missing = missing_rhai_functions(
+            &ast,
+            &[
+                ("metadata", 0),
+                ("normalize", 1),
+                ("to_tick", 1),
+                ("humanizer", 3),
+            ],
+        );
+        if !missing.is_empty() {
+            return Err(ValidationError::CalendarCompile {
+                calendar: name.into(),
+                details: format!("缺少公开接口：{}", missing.join(", ")),
+            });
+        }
         Ok(Self {
             engine,
             ast,
             name: name.into(),
+            lang: lang.into(),
         })
     }
 
@@ -81,7 +112,8 @@ impl RhaiCalendar {
     }
 
     pub fn metadata(&self) -> Result<Value, ValidationError> {
-        let output = self.call("metadata", ())?;
+        let data = self.call("metadata", ())?;
+        let output = self.call("humanizer", ("metadata", data, self.lang.clone()))?;
         from_dynamic(&output).map_err(|error| ValidationError::CalendarInvalidMetadata {
             calendar: self.name.clone(),
             details: error.to_string(),
@@ -106,9 +138,15 @@ impl RhaiCalendar {
     }
 
     pub fn humanize(&self, values: &[i64]) -> Result<String, ValidationError> {
-        self.call("humanize", (self.ints(values),))?
+        self.call("humanizer", ("time", self.ints(values), self.lang.clone()))?
             .into_string()
-            .map_err(|_| self.invalid_return("humanize"))
+            .map_err(|_| self.invalid_return("humanizer"))
+    }
+
+    pub fn humanize_duration(&self, seconds: i64) -> Result<String, ValidationError> {
+        self.call("humanizer", ("duration", seconds, self.lang.clone()))?
+            .into_string()
+            .map_err(|_| self.invalid_return("humanizer"))
     }
 }
 
@@ -119,25 +157,20 @@ pub struct Calendar {
 }
 
 impl Calendar {
-    // name 是 story.date_mode：内置 gregorian/gregorian_en，或在顶层 calendar 注册的自定义历法
     pub fn load(
         name: &str,
         spec: Option<&CalendarSpec>,
         base: &Path,
+        lang: &str,
     ) -> Result<Self, DocumentError> {
         let inner = match name {
-            "gregorian" => {
-                RhaiCalendar::load_script(name, &format!("{GREGORIAN_CORE}\n{GREGORIAN_CN}"))?
-            }
-            "gregorian_en" => {
-                RhaiCalendar::load_script(name, &format!("{GREGORIAN_CORE}\n{GREGORIAN_EN}"))?
-            }
+            "gregorian" => RhaiCalendar::load_script(name, GREGORIAN, lang)?,
             other => {
                 let spec = spec.ok_or_else(|| ValidationError::UnregisteredCalendar {
                     calendar: other.to_string(),
                 })?;
                 spec.validate(other, "calendar")?;
-                RhaiCalendar::load(other, &base.join(&spec.source))?
+                RhaiCalendar::load(other, &base.join(&spec.source), lang)?
             }
         };
         let value = inner.metadata()?;
@@ -206,7 +239,7 @@ impl Calendar {
 
     pub fn to_tick(&self, values: &[i64]) -> Result<i64, DocumentError> {
         let mut padded = self.pad(values)?;
-        if matches!(self.inner.name.as_str(), "gregorian" | "gregorian_en") {
+        if self.inner.name == "gregorian" {
             // 部分日期排序按其最早可能时刻；展示仍保留未指定的 0 分量。
             if padded[1] == 0 {
                 padded[1] = 1;
@@ -219,16 +252,12 @@ impl Calendar {
     }
 
     pub fn offset_display(&self, time: &[i64], base: &[i64]) -> Result<String, DocumentError> {
-        if matches!(self.inner.name.as_str(), "gregorian" | "gregorian_en") {
+        if self.inner.name == "gregorian" {
             let seconds = self
                 .to_tick(time)?
                 .checked_sub(self.to_tick(base)?)
                 .ok_or(ValidationError::TimeOffsetOutOfRange)?;
-            return self
-                .inner
-                .call("humanize_duration", (seconds,))?
-                .into_string()
-                .map_err(|_| self.inner.invalid_return("humanize_duration").into());
+            return self.inner.humanize_duration(seconds).map_err(Into::into);
         }
         let diff: Vec<i64> = (0..time.len().max(base.len()))
             .map(|i| {
