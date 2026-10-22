@@ -30,13 +30,13 @@ calendar:
 | `to_tick(values)` | 整数数组 | 64 位整数 | 把时间转成可比较、可相减的刻度 |
 | `humanizer(kind, value, language)` | 种类、数据、语言 | 见下表 | 生成显示内容 |
 
-`metadata().components` 经 `humanizer("metadata", ...)` 处理后必须是 **1 到 64** 的正整数。它定义时间数组的分量数与顺序。用户写的数组可以省略末尾分量，后端会补 `0`；超过该长度会报错。`normalize` 必须返回恰好 `components` 个整数。`to_tick` 的数值用于事件排序、起止先后判断和叙事线相对刻度，须保持同一历法内的时间顺序，并处于 64 位整数范围内。
+`metadata().components` 必须是 **1 到 64** 的正整数。它定义时间数组的分量数与顺序。用户写的数组可以省略末尾分量，后端会补 `0`；超过该长度会报错。`normalize` 必须返回恰好 `components` 个整数。`to_tick` 的数值用于事件排序、起止先后判断和叙事线相对刻度，须保持同一历法内的时间顺序，并处于 64 位整数范围内。
 
 `humanizer` 在一个函数中处理所有语言分支：
 
 | `kind` | `value` | 返回值 | 调用时机 |
 | --- | --- | --- | --- |
-| `metadata` | `metadata()` 的 map | map，保留 `components`，可添加 `title`、`description` | 加载历法时 |
+| `metadata` | `metadata()` 的 map | map，可添加 `title`、`description`（`components` 以原始元数据为准） | 加载历法时 |
 | `time` | 按 `components` 补齐的整数数组 | 字符串 | 展示实体和事件时间、相对偏移 |
 
 `language` 是应用设置中的 `zh` 或 `en`。应用切换语言后会重新解析当前文档，因此 `humanizer` 会收到新的语言。脚本也可调用宿主提供的 `language()`，但建议只在 `humanizer` 中选择显示文字，让 `metadata`、`normalize` 和 `to_tick` 的结果不受语言影响。
@@ -84,3 +84,13 @@ fn humanizer(kind, value, language) {
 ```
 
 脚本读取、编译或接口检查失败时，文档解析会报错。`metadata` 会在加载时调用；其余函数在解析使用该历法的时间时调用。脚本运行受操作数、调用层数及容器大小等资源限制。
+
+## 宿主代码层级
+
+- `src-tauri/src/calendar/mod.rs`：历法应用入口，负责分量数校验、补齐、归一化和偏移计算，供文档解析调用。
+- `src-tauri/src/weft/phase.rs`：定义 `TimeUnit`（不定长整数数组），解析 `time_unit` 或 `[phase, 偏移分量…]` 的递归结构。锚点在首项，负数偏移表示减法；递归 flatten 只逐分量求和并检查溢出，不做进位。例如 `[[2025, 4, 2, 23, 50, 0], 0, 0, 0, 0, 20]` 展平为 `[2025, 4, 2, 23, 70, 0]`，最后由 Rhai `normalize` 处理进位。
+- `calendar/script.rs`：加载与编译历法脚本，检查公开接口，转换 `metadata`、`normalize`、`to_tick` 的返回值。
+- `calendar/humanizer.rs`：封装 `humanizer` 的种类、语言与展示返回值；显示结果不决定历法分量数。
+- `src-tauri/src/plugin_loader.rs`：历法与可计算标签共用的 Rhai 资源限制和公开函数检查。
+
+事件时间的处理顺序是：解析 `Phase` → 展平分量 → 补齐 → 脚本归一化 → 转 tick / humanizer 展示。展平只做逐分量求和，进位规则始终由历法脚本决定。

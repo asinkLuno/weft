@@ -1,8 +1,8 @@
 mod calculable_tag;
 mod calendar;
-mod document;
-mod model;
-mod validation;
+mod plugin_loader;
+mod weft;
+mod weft_doc;
 
 use serde_json::json;
 use std::sync::Mutex;
@@ -57,7 +57,7 @@ fn apply_lang(app: &AppHandle, lang: &str) {
         let _ = app.set_menu(menu);
     }
     let _ = app.emit("settings-changed", json!({ "language": lang }));
-    document::refresh_language(app);
+    weft_doc::refresh_language(app);
 }
 
 #[tauri::command]
@@ -79,11 +79,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
-        .manage(Mutex::new(document::DocumentState::default()))
+        .manage(Mutex::new(weft_doc::DocumentState::default()))
         .invoke_handler(tauri::generate_handler![
-            document::bind_document,
-            document::save_document,
-            document::unbind_document,
+            weft_doc::bind_document,
+            weft_doc::save_document,
+            weft_doc::unbind_document,
             get_language,
         ])
         .setup(|app| {

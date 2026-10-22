@@ -1,5 +1,8 @@
+//! YAML 文档边界：数据模型、语法与结构校验、文件监听及变更推送。
+//! 保存前通过同一解析流程校验，错误通过 DocumentPayload 返回前端。
+
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -8,14 +11,90 @@ use std::{
 
 use notify::RecursiveMode;
 use notify_debouncer_full::{Debouncer, RecommendedCache, new_debouncer};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_log::log::{error, warn};
 
-use crate::calendar::Calendar;
-use crate::model::{Entity, EntityOffset, EventItem, WeftDoc};
-use crate::validation::{DocumentError, ValidationError};
+use crate::calendar::{Calendar, CalendarMetadata};
+use crate::weft::entity::{self, Entity, EntityLink, check as check_entity};
+use crate::weft::errors::{DocumentError, ValidationError};
+use crate::weft::event::{
+    self, EventItem, RawEvent, build_event_index, build_events, check as check_event,
+};
+use crate::weft::narrative::{
+    self, Narrative, RawNarrative, check as check_narrative, resolve_narratives,
+};
+use crate::weft::plugin::CalendarSpec;
+use crate::weft::story::{Story, check as check_story};
+
+// YAML 数据模型：顶层键逐个补齐，未知键在反序列化时滤掉。
+#[derive(Debug, Serialize)]
+pub struct WeftDoc {
+    pub story: Story,
+    pub entity: HashMap<String, Entity>,
+    // 关系分组：组名 → 关系对列表
+    #[serde(default)]
+    pub entity_link: HashMap<String, Vec<EntityLink>>,
+    // 自定义历法注册表：注册名 → Rhai 脚本清单（相对故事文件的路径）
+    #[serde(default)]
+    pub calendar: HashMap<String, CalendarSpec>,
+    // 可计算标签注册表：注册名 → Rhai 脚本清单（与 calendar 同构），按实体 base_time 计算归属
+    #[serde(default)]
+    pub calculable_tag: HashMap<String, CalendarSpec>,
+    // 事件分组：组名 → 按 tick 排序的事件列表
+    #[serde(default)]
+    pub event: BTreeMap<String, Vec<EventItem>>,
+    // 叙事线：组名 → 相对 observer base_time 展开的事件时间轴
+    #[serde(default)]
+    pub narrative: BTreeMap<String, Narrative>,
+    // 运行时填充：story.date_mode 所指历法的元数据，不来自 YAML
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar_meta: Option<CalendarMetadata>,
+}
+
+#[derive(Deserialize)]
+struct RawWeftDoc {
+    story: Story,
+    #[serde(default)]
+    entity: HashMap<String, Entity>,
+    #[serde(default)]
+    entity_link: HashMap<String, Vec<EntityLink>>,
+    #[serde(default)]
+    event: HashMap<String, HashMap<String, RawEvent>>,
+    #[serde(default)]
+    narrative: HashMap<String, RawNarrative>,
+    #[serde(default)]
+    calendar: HashMap<String, CalendarSpec>,
+    #[serde(default)]
+    calculable_tag: HashMap<String, CalendarSpec>,
+}
+
+impl WeftDoc {
+    pub fn from_yaml(yaml: &serde_yaml_ng::Value) -> Result<Self, DocumentError> {
+        let raw = RawWeftDoc::deserialize(yaml).map_err(DocumentError::raw)?;
+        // 按段检查：story → entity → event → narrative；每段先引用后结构，
+        // 前面的段不成立，后面段的问题没有报告价值
+        check_story(&raw.story, &raw.calendar)?;
+        check_entity(&raw.entity, &raw.entity_link)?;
+        // 标题索引只含名字不含事件体，event 与 narrative 的检查、重写都单独对它做
+        let index = build_event_index(&raw.event);
+        check_event(&raw.event, &raw.entity, &index)?;
+        check_narrative(&raw.narrative, &raw.entity, &index)?;
+        let narrative = resolve_narratives(raw.narrative, &index);
+        let event = build_events(raw.event)?;
+        Ok(WeftDoc {
+            story: raw.story,
+            entity: raw.entity,
+            entity_link: raw.entity_link,
+            event,
+            narrative,
+            calendar: raw.calendar,
+            calculable_tag: raw.calculable_tag,
+            calendar_meta: None,
+        })
+    }
+}
 
 const EVENT: &str = "document-changed";
 
@@ -55,142 +134,20 @@ impl DocumentPayload {
     }
 }
 
-// 按实体 id 取 base_time；事件与叙事线都要拿它算偏移
-fn resolve_base<'a>(entity: &'a HashMap<String, Entity>, id: &str) -> Option<&'a [i64]> {
-    entity.get(id).and_then(|e| e.base_time.as_deref())
-}
-
-// 两个 tick 相减；任一端没有时间就得到 None
-fn offset_tick(base: Option<i64>, time: Option<i64>) -> Result<Option<i64>, DocumentError> {
-    base.zip(time)
-        .map(|(base, time)| {
-            time.checked_sub(base)
-                .ok_or(ValidationError::TimeOffsetOutOfRange)
-        })
-        .transpose()
-        .map_err(DocumentError::from)
-}
-
 fn parse(content: &str, base: &Path, lang: &str) -> Result<Value, DocumentError> {
     let yaml: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(content).map_err(DocumentError::raw)?;
-    // 序列化 model.rs 声明过的结构：未知键在这里被滤掉
+    // 序列化 weft_doc.rs 声明过的结构：未知键在这里被滤掉
     let mut doc = WeftDoc::from_yaml(&yaml)?;
     // 加载历法并解析所有时间：历法错误等同 YAML 错误，阻止展示
-    let mode = doc
-        .story
-        .date_mode
-        .clone()
-        .unwrap_or_else(|| "gregorian".into());
+    let mode = doc.story.date_mode().to_owned();
     let cal = Calendar::load(&mode, doc.calendar.get(&mode), base, lang)?;
     doc.calendar_meta = Some(cal.metadata());
-    apply_entity_times(&mut doc, &cal)?;
+    entity::apply_times(&mut doc.entity, &cal)?;
     apply_calculable_tags(&mut doc, base, &mode, lang)?;
-    apply_event_times(&mut doc, &cal)?;
-    apply_narrative_times(&mut doc, &cal)?;
+    event::apply_times(&mut doc.event, &doc.entity, &cal)?;
+    narrative::apply_times(&mut doc.narrative, &doc.entity, &doc.event, &cal)?;
     serde_json::to_value(doc).map_err(DocumentError::raw)
-}
-
-// base_time：归一化后写回原字段，展示文案单独存一份
-fn apply_entity_times(doc: &mut WeftDoc, cal: &Calendar) -> Result<(), DocumentError> {
-    for entity in doc.entity.values_mut() {
-        if let Some(values) = &entity.base_time {
-            let normalized = cal.normalize(values)?;
-            entity.base_time_display = Some(cal.humanize(&normalized)?);
-            entity.base_time = Some(normalized);
-        }
-    }
-    Ok(())
-}
-
-// 事件：展平相对时间 → 归一化 → tick（排序与先后校验的基准）→ humanize，
-// 同时算出每个参与实体相对其 base_time 的偏移
-fn apply_event_times(doc: &mut WeftDoc, cal: &Calendar) -> Result<(), DocumentError> {
-    let WeftDoc { entity, event, .. } = doc;
-    for events in event.values_mut() {
-        for ev in &mut *events {
-            let start = cal.normalize(&ev.start_phase.flatten())?;
-            let start_tick = cal.to_tick(&start)?;
-            let end = ev
-                .end_phase
-                .as_ref()
-                .map(|phase| cal.normalize(&phase.flatten()))
-                .transpose()?;
-            let end_tick = end.as_ref().map(|end| cal.to_tick(end)).transpose()?;
-            if end_tick.is_some_and(|end| end < start_tick) {
-                return Err(ValidationError::EventEndBeforeStart {
-                    event: ev.id.clone(),
-                }
-                .into());
-            }
-            let start_display = cal.humanize(&start)?;
-            let end_display = end.as_ref().map(|end| cal.humanize(end)).transpose()?;
-            // 没有 base_time 的实体 start 留空
-            ev.offsets = ev
-                .entities
-                .iter()
-                .map(|r| {
-                    let base = resolve_base(entity, r);
-                    Ok(EntityOffset {
-                        entity: r.clone(),
-                        start: base
-                            .map(|base| cal.offset_display(&start, base))
-                            .transpose()?,
-                        end: match (base, &end) {
-                            (Some(base), Some(end)) => cal.offset_display(end, base).map(Some)?,
-                            _ => None,
-                        },
-                    })
-                })
-                .collect::<Result<_, DocumentError>>()?;
-            ev.start = Some(start);
-            ev.end = end;
-            ev.start_tick = Some(start_tick);
-            ev.end_tick = end_tick;
-            ev.start_display = Some(start_display);
-            ev.end_display = end_display;
-        }
-        events.sort_by_key(|e| e.start_tick.unwrap_or(i64::MAX));
-    }
-    Ok(())
-}
-
-// 叙事线：subject 事件相对 observer base_time 的偏移（tick 定位 + humanize 展示）。
-// subject.event 在 model 层已重写成 `组名/标题` 全 id，这里按 id 直接取事件
-fn apply_narrative_times(doc: &mut WeftDoc, cal: &Calendar) -> Result<(), DocumentError> {
-    let WeftDoc {
-        entity,
-        event,
-        narrative,
-        ..
-    } = doc;
-    let by_id: HashMap<&str, &EventItem> = event
-        .values()
-        .flatten()
-        .map(|ev| (ev.id.as_str(), ev))
-        .collect();
-    for nar in narrative.values_mut() {
-        let base = resolve_base(entity, &nar.observer);
-        let base_tick = base.map(|base| cal.to_tick(base)).transpose()?;
-        for subject in &mut nar.subject {
-            let Some(ev) = by_id.get(subject.event.as_str()) else {
-                continue;
-            };
-            subject.start_tick = offset_tick(base_tick, ev.start_tick)?;
-            subject.end_tick = offset_tick(base_tick, ev.end_tick)?;
-            subject.start = match (base, &ev.start) {
-                (Some(base), Some(time)) => Some(cal.offset_display(time, base)?),
-                _ => None,
-            };
-            subject.end = match (base, &ev.end) {
-                (Some(base), Some(time)) => Some(cal.offset_display(time, base)?),
-                _ => None,
-            };
-        }
-        nar.subject
-            .sort_by_key(|s| s.start_tick.unwrap_or(i64::MAX));
-    }
-    Ok(())
 }
 
 // 可计算标签：按各实体 base_time 执行脚本，归属链 chain[0] 并入 belong_to，其余逐级生成缺失实体
@@ -227,7 +184,7 @@ fn apply_calculable_tags(
         }
     }
     // 可计算标签生成的归属可能成环（比如把实体自己算进链里），复查 belong_to 无环
-    crate::model::check_acyclic(&doc.entity)
+    crate::weft::entity::check_acyclic(&doc.entity)
 }
 
 // 名称 → 已有实体 id：tag 返回的是名称，实体 id 可以与之不同
@@ -270,6 +227,7 @@ fn apply_chain(
             target.clone(),
             Entity {
                 name: Some(target.clone()),
+                base_phase: None,
                 base_time: None,
                 base_time_display: None,
                 description: None,

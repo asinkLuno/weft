@@ -3,9 +3,9 @@ use rhai::{AST, Dynamic, Engine, Scope};
 use serde_json::Value;
 use std::{collections::HashMap, fs, path::Path};
 
-use crate::calendar::{limited_engine, missing_rhai_functions};
-use crate::model::CalendarSpec;
-use crate::validation::DocumentError;
+use crate::plugin_loader::{limited_engine, missing_rhai_functions};
+use crate::weft::errors::DocumentError;
+use crate::weft::plugin::CalendarSpec;
 
 const CONSTELLATION: &str = include_str!("../rhai/constellation.rhai");
 

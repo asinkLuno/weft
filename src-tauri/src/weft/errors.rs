@@ -90,11 +90,11 @@ pub enum DocumentError {
 }
 
 impl DocumentError {
-    pub fn validation(error: ValidationError) -> Self {
+    pub(crate) fn validation(error: ValidationError) -> Self {
         Self::Validation { error }
     }
 
-    pub fn raw(message: impl ToString) -> Self {
+    pub(crate) fn raw(message: impl ToString) -> Self {
         Self::Raw {
             message: message.to_string(),
         }
