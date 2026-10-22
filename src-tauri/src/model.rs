@@ -53,47 +53,12 @@ impl WeftDoc {
     pub fn from_yaml(yaml: &Value) -> Result<Self, DocumentError> {
         let raw = RawWeftDoc::deserialize(yaml).map_err(DocumentError::raw)?;
         // 所有「引用的 id 不存在」检查集中在最先：引用断了，后面的结构检查没有报告价值
-        check_references(&raw)?;
+        // 标题索引只含名字不含事件体，引用解析与查重都单独对它做
+        let index = build_event_index(&raw.event);
+        check_references(&raw, &index).map_err(|errors| DocumentError::References { errors })?;
         check_acyclic(&raw.entity)?;
-        // 事件标题全局唯一：跨组同名也算重复，subject 等引用才能省略组名。
-        // 建标题 → 组名索引，按标题排序后查重：报哪个标题、组名顺序都不随 HashMap 迭代漂移
-        let mut by_title: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-        for (group, events) in &raw.event {
-            for title in events.keys() {
-                by_title.entry(title.as_str()).or_default().push(group);
-            }
-        }
-        if let Some((title, groups)) = by_title.iter().find(|(_, groups)| groups.len() > 1) {
-            let mut names: Vec<&str> = groups.iter().copied().collect();
-            names.sort_unstable();
-            return Err(ValidationError::DuplicateEventTitle {
-                title: title.to_string(),
-                groups: names.join(", "),
-            }
-            .into());
-        }
-        // narrative：引用已在 check_references 校验，这里把 subject 重写成事件 id
-        let mut narrative = BTreeMap::new();
-        for (name, nar) in raw.narrative {
-            let mut subject = Vec::with_capacity(nar.subject.len());
-            for r in nar.subject {
-                let (g, t) = resolve_event(&raw.event, &r).expect("subject 引用已校验");
-                subject.push(NarrativeSubject {
-                    event: format!("{g}/{t}"),
-                    start_tick: None,
-                    end_tick: None,
-                    start: None,
-                    end: None,
-                });
-            }
-            narrative.insert(
-                name,
-                Narrative {
-                    observer: nar.observer,
-                    subject,
-                },
-            );
-        }
+        check_unique_event_titles(&index)?;
+        let narrative = resolve_narratives(raw.narrative, &index);
         // 事件 id = `组名/标题`；时间解析要等历法加载，document.rs 里做
         let mut event: BTreeMap<String, Vec<EventItem>> = BTreeMap::new();
         for (group, events) in raw.event {
@@ -321,34 +286,78 @@ struct RawNarrative {
     observer: String,
 }
 
-// 事件引用：`组名/标题` 全 id，或裸标题（标题已全局唯一校验）
-fn resolve_event(
-    event: &HashMap<String, HashMap<String, RawEvent>>,
-    r: &str,
-) -> Option<(String, String)> {
+// 事件标题索引：标题 → 组名列表（组名已排序，查重报告顺序稳定）。
+// 裸标题引用靠它定位组名，`组名/标题` 全 id 引用靠它验证存在；
+// 不含事件体，单条引用拿索引即可单独解析
+type EventIndex<'a> = BTreeMap<&'a str, Vec<&'a str>>;
+
+fn build_event_index(events: &HashMap<String, HashMap<String, RawEvent>>) -> EventIndex<'_> {
+    let mut by_title: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (group, evs) in events {
+        for title in evs.keys() {
+            by_title.entry(title).or_default().push(group);
+        }
+    }
+    for groups in by_title.values_mut() {
+        groups.sort_unstable();
+    }
+    by_title
+}
+
+// 事件引用：`组名/标题` 全 id，或裸标题（须先过全局唯一查重才能定组）
+fn resolve_event(index: &EventIndex<'_>, r: &str) -> Option<(String, String)> {
     if let Some((g, t)) = r.split_once('/') {
-        return event
-            .get(g)
-            .is_some_and(|evs| evs.contains_key(t))
+        return index
+            .get(t)
+            .is_some_and(|groups| groups.contains(&g))
             .then(|| (g.to_string(), t.to_string()));
     }
-    event
-        .iter()
-        .find(|(_, evs)| evs.contains_key(r))
-        .map(|(g, _)| (g.clone(), r.to_string()))
+    index
+        .get(r)
+        .map(|groups| (groups[0].to_string(), r.to_string()))
+}
+
+// narrative：引用已在 check_references 校验，这里把 subject 重写成事件 id。
+// 只依赖标题索引，单条 narrative 给索引即可单独解析
+fn resolve_narratives(
+    narrative: HashMap<String, RawNarrative>,
+    index: &EventIndex<'_>,
+) -> BTreeMap<String, Narrative> {
+    let mut out = BTreeMap::new();
+    for (name, nar) in narrative {
+        let mut subject = Vec::with_capacity(nar.subject.len());
+        for r in nar.subject {
+            let (g, t) = resolve_event(index, &r).expect("subject 引用已校验");
+            subject.push(NarrativeSubject {
+                event: format!("{g}/{t}"),
+                start_tick: None,
+                end_tick: None,
+                start: None,
+                end: None,
+            });
+        }
+        out.insert(
+            name,
+            Narrative {
+                observer: nar.observer,
+                subject,
+            },
+        );
+    }
+    out
 }
 
 // 所有「引用的 id 不存在」检查集中在此：belong_to、entity_link、event 参与实体、
-// narrative 的 observer 与 subject。先于结构检查（成环、标题重复）报告
-fn check_references(raw: &RawWeftDoc) -> Result<(), DocumentError> {
+// narrative 的 observer 与 subject。先于结构检查（成环、标题重复）报告全部断开的引用
+fn check_references(raw: &RawWeftDoc, index: &EventIndex<'_>) -> Result<(), Vec<ValidationError>> {
+    let mut errors = Vec::new();
     for (id, entity) in &raw.entity {
         for target in &entity.belong_to {
             if !raw.entity.contains_key(target) {
-                return Err(ValidationError::EntityUnknownParent {
+                errors.push(ValidationError::EntityUnknownParent {
                     entity: id.clone(),
                     target: target.clone(),
-                }
-                .into());
+                });
             }
         }
     }
@@ -356,11 +365,10 @@ fn check_references(raw: &RawWeftDoc) -> Result<(), DocumentError> {
         for link in links {
             for r in [&link.entities.0, &link.entities.1] {
                 if !raw.entity.contains_key(r) {
-                    return Err(ValidationError::UnknownLinkEntity {
+                    errors.push(ValidationError::UnknownLinkEntity {
                         group: group.clone(),
                         entity: r.clone(),
-                    }
-                    .into());
+                    });
                 }
             }
         }
@@ -369,34 +377,36 @@ fn check_references(raw: &RawWeftDoc) -> Result<(), DocumentError> {
         for (title, ev) in events {
             for r in &ev.entities {
                 if !raw.entity.contains_key(r) {
-                    return Err(ValidationError::UnknownEventEntity {
+                    errors.push(ValidationError::UnknownEventEntity {
                         event: format!("{group}/{title}"),
                         entity: r.clone(),
-                    }
-                    .into());
+                    });
                 }
             }
         }
     }
     for (name, nar) in &raw.narrative {
         if !raw.entity.contains_key(&nar.observer) {
-            return Err(ValidationError::UnknownObserver {
+            errors.push(ValidationError::UnknownObserver {
                 narrative: name.clone(),
                 entity: nar.observer.clone(),
-            }
-            .into());
+            });
         }
         for r in &nar.subject {
-            if resolve_event(&raw.event, r).is_none() {
-                return Err(ValidationError::UnknownSubjectEvent {
+            if resolve_event(index, r).is_none() {
+                errors.push(ValidationError::UnknownSubjectEvent {
                     narrative: name.clone(),
                     event: r.clone(),
-                }
-                .into());
+                });
             }
         }
     }
-    Ok(())
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        errors.sort_by_cached_key(ToString::to_string);
+        Err(errors)
+    }
 }
 
 // 归属图不许成环（如 a belong_to b、b belong_to a），否则按层级递归展示无法终止。
@@ -427,6 +437,19 @@ pub(crate) fn check_acyclic(graph: &HashMap<String, Entity>) -> Result<(), Docum
     let mut state = HashMap::new();
     for id in graph.keys() {
         visit(id, graph, &mut state)?;
+    }
+    Ok(())
+}
+
+// 事件标题全局唯一：跨组同名也算重复，subject 等引用才能省略组名。
+// 组名列表建索引时已排序：报哪个标题、组名顺序都不随 HashMap 迭代漂移
+fn check_unique_event_titles(index: &EventIndex<'_>) -> Result<(), DocumentError> {
+    if let Some((title, groups)) = index.iter().find(|(_, groups)| groups.len() > 1) {
+        return Err(ValidationError::DuplicateEventTitle {
+            title: (*title).to_string(),
+            groups: groups.join(", "),
+        }
+        .into());
     }
     Ok(())
 }

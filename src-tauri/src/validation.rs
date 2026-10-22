@@ -83,6 +83,8 @@ pub enum DocumentError {
         #[source]
         error: ValidationError,
     },
+    #[error("invalid references: {errors:?}")]
+    References { errors: Vec<ValidationError> },
     #[error("{message}")]
     Raw { message: String },
 }

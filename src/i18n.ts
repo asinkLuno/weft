@@ -4,6 +4,7 @@ export type Lang = "zh" | "en";
 
 export type DocumentError =
   | { type: "validation"; error: ValidationError }
+  | { type: "references"; errors: ValidationError[] }
   | { type: "raw"; message: string };
 
 type ValidationCode = ValidationError["code"];
@@ -85,26 +86,31 @@ const validationMessages = {
   },
 } satisfies Record<Lang, Record<ValidationCode, string>>;
 
+function formatValidationError(error: ValidationError, lang: Lang): string {
+  const code = error.code;
+  const messages: Record<string, string> = validationMessages[lang];
+  const template = messages[code] ?? code;
+  const params = ("params" in error ? error.params : {}) as Record<
+    string,
+    string
+  >;
+  return template.replace(
+    /\{(\w+)\}/g,
+    (_, key: string) => params[key] ?? `{${key}}`,
+  );
+}
+
 export function formatDocumentError(error: unknown, lang: Lang): string {
   if (error && typeof error === "object" && "type" in error) {
     const e = error as Partial<DocumentError>;
     if (e.type === "raw" && typeof e.message === "string") return e.message;
-    if (
-      e.type === "validation" &&
-      e.error &&
-      typeof e.error.code === "string"
-    ) {
-      const code = e.error.code;
-      const messages: Record<string, string> = validationMessages[lang];
-      const template = messages[code] ?? code;
-      const params = ("params" in e.error ? e.error.params : {}) as Record<
-        string,
-        string
-      >;
-      return template.replace(
-        /\{(\w+)\}/g,
-        (_, key: string) => params[key] ?? `{${key}}`,
-      );
+    if (e.type === "references" && Array.isArray(e.errors)) {
+      return e.errors
+        .map((item) => `• ${formatValidationError(item, lang)}`)
+        .join("\n");
+    }
+    if (e.type === "validation" && e.error) {
+      return formatValidationError(e.error, lang);
     }
   }
   return String(error);

@@ -196,10 +196,15 @@ function App() {
   useEffect(() => {
     toast.dismiss();
     if (activeError !== null) {
-      toast.error(formatDocumentError(activeError, lang), {
-        duration: Infinity,
-        closeButton: true,
-      });
+      toast.error(
+        <div className="whitespace-pre-line">
+          {formatDocumentError(activeError, lang)}
+        </div>,
+        {
+          duration: Infinity,
+          closeButton: true,
+        },
+      );
     }
   }, [activeError, lang]);
 
