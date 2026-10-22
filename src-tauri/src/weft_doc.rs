@@ -19,11 +19,9 @@ use tauri_plugin_log::log::{error, warn};
 use crate::weft::entity::{EntityCollection, RawEntity, RawEntityLink};
 use crate::weft::errors::{DocumentError, ValidationError};
 use crate::weft::event::{
-    self, EventItem, RawEvent, build_event_index, build_events, check as check_event,
+    self, EventItem, EventTiming, RawEvent, build_events, check as check_event,
 };
-use crate::weft::narrative::{
-    self, Narrative, RawNarrative, check as check_narrative, resolve_narratives,
-};
+use crate::weft::narrative::{Narrative, check as check_narrative};
 use crate::weft::story::{RawStory, Story};
 
 // YAML 数据模型：顶层键逐个补齐，未知键在反序列化时滤掉。
@@ -32,10 +30,11 @@ pub struct WeftDoc {
     pub story: Story,
     #[serde(flatten)]
     pub entity: EntityCollection,
-    // 事件分组：组名 → 按 tick 排序的事件列表
+    // 事件字典：事件 ID → 事件定义
     #[serde(default)]
-    pub event: BTreeMap<String, Vec<EventItem>>,
-    // 叙事线：组名 → 相对 observer base_time 展开的事件时间轴
+    pub event: BTreeMap<String, EventItem>,
+    pub event_times: BTreeMap<String, EventTiming>,
+    // 叙事线名称 → 事件 ID 列表
     #[serde(default)]
     pub narrative: BTreeMap<String, Narrative>,
     // 运行时填充：所选历法的时间分量数，不来自 YAML
@@ -51,9 +50,9 @@ struct RawWeftDoc {
     #[serde(default)]
     entity_link: HashMap<String, Vec<RawEntityLink>>,
     #[serde(default)]
-    event: HashMap<String, HashMap<String, RawEvent>>,
+    event: HashMap<String, RawEvent>,
     #[serde(default)]
-    narrative: HashMap<String, RawNarrative>,
+    narrative: HashMap<String, Narrative>,
 }
 
 impl WeftDoc {
@@ -63,7 +62,19 @@ impl WeftDoc {
         gregorian: &Path,
         lang: &str,
     ) -> Result<Self, DocumentError> {
-        let raw = RawWeftDoc::deserialize(yaml).map_err(DocumentError::raw)?;
+        let mut raw = RawWeftDoc::deserialize(yaml).map_err(DocumentError::raw)?;
+        // 头像路径相对 YAML 文件；无效图片由前端回退为 ID 缩写。
+        for entity in raw.entity.values_mut() {
+            entity.avatar = entity.avatar.take().and_then(|source| {
+                if source.trim().is_empty() {
+                    return None;
+                }
+                fs::canonicalize(base.join(source))
+                    .ok()
+                    .filter(|path| path.is_file())
+                    .map(|path| path.to_string_lossy().into_owned())
+            });
+        }
         // 按段检查：story → entity → event → narrative；每段先引用后结构，
         // 前面的段不成立，后面段的问题没有报告价值
         // 历法路径仅在输入构建阶段用于标签上下文，不保存到运行时 Story。
@@ -81,16 +92,15 @@ impl WeftDoc {
             date_mode.as_deref(),
             lang,
         )?;
-        // 标题索引只含名字不含事件体，event 与 narrative 的检查、重写都单独对它做
-        let index = build_event_index(&raw.event);
-        check_event(&raw.event, entity.as_map(), &index)?;
-        check_narrative(&raw.narrative, entity.as_map(), &index)?;
-        let narrative = resolve_narratives(raw.narrative, &index);
-        let event = build_events(raw.event)?;
+        check_event(&raw.event, entity.as_map())?;
+        check_narrative(&raw.narrative, &raw.event)?;
+        let narrative = raw.narrative.into_iter().collect();
+        let event = build_events(raw.event, entity.as_map())?;
         let doc = WeftDoc {
             story,
             entity,
             event,
+            event_times: BTreeMap::new(),
             narrative,
             calendar_components: None,
         };
@@ -148,11 +158,17 @@ fn parse(app: &AppHandle, content: &str, base: &Path, lang: &str) -> Result<Valu
         )
         .map_err(DocumentError::raw)?;
     let mut doc = WeftDoc::from_yaml(&yaml, base, &gregorian, lang)?;
-    // 实体及可计算归属已构建完毕，继续计算事件与叙事线时间。
+    // 实体及可计算归属已构建完毕，计算事件时间。
     let cal = &doc.story.calendar;
     doc.calendar_components = Some(cal.component_count());
-    event::apply_times(&mut doc.event, doc.entity.as_map(), cal)?;
-    narrative::apply_times(&mut doc.narrative, doc.entity.as_map(), &doc.event, cal)?;
+    doc.event_times = event::apply_times(&doc.event, cal)?;
+    for entity in doc.entity.as_map().values() {
+        if let Some(avatar) = &entity.avatar {
+            app.asset_protocol_scope()
+                .allow_file(avatar)
+                .map_err(DocumentError::raw)?;
+        }
+    }
     serde_json::to_value(doc).map_err(DocumentError::raw)
 }
 

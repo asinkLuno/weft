@@ -4,12 +4,10 @@ export type ValidationError =
   | { code: "file_deleted" }
   | { code: "document_not_bound" }
   | { code: "invalid_path" }
-  | { code: "duplicate_event_title"; params: { title: string; groups: string } }
   | { code: "unknown_link_entity"; params: { group: string; entity: string } }
   | { code: "unknown_event_entity"; params: { event: string; entity: string } }
-  | { code: "unknown_observer"; params: { narrative: string; entity: string } }
   | {
-      code: "unknown_subject_event";
+      code: "unknown_narrative_event";
       params: { narrative: string; event: string };
     }
   | {

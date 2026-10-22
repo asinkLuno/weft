@@ -17,6 +17,17 @@ WeftDoc 是 Weft 的故事文档格式：一个 YAML 文件（习惯命名 `stor
 
 ## id 与引用
 
+实体可以通过可选的 `avatar` 指定本地头像路径，相对路径以 YAML 所在目录为基准，也支持绝对路径：
+
+```yaml
+entity:
+  哈利·波特:
+    avatar: images/harry.png
+    description: 霍格沃茨的学生。
+```
+
+头像会显示在实体卡片和归属悬停预览中。未配置、文件不存在或图片加载失败时，显示实体 ID 缩写：多个词取前两个词的首字，单个词取前两个字符（如 `Harry Potter` → `HP`，`霍格沃茨` → `霍格`）。
+
 文档内部靠 id 互相引用，引用不存在的 id 会解析报错：
 
 - **实体 id** 是 `entity` 下的键。实体的 `belong_to`（归属）、`entity_link` 的关系对、事件的 `entities`（参与实体）、叙事线的 `observer` 都引用实体 id。

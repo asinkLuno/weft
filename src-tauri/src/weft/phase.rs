@@ -88,3 +88,17 @@ impl Phase {
         Ok(())
     }
 }
+
+// 两个 tick 相减；任一端没有时间就得到 None
+pub(crate) fn offset_tick(
+    base: Option<i64>,
+    time: Option<i64>,
+) -> Result<Option<i64>, DocumentError> {
+    base.zip(time)
+        .map(|(base, time)| {
+            time.checked_sub(base)
+                .ok_or(ValidationError::TimeOffsetOutOfRange)
+        })
+        .transpose()
+        .map_err(DocumentError::from)
+}

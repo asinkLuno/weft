@@ -11,6 +11,7 @@ story:
 
 entity:
   霍格沃茨魔法学校:
+    # avatar: images/hogwarts.png # 相对本 YAML 的图片路径；省略时显示 ID 缩写
     description: 英国的魔法学校，下设四大学院。
 
   格兰芬多:
@@ -109,28 +110,23 @@ entity_link:
     - entities: [罗恩·韦斯莱, 赫敏·格兰杰]
       relations: 同学与朋友
 
-# 事件：按组组织，组内按开始时间排序；时间列表末尾嵌套列表表示锚点相对时间
+# 事件：事件 ID → 事件定义；嵌套列表首项为时间锚点
 event:
-  入学之夜:
-    分院帽晚宴:
-      start_time: &feast [1991, 9, 1, 19]
-      end_time: [0, 0, 0, 2, *feast] # 宴会两小时后结束
-      entities: [哈利·波特, 罗恩·韦斯莱, 赫敏·格兰杰, 德拉科·马尔福]
-      description: 开学宴会上分院帽把新生分入四大学院。
-    厄里斯魔镜:
-      start_time: [1991, 12, 25, 21]
-      entities: [哈利·波特]
-      description: 圣诞夜哈利在镜中看见了家人。
-  密室事件:
-    蛇怪袭击:
-      start_time: &basilisk [1993, 4, 20, 8]
-      end_time: [0, 0, 6, 0, *basilisk] # 锚点：自己开始后 6 小时
-      entities: [金妮·韦斯莱]
-      description: 金妮被里德的日记控制，打开密室。
+  分院帽晚宴:
+    start_time: &feast [1991, 9, 1, 19]
+    end_time: [*feast, 0, 0, 0, 2] # 宴会两小时后结束
+    entities: [哈利·波特, 罗恩·韦斯莱, 赫敏·格兰杰, 德拉科·马尔福]
+    description: 开学宴会上分院帽把新生分入四大学院。
+  厄里斯魔镜:
+    start_time: [1991, 12, 25, 21]
+    entities: [哈利·波特]
+    description: 圣诞夜哈利在镜中看见了家人。
+  蛇怪袭击:
+    start_time: &basilisk [1993, 4, 20, 8]
+    end_time: [*basilisk, 0, 0, 0, 6] # 锚点：自己开始后 6 小时
+    entities: [金妮·韦斯莱]
+    description: 金妮被里德的日记控制，打开密室。
 
-# 叙事线：subject 引用事件（`组名/标题` 全 id，或裸标题——事件标题全局唯一），
-# observer 引用实体；事件按 observer 的 base_time 展开成相对偏移时间轴
+# 叙事线：名称 → 事件 ID 列表
 narrative:
-  哈利的第一学年:
-    subject: [入学之夜/分院帽晚宴, 入学之夜/厄里斯魔镜, 密室事件/蛇怪袭击]
-    observer: 哈利·波特
+  哈利的第一学年: [分院帽晚宴, 厄里斯魔镜, 蛇怪袭击]

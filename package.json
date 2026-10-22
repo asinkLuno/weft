@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "yarn generate:errors && vite",
     "build": "yarn generate:errors && tsc && vite build",
-    "generate:errors": "cargo run --quiet --manifest-path src-tauri/Cargo.toml --bin export_errors && biome format --write src/generated/validation-error.ts",
+    "generate:errors": "cargo run --quiet --manifest-path src-tauri/Cargo.toml --example export_errors && biome format --write src/generated/validation-error.ts",
     "preview": "vite preview",
     "tauri": "tauri",
     "lint": "biome check .",

@@ -44,27 +44,6 @@ body,
   display: none;
 }
 
-.story-body h1 {
-  margin: 0 0 8px;
-  font-size: 22px;
-}
-
-.story-desc {
-  margin: 0 0 8px;
-  color: #444;
-}
-
-.story-author {
-  margin: 0 0 16px;
-  font-size: 13px;
-  color: #666;
-}
-
-.story-body h2 {
-  margin: 16px 0 8px;
-  font-size: 15px;
-}
-
 /* 通知弹窗改用 shadcn/ui 的 sonner（src/components/ui/sonner.tsx） */
 
 /* VS Code 风格底部状态条 */

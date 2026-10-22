@@ -12,16 +12,12 @@ pub enum ValidationError {
     DocumentNotBound,
     #[error("invalid path")]
     InvalidPath,
-    #[error("duplicate event title: {title} in {groups}")]
-    DuplicateEventTitle { title: String, groups: String },
     #[error("entity link {group} refers to unknown entity {entity}")]
     UnknownLinkEntity { group: String, entity: String },
     #[error("event {event} refers to unknown entity {entity}")]
     UnknownEventEntity { event: String, entity: String },
-    #[error("narrative {narrative} refers to unknown observer {entity}")]
-    UnknownObserver { narrative: String, entity: String },
     #[error("narrative {narrative} refers to unknown event {event}")]
-    UnknownSubjectEvent { narrative: String, event: String },
+    UnknownNarrativeEvent { narrative: String, event: String },
     #[error("entity {entity} refers to unknown parent {target}")]
     EntityUnknownParent { entity: String, target: String },
     #[error("entity {entity} has a parent cycle")]

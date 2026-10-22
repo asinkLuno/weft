@@ -1,5 +1,5 @@
 import dagre from "@dagrejs/dagre";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { LazyStore } from "@tauri-apps/plugin-store";
@@ -13,7 +13,14 @@ import {
   ReactFlow,
   useNodesState,
 } from "@xyflow/react";
-import { ChevronDown, X as XIcon } from "lucide-react";
+import {
+  BookOpen,
+  CalendarDays,
+  ChevronDown,
+  Tags,
+  UserRound,
+  X as XIcon,
+} from "lucide-react";
 import "@xyflow/react/dist/style.css";
 import {
   Fragment,
@@ -25,6 +32,7 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -85,6 +93,7 @@ type WeftDoc = {
     string,
     {
       id: string;
+      avatar?: string;
       description?: string;
       belong_to?: string[];
       base_time?: Phase | null;
@@ -95,35 +104,28 @@ type WeftDoc = {
     string,
     Array<{ entities: [string, string]; relations: string }>
   >;
-  // 事件分组：组名 → 按 tick 升序的事件
-  event?: Record<string, EventItem[]>;
-  // 叙事线：组名 → 相对观察者展开的事件时间轴
+  // 事件 ID → 事件定义
+  event?: Record<string, EventDefinition>;
+  event_times?: Record<string, EventTiming>;
+  // 叙事线名称 → 事件 ID 列表
   narrative?: Record<string, Narrative>;
 };
 
-type NarrativeSubject = {
-  event: string;
-  // 相对 observer base_time 的 tick
-  start_tick?: number;
-  end_tick?: number;
-  // 相对 observer base_time 的偏移展示
-  start?: string;
-  end?: string;
-};
+type Narrative = string[];
 
-type Narrative = {
-  observer: string;
-  subject: NarrativeSubject[];
-};
-
-type EventItem = {
-  id: string;
-  title: string;
+type EventDefinition = {
+  start_time: Phase;
+  end_time?: Phase | null;
   description?: string;
   entities?: string[];
-  // 每个参与实体相对其 base_time 的偏移
+};
+
+type EventTiming = {
+  // tick 偏移用于甘特图定位和长度，start/end 用于文本展示
   offsets?: Array<{
     entity: string;
+    start_tick?: number;
+    end_tick?: number;
     start?: string;
     end?: string;
   }>;
@@ -133,10 +135,23 @@ type EventItem = {
   end_display?: string;
 };
 
+type EventItem = EventDefinition & EventTiming & { id: string; title: string };
+
+function eventItems(doc: WeftDoc | null): EventItem[] {
+  return Object.entries(doc?.event ?? {})
+    .map(([id, event]) => ({
+      ...event,
+      ...doc?.event_times?.[id],
+      id,
+      title: id,
+    }))
+    .sort((a, b) => (a.start_tick ?? 0) - (b.start_tick ?? 0));
+}
+
 const YAML_FILTER = { name: "YAML", extensions: ["yaml", "yml"] };
 
-// 四个标签页，名字在 i18n 里改
-const TABS = ["tab1", "tab2", "tab3", "tab4"] as const;
+// 标签页名称在 i18n 里定义
+const TABS = ["tab1", "tab2", "tab4"] as const;
 type Tab = (typeof TABS)[number];
 
 // 常驻错误提示：不自动消失，可手动关闭，下一条正常事件时清除
@@ -331,7 +346,6 @@ function App() {
         <main className="content">
           {pane("tab1", doc?.story && <StoryView doc={doc} lang={lang} />)}
           {pane("tab2", <EntityView doc={doc} lang={lang} path={path} />)}
-          {pane("tab3", <EventView doc={doc} lang={lang} />)}
           {pane("tab4", <NarrativeView doc={doc} lang={lang} />)}
         </main>
       </Tabs>
@@ -361,23 +375,103 @@ function StoryView({ doc, lang }: { doc: WeftDoc; lang: Lang }) {
   const t = strings[lang];
   const story = doc.story;
   if (!story) return null;
+  const calculableTags = Object.entries(story.calculatable_tags ?? {}).sort(
+    ([a], [b]) => a.localeCompare(b),
+  );
   return (
-    <div className="story-body">
-      <h1>{story.title}</h1>
-      {story.description && <p className="story-desc">{story.description}</p>}
-      {story.author && (
-        <p className="story-author">
-          {t.author}: {story.author}
-        </p>
-      )}
-      {story.date?.name && (
-        <p className="story-author">
-          {t.calendar}: {story.date.name}
-        </p>
-      )}
-      {story.date?.description && (
-        <p className="story-desc">{story.date.description}</p>
-      )}
+    <div className="@container mx-auto w-full max-w-5xl py-4">
+      <header className="mb-10 space-y-5 border-b pb-8">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <BookOpen className="size-4" aria-hidden="true" />
+          <span>{t.tab1}</span>
+        </div>
+        <h1 className="break-words text-3xl font-semibold tracking-tight @min-[640px]:text-4xl">
+          {story.title}
+        </h1>
+        {story.author && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <UserRound className="size-4 shrink-0" aria-hidden="true" />
+            <span className="break-words">
+              {t.author} · {story.author}
+            </span>
+          </div>
+        )}
+        {story.description && (
+          <p className="max-w-3xl whitespace-pre-wrap break-words text-base leading-8 text-muted-foreground">
+            {story.description}
+          </p>
+        )}
+      </header>
+      <div className="grid items-start gap-6 @min-[640px]:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+        {(story.date?.name || story.date?.description) && (
+          <Card className="min-w-0 gap-5">
+            <CardHeader className="border-b">
+              <CardTitle>
+                <h2 className="flex items-center gap-2 text-sm">
+                  <CalendarDays
+                    className="size-4 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  {t.calendar}
+                </h2>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {story.date.name && (
+                <p className="break-words font-medium">{story.date.name}</p>
+              )}
+              {story.date.description && (
+                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-muted-foreground">
+                  {story.date.description}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+        {calculableTags.length > 0 && (
+          <Card
+            className={`min-w-0 gap-0 ${!story.date?.name && !story.date?.description ? "col-span-full" : ""}`}
+          >
+            <CardHeader className="border-b">
+              <CardTitle>
+                <h2 className="flex items-center gap-2 text-sm">
+                  <Tags
+                    className="size-4 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  {t.calculableTags}
+                  <Badge variant="secondary" className="ml-auto tabular-nums">
+                    {calculableTags.length}
+                  </Badge>
+                </h2>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ul className="divide-y">
+                {calculableTags.map(([id, tag]) => (
+                  <li key={id} className="space-y-2 py-4 last:pb-0">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <h3 className="break-all font-medium">
+                        {tag.name || id}
+                      </h3>
+                      {tag.name && tag.name !== id && (
+                        <span className="break-all font-mono text-xs text-muted-foreground">
+                          {id}
+                        </span>
+                      )}
+                    </div>
+                    {tag.description && (
+                      <p className="whitespace-pre-wrap break-words text-sm leading-6 text-muted-foreground">
+                        {tag.description}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }
@@ -386,8 +480,9 @@ function StoryView({ doc, lang }: { doc: WeftDoc; lang: Lang }) {
 type EntityT = NonNullable<WeftDoc["entity"]>[string];
 type EntityData = {
   name: string;
+  avatar?: string;
   baseTime?: string;
-  parents: Array<{ id: string; name: string }>;
+  parents: Array<{ id: string; name: string; preview?: EntityData }>;
   description?: string;
   belongLabel: string;
 };
@@ -396,7 +491,7 @@ type EntityFlowNode = Node<EntityData, "entity">;
 // 入参只要 data：既当 React Flow 节点，也能当普通卡片用
 function EntityNode({ data }: { data: EntityData }) {
   return (
-    <Card size="sm" className="w-[280px]">
+    <>
       {/* 连线锚点：父级从底部出、子级从顶部入；藏掉但保留挂点，且不许用户拖出新连线 */}
       <Handle
         type="target"
@@ -410,23 +505,113 @@ function EntityNode({ data }: { data: EntityData }) {
         isConnectable={false}
         className="!border-0 !bg-transparent"
       />
-      <CardHeader>
-        <CardTitle>{data.name}</CardTitle>
-        {data.baseTime && <CardDescription>{data.baseTime}</CardDescription>}
+      <EntityCard data={data} />
+    </>
+  );
+}
+
+function entityInitials(id: string): string {
+  const parts = id
+    .trim()
+    .split(/[\s·._-]+/u)
+    .filter(Boolean);
+  if (parts.length > 1) {
+    return parts
+      .slice(0, 2)
+      .map((part) => Array.from(part)[0])
+      .join("")
+      .toLocaleUpperCase();
+  }
+  return Array.from(parts[0] ?? "?")
+    .slice(0, 2)
+    .join("")
+    .toLocaleUpperCase();
+}
+
+function EntityCard({ data }: { data: EntityData }) {
+  return (
+    <Card className="w-[280px] gap-0 overflow-hidden py-0 shadow-sm transition-shadow hover:shadow-md">
+      <CardHeader className="gap-3 p-4">
+        <div className="flex items-start gap-3">
+          <Avatar className="size-10 shrink-0 rounded-lg">
+            {data.avatar && (
+              <AvatarImage
+                src={data.avatar}
+                alt={data.name}
+                className="rounded-lg object-cover"
+              />
+            )}
+            <AvatarFallback className="rounded-lg text-xs font-medium">
+              {entityInitials(data.name)}
+            </AvatarFallback>
+          </Avatar>
+          <CardTitle className="min-w-0 self-center break-words text-base leading-6">
+            {data.name}
+          </CardTitle>
+        </div>
+        {data.description && (
+          <CardDescription className="whitespace-pre-wrap break-words leading-6">
+            {data.description}
+          </CardDescription>
+        )}
       </CardHeader>
-      {data.parents.length > 0 && (
-        <CardContent className="flex flex-wrap items-center gap-1.5">
-          <span className="text-muted-foreground text-xs">
-            {data.belongLabel}
-          </span>
-          {data.parents.map((p) => (
-            <Badge key={p.id} variant="secondary">
-              {p.name}
-            </Badge>
-          ))}
+      {(data.baseTime || data.parents.length > 0) && (
+        <CardContent className="space-y-3 border-t bg-muted/30 p-4">
+          {data.baseTime && (
+            <div className="flex items-start gap-2 text-xs text-muted-foreground">
+              <CalendarDays
+                className="mt-0.5 size-3.5 shrink-0"
+                aria-hidden="true"
+              />
+              <span className="break-words leading-5">{data.baseTime}</span>
+            </div>
+          )}
+          {data.parents.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                {data.belongLabel}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {data.parents.map((p) =>
+                  p.preview ? (
+                    <HoverCard key={p.id} openDelay={250}>
+                      <HoverCardTrigger asChild>
+                        <button
+                          type="button"
+                          className="nodrag max-w-full rounded-full text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <Badge
+                            variant="outline"
+                            className="max-w-full cursor-pointer whitespace-normal break-words bg-background px-2 py-0.5 font-normal hover:bg-accent"
+                          >
+                            {p.name}
+                          </Badge>
+                        </button>
+                      </HoverCardTrigger>
+                      <HoverCardContent
+                        side="right"
+                        align="start"
+                        sideOffset={12}
+                        className="nodrag nopan w-auto border-0 bg-transparent p-0 shadow-none"
+                      >
+                        <EntityCard data={p.preview} />
+                      </HoverCardContent>
+                    </HoverCard>
+                  ) : (
+                    <Badge
+                      key={p.id}
+                      variant="outline"
+                      className="max-w-full whitespace-normal break-words bg-background px-2 py-0.5 font-normal"
+                    >
+                      {p.name}
+                    </Badge>
+                  ),
+                )}
+              </div>
+            </div>
+          )}
         </CardContent>
       )}
-      {data.description && <CardContent>{data.description}</CardContent>}
     </Card>
   );
 }
@@ -658,13 +843,25 @@ function EntityViewInner({
     return true;
   });
 
-  const entityData = (id: string, e: EntityT): EntityData => ({
+  const entityData = (
+    id: string,
+    e: EntityT,
+    includePreviews = true,
+  ): EntityData => ({
     name: nameOf(id),
+    avatar: e.avatar ? convertFileSrc(e.avatar) : undefined,
     baseTime:
       e.base_time_humanizer !== undefined
         ? `${t.baseTime}: ${e.base_time_humanizer}`
         : undefined,
-    parents: (e.belong_to ?? []).map((b) => ({ id: b, name: nameOf(b) })),
+    parents: (e.belong_to ?? []).map((b) => ({
+      id: b,
+      name: nameOf(b),
+      preview:
+        includePreviews && doc?.entity?.[b]
+          ? entityData(b, doc.entity[b], false)
+          : undefined,
+    })),
     description: e.description,
     belongLabel: t.belongTo,
   });
@@ -761,312 +958,209 @@ function EntityViewInner({
 
 const EntityView = memo(EntityViewInner);
 
-// 事件时间轴：左列事件名，右列按 tick 比例摆条/点
-function EventGantt({
-  group,
-  events,
-  nameOf,
+type GanttBounds = {
+  start: number;
+  end: number;
+  startDisplay?: string;
+  endDisplay?: string;
+};
+
+type GanttScale = {
+  position: (tick: number) => number;
+  breaks: Array<{ start: number; end: number; label: string }>;
+};
+
+function ganttScale(events: EventItem[], origin: number): GanttScale {
+  const intervals: Array<{ start: number; end: number }> = [];
+  const labels = new Map<number, string>();
+  for (const event of events) {
+    if (event.start_tick === undefined) continue;
+    const start = event.start_tick - origin;
+    const end = (event.end_tick ?? event.start_tick) - origin;
+    labels.set(start, event.start_display ?? "");
+    labels.set(end, event.end_display ?? event.start_display ?? "");
+    intervals.push({ start, end });
+  }
+  intervals.sort((a, b) => a.start - b.start);
+  const merged: typeof intervals = [];
+  for (const interval of intervals) {
+    const previous = merged[merged.length - 1];
+    if (previous && interval.start <= previous.end) {
+      previous.end = Math.max(previous.end, interval.end);
+    } else {
+      merged.push({ ...interval });
+    }
+  }
+  const activeTicks = merged.reduce(
+    (sum, interval) => sum + interval.end - interval.start,
+    0,
+  );
+  const gaps = merged
+    .slice(1)
+    .map((interval, index) => interval.start - merged[index].end);
+  // 所有空白合计最多占活动时长的 15%；只有时间点时保留相对间距。
+  const gapLimit =
+    activeTicks > 0 && gaps.length > 0
+      ? (activeTicks * 0.15) / gaps.length
+      : Number.POSITIVE_INFINITY;
+  const segments: Array<{
+    start: number;
+    end: number;
+    offset: number;
+    length: number;
+  }> = [];
+  const compressed: Array<{ start: number; end: number; label: string }> = [];
+  let total = 0;
+  for (const [index, interval] of merged.entries()) {
+    if (index > 0) {
+      const start = merged[index - 1].end;
+      const end = interval.start;
+      const length = Math.min(end - start, gapLimit);
+      segments.push({ start, end, offset: total, length });
+      if (length < end - start) {
+        compressed.push({
+          start: total,
+          end: total + length,
+          label: `${labels.get(start)} – ${labels.get(end)}`,
+        });
+      }
+      total += length;
+    }
+    const length = interval.end - interval.start;
+    segments.push({ ...interval, offset: total, length });
+    total += length;
+  }
+  const span = Math.max(total, 1);
+  return {
+    position: (tick) => {
+      const relative = tick - origin;
+      const segment = segments.find(
+        (segment) => relative >= segment.start && relative <= segment.end,
+      );
+      if (!segment) return relative <= 0 ? 0 : 100;
+      const fraction =
+        segment.end > segment.start
+          ? (relative - segment.start) / (segment.end - segment.start)
+          : 0;
+      return ((segment.offset + fraction * segment.length) / span) * 100;
+    },
+    breaks: compressed.map((gap) => ({
+      ...gap,
+      start: (gap.start / span) * 100,
+      end: (gap.end / span) * 100,
+    })),
+  };
+}
+
+// 所有叙事线以最早事件的 tick 为原点，共用相对时间范围。
+function NarrativeGantt({
+  name,
+  nar,
+  byId,
+  bounds,
+  scale,
   t,
 }: {
-  group: string;
-  events: EventItem[];
-  nameOf: (r: string) => string;
+  name: string;
+  nar: Narrative;
+  byId: Map<string, EventItem>;
+  bounds: GanttBounds;
+  scale: GanttScale;
   t: (typeof strings)[Lang];
 }) {
-  let minTick = events[0].start_tick ?? 0;
-  let maxTick = events[0].end_tick ?? minTick;
-  for (const ev of events) {
-    const endTick = ev.end_tick ?? ev.start_tick ?? 0;
-    if ((ev.start_tick ?? 0) < minTick) minTick = ev.start_tick ?? 0;
-    if (endTick > maxTick) maxTick = endTick;
-  }
-  const range = Math.max(maxTick - minTick, 1);
-  const first = events[0];
-  const last = events[events.length - 1];
-  // 时间段/标题共用一张 hover 卡：时间、参与实体、描述
-  const card = (ev: EventItem, trigger: ReactNode) => (
+  const events = nar.flatMap((id) => {
+    const event = byId.get(id);
+    return event ? [event] : [];
+  });
+  const originTick = bounds.start;
+  const card = (event: EventItem, trigger: ReactNode) => (
     <HoverCard>
       <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
       <HoverCardContent className="w-80">
-        <div className="text-sm font-medium">{ev.title}</div>
+        <div className="text-sm font-medium">{event.id}</div>
         <div className="mt-0.5 font-mono text-xs text-muted-foreground">
-          {ev.start_display}
-          {ev.end_display && ` – ${ev.end_display}`}
+          {event.start_display}
+          {event.end_display && ` – ${event.end_display}`}
         </div>
-        {ev.entities && ev.entities.length > 0 && (
-          <div className="mt-2 space-y-1">
-            {ev.entities.map((r) => {
-              const off = ev.offsets?.find((o) => o.entity === r);
-              return (
-                <div
-                  key={r}
-                  className="flex items-baseline justify-between gap-3 rounded-md bg-muted px-2 py-1 text-xs"
-                >
-                  <span className="font-medium">{nameOf(r)}</span>
-                  <span className="text-right font-mono text-muted-foreground">
-                    {off?.start
-                      ? `Δ ${off.start}${off.end ? ` — ${off.end}` : ""}`
-                      : t.noBaseTime}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        {ev.description && (
-          <p className="mt-2 text-sm whitespace-pre-wrap">{ev.description}</p>
+        {event.description && (
+          <p className="mt-2 text-sm whitespace-pre-wrap">
+            {event.description}
+          </p>
         )}
       </HoverCardContent>
     </HoverCard>
   );
-
   return (
     <section className="min-w-0">
-      <h2 className="mb-2 text-lg font-medium">{group}</h2>
+      <h2 className="mb-2 text-lg font-medium">{name}</h2>
       <div className="overflow-hidden rounded-lg border bg-card">
         <div className="grid grid-cols-[220px_1fr] border-b bg-muted/50 text-xs text-muted-foreground">
           <div className="h-9 border-r px-3 leading-9">{t.ganttEvent}</div>
-          <div className="relative h-9">
-            <span className="absolute bottom-1 left-3 font-mono">
-              {first.start_display}
-            </span>
-            <span className="absolute right-3 bottom-1 font-mono">
-              {last.end_display ?? last.start_display}
-            </span>
+          <div className="relative flex h-9 items-end justify-between px-3 pb-1 font-mono">
+            <span>{bounds.startDisplay}</span>
+            <span>{bounds.endDisplay}</span>
+            {scale.breaks.map((gap) => (
+              <span
+                key={gap.start}
+                title={gap.label}
+                className="absolute top-0 -translate-x-1/2 bg-card px-1 font-bold"
+                style={{ left: `${(gap.start + gap.end) / 2}%` }}
+              >
+                {"//"}
+              </span>
+            ))}
           </div>
         </div>
-        {events.map((ev) => {
-          const start = ev.start_tick ?? 0;
-          const end = ev.end_tick ?? start;
-          const left = ((start - minTick) / range) * 100;
-          const width = ((end - start) / range) * 100;
+        {events.map((event) => {
+          const start = event.start_tick ?? originTick;
+          const left = scale.position(start);
+          const width = scale.position(event.end_tick ?? start) - left;
           return (
             <div
-              key={ev.id}
+              key={event.id}
               className="grid min-h-14 grid-cols-[220px_1fr] border-b last:border-b-0"
             >
               <div className="min-w-0 border-r px-3 py-2">
                 {card(
-                  ev,
+                  event,
                   <button
                     type="button"
                     className="block w-full truncate text-left text-sm font-medium outline-none hover:underline"
                   >
-                    {ev.title}
+                    {event.id}
                   </button>,
                 )}
-                {ev.entities && ev.entities.length > 0 && (
-                  <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {ev.entities.map(nameOf).join(" · ")}
-                  </div>
-                )}
+                <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                  {event.start_display}
+                </div>
               </div>
-              <div className="relative bg-[linear-gradient(to_right,color-mix(in_oklab,var(--border)_55%,transparent)_1px,transparent_1px)] bg-[size:25%_100%]">
+              <div className="relative">
+                {scale.breaks.map((gap) => (
+                  <span
+                    key={gap.start}
+                    title={gap.label}
+                    className="absolute inset-y-0 border-x border-dashed border-border bg-muted/40"
+                    style={{
+                      left: `${gap.start}%`,
+                      width: `${gap.end - gap.start}%`,
+                    }}
+                  />
+                ))}
                 {card(
-                  ev,
-                  ev.end_tick === undefined ? (
+                  event,
+                  event.end_tick === undefined ? (
                     <span
                       className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border border-primary bg-primary shadow-sm"
                       style={{ left: `clamp(6px, ${left}%, calc(100% - 6px))` }}
                     />
                   ) : (
                     <span
-                      className="absolute top-1/2 h-6 min-w-1 -translate-y-1/2 rounded-[4px] border border-primary/25 bg-primary/85 shadow-sm"
+                      className="absolute top-1/2 h-6 -translate-y-1/2 rounded-[4px] border border-primary/25 bg-primary/85 shadow-sm"
                       style={{ left: `${left}%`, width: `${width}%` }}
                     />
                   ),
                 )}
               </div>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function EventViewInner({ doc, lang }: { doc: WeftDoc | null; lang: Lang }) {
-  const t = strings[lang];
-  const nameOf = (r: string) => doc?.entity?.[r]?.id ?? r;
-  const entries = Object.entries(doc?.event ?? {})
-    .filter(([, events]) => events.length > 0)
-    .sort(([a], [b]) => a.localeCompare(b));
-  if (entries.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
-        {t.eventEmpty}
-      </div>
-    );
-  }
-  return (
-    <div className="flex h-full flex-col gap-5 overflow-auto p-4">
-      {entries.map(([group, events]) => (
-        <EventGantt
-          key={group}
-          group={group}
-          events={events}
-          nameOf={nameOf}
-          t={t}
-        />
-      ))}
-      <div className="flex items-center gap-5 text-xs text-muted-foreground">
-        <span className="flex items-center gap-2">
-          <span className="h-2.5 w-5 rounded-[3px] bg-primary/85" />
-          {t.ganttDuration}
-        </span>
-        <span className="flex items-center gap-2">
-          <span className="size-2.5 rotate-45 rounded-[1px] bg-primary" />
-          {t.ganttMilestone}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-const EventView = memo(EventViewInner);
-
-// 叙事线 gantt（复用事件页的视觉）：x 轴原点是 observer 的 base_time，
-// 事件按相对 observer 的偏移摆位；observer 无 base_time 时退化为纯列表
-function NarrativeGantt({
-  name,
-  nar,
-  byId,
-  doc,
-  nameOf,
-  t,
-}: {
-  name: string;
-  nar: Narrative;
-  byId: Map<string, EventItem>;
-  doc: WeftDoc | null;
-  nameOf: (r: string) => string;
-  t: (typeof strings)[Lang];
-}) {
-  const rows = nar.subject.map((s) => ({ s, ev: byId.get(s.event) }));
-  // observer 按 id 对回实体（后端已校验）
-  const observer = doc?.entity?.[nar.observer];
-  const based = rows.some(({ s }) => s.start_tick !== undefined);
-  // 0 = observer 的 base_time，纳入范围让原点可见
-  const ticks = based
-    ? rows
-        .flatMap(({ s }) => [s.start_tick, s.end_tick])
-        .filter((x): x is number => x !== undefined)
-    : [];
-  const min = Math.min(0, ...ticks);
-  const max = Math.max(0, ...ticks);
-  const range = Math.max(max - min, 1);
-  const zero = ((0 - min) / range) * 100;
-  const last = rows[rows.length - 1]?.s;
-
-  // 时间/偏移/描述共用一张 hover 卡
-  const card = (s: NarrativeSubject, trigger: ReactNode) => {
-    const ev = byId.get(s.event);
-    return (
-      <HoverCard>
-        <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
-        <HoverCardContent className="w-80">
-          <div className="text-sm font-medium">{ev?.title ?? s.event}</div>
-          <div className="mt-0.5 font-mono text-xs text-muted-foreground">
-            {ev?.start_display}
-            {ev?.end_display && ` – ${ev.end_display}`}
-          </div>
-          {(s.start || s.end) && (
-            <div className="mt-1 font-mono text-xs text-muted-foreground">
-              Δ {s.start}
-              {s.end && ` — ${s.end}`}
-            </div>
-          )}
-          {ev?.description && (
-            <p className="mt-2 text-sm whitespace-pre-wrap">{ev.description}</p>
-          )}
-        </HoverCardContent>
-      </HoverCard>
-    );
-  };
-
-  return (
-    <section className="min-w-0">
-      <h2 className="mb-1 text-lg font-medium">{name}</h2>
-      <p className="mb-2 text-sm text-muted-foreground">
-        {t.observer}: {nameOf(nar.observer)}
-        {observer?.base_time_humanizer &&
-          ` · ${t.baseTime} ${observer.base_time_humanizer}`}
-      </p>
-      <div className="overflow-hidden rounded-lg border bg-card">
-        <div className="grid grid-cols-[220px_1fr] border-b bg-muted/50 text-xs text-muted-foreground">
-          <div className="h-9 border-r px-3 leading-9">{t.ganttEvent}</div>
-          {based ? (
-            <div className="relative h-9">
-              <span
-                className="absolute bottom-1 -translate-x-1/2 font-mono"
-                style={{ left: `${zero}%` }}
-              >
-                {observer?.base_time_humanizer}
-              </span>
-              {last && (last.end ?? last.start) && (
-                <span className="absolute right-3 bottom-1 font-mono">
-                  Δ {last.end ?? last.start}
-                </span>
-              )}
-            </div>
-          ) : (
-            <div className="h-9 px-3 leading-9">{t.noBaseTime}</div>
-          )}
-        </div>
-        {rows.map(({ s, ev }) => {
-          const start = s.start_tick ?? 0;
-          const end = s.end_tick ?? start;
-          const left = ((start - min) / range) * 100;
-          const width = ((end - start) / range) * 100;
-          return (
-            <div
-              key={s.event}
-              className="grid min-h-14 grid-cols-[220px_1fr] border-b last:border-b-0"
-            >
-              <div className="min-w-0 border-r px-3 py-2">
-                {card(
-                  s,
-                  <button
-                    type="button"
-                    className="block w-full truncate text-left text-sm font-medium outline-none hover:underline"
-                  >
-                    {ev?.title ?? s.event}
-                  </button>,
-                )}
-                {ev?.start_display && (
-                  <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {ev.start_display}
-                  </div>
-                )}
-              </div>
-              {based ? (
-                <div className="relative bg-[linear-gradient(to_right,color-mix(in_oklab,var(--border)_55%,transparent)_1px,transparent_1px)] bg-[size:25%_100%]">
-                  <span
-                    className="absolute inset-y-0 w-px bg-primary/30"
-                    style={{ left: `${zero}%` }}
-                  />
-                  {card(
-                    s,
-                    s.end_tick === undefined ? (
-                      <span
-                        className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border border-primary bg-primary shadow-sm"
-                        style={{
-                          left: `clamp(6px, ${left}%, calc(100% - 6px))`,
-                        }}
-                      />
-                    ) : (
-                      <span
-                        className="absolute top-1/2 h-6 min-w-1 -translate-y-1/2 rounded-[4px] border border-primary/25 bg-primary/85 shadow-sm"
-                        style={{ left: `${left}%`, width: `${width}%` }}
-                      />
-                    ),
-                  )}
-                </div>
-              ) : (
-                <div className="flex items-center px-3 py-2 text-xs text-muted-foreground">
-                  {t.noBaseTime}
-                </div>
-              )}
             </div>
           );
         })}
@@ -1083,15 +1177,26 @@ function NarrativeViewInner({
   lang: Lang;
 }) {
   const t = strings[lang];
-  const nameOf = (r: string) => doc?.entity?.[r]?.id ?? r;
-  // 事件索引：id → 事件（subject 只存 id，展示数据从这里取）
-  const byId = new Map(
-    Object.values(doc?.event ?? {})
-      .flat()
-      .map((ev) => [ev.id, ev]),
-  );
+  // 事件索引：id → 展示数据
+  const events = eventItems(doc);
+  const byId = new Map(events.map((event) => [event.id, event]));
+  let first: EventItem | undefined;
+  let last: EventItem | undefined;
+  for (const event of events) {
+    if (event.start_tick === undefined) continue;
+    if (!first || event.start_tick < (first.start_tick ?? 0)) first = event;
+    const end = event.end_tick ?? event.start_tick;
+    if (!last || end > (last.end_tick ?? last.start_tick ?? 0)) last = event;
+  }
+  const bounds: GanttBounds = {
+    start: first?.start_tick ?? 0,
+    end: last?.end_tick ?? last?.start_tick ?? 0,
+    startDisplay: first?.start_display,
+    endDisplay: last?.end_display ?? last?.start_display,
+  };
+  const scale = ganttScale(events, bounds.start);
   const entries = Object.entries(doc?.narrative ?? {})
-    .filter(([, nar]) => nar.subject.length > 0)
+    .filter(([, nar]) => nar.length > 0)
     .sort(([a], [b]) => a.localeCompare(b));
   if (entries.length === 0) {
     return (
@@ -1108,8 +1213,8 @@ function NarrativeViewInner({
           name={name}
           nar={nar}
           byId={byId}
-          doc={doc}
-          nameOf={nameOf}
+          bounds={bounds}
+          scale={scale}
           t={t}
         />
       ))}

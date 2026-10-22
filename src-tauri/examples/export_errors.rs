@@ -1,4 +1,4 @@
-#[path = "../weft/errors.rs"]
+#[path = "../src/weft/errors.rs"]
 #[allow(dead_code)]
 mod errors;
 
