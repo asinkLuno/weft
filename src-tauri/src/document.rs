@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_log::log::{error, warn};
 
 use crate::calendar::Calendar;
-use crate::model::StoryDoc;
+use crate::model::WeftDoc;
 use crate::validation::{DocumentError, ValidationError};
 
 const EVENT: &str = "document-changed";
@@ -52,7 +52,7 @@ fn parse(content: &str, base: &Path, lang: &str) -> Result<Value, DocumentError>
     let yaml: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(content).map_err(DocumentError::raw)?;
     // 序列化 model.rs 声明过的结构：未知键在这里被滤掉
-    let mut doc = StoryDoc::from_yaml(&yaml)?;
+    let mut doc = WeftDoc::from_yaml(&yaml)?;
     // 加载历法并解析所有时间：历法错误等同 YAML 错误，阻止展示
     let mode = doc
         .story
@@ -118,7 +118,7 @@ fn parse(content: &str, base: &Path, lang: &str) -> Result<Value, DocumentError>
         events.sort_by_key(|e| e.start_tick.unwrap_or(i64::MAX));
     }
     // 叙事线：subject 事件相对 observer base_time 的偏移（tick 定位 + humanize 展示）
-    let StoryDoc {
+    let WeftDoc {
         entity,
         event,
         narrative,
@@ -168,7 +168,7 @@ fn parse(content: &str, base: &Path, lang: &str) -> Result<Value, DocumentError>
 
 // 可计算标签：按各实体 base_time 执行脚本，归属链 chain[0] 并入 belong_to，其余逐级生成缺失实体
 fn apply_calculable_tags(
-    doc: &mut StoryDoc,
+    doc: &mut WeftDoc,
     base: &Path,
     mode: &str,
     lang: &str,

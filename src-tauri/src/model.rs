@@ -9,7 +9,7 @@ use crate::validation::{DocumentError, ValidationError};
 
 // YAML 数据模型：顶层键逐个补齐，未知键在反序列化时滤掉。
 #[derive(Debug, Serialize)]
-pub struct StoryDoc {
+pub struct WeftDoc {
     pub story: Story,
     pub entity: HashMap<String, Entity>,
     // 关系分组：组名 → 关系对列表
@@ -33,7 +33,7 @@ pub struct StoryDoc {
 }
 
 #[derive(Deserialize)]
-struct RawStoryDoc {
+struct RawWeftDoc {
     story: Story,
     #[serde(default)]
     entity: HashMap<String, Entity>,
@@ -49,9 +49,9 @@ struct RawStoryDoc {
     calculable_tag: HashMap<String, CalendarSpec>,
 }
 
-impl StoryDoc {
+impl WeftDoc {
     pub fn from_yaml(yaml: &Value) -> Result<Self, DocumentError> {
-        let raw = RawStoryDoc::deserialize(yaml).map_err(DocumentError::raw)?;
+        let raw = RawWeftDoc::deserialize(yaml).map_err(DocumentError::raw)?;
         // 所有「引用的 id 不存在」检查集中在最先：引用断了，后面的结构检查没有报告价值
         check_references(&raw)?;
         check_acyclic(&raw.entity)?;
@@ -117,7 +117,7 @@ impl StoryDoc {
             }
             event.insert(group, list);
         }
-        Ok(StoryDoc {
+        Ok(WeftDoc {
             story: raw.story,
             entity: raw.entity,
             entity_link: raw.entity_link,
@@ -340,7 +340,7 @@ fn resolve_event(
 
 // 所有「引用的 id 不存在」检查集中在此：belong_to、entity_link、event 参与实体、
 // narrative 的 observer 与 subject。先于结构检查（成环、标题重复）报告
-fn check_references(raw: &RawStoryDoc) -> Result<(), DocumentError> {
+fn check_references(raw: &RawWeftDoc) -> Result<(), DocumentError> {
     for (id, entity) in &raw.entity {
         for target in &entity.belong_to {
             if !raw.entity.contains_key(target) {

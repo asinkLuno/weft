@@ -66,7 +66,7 @@ type DocumentPayload = {
 };
 
 // 后端已按 src-tauri/src/model.rs 校验并滤掉未声明键，这里只读序列化结果
-type StoryDoc = {
+type WeftDoc = {
   story?: {
     title?: string;
     description?: string;
@@ -140,7 +140,7 @@ type Tab = (typeof TABS)[number];
 // 常驻错误提示：不自动消失，可手动关闭，下一条正常事件时清除
 function App() {
   const [path, setPath] = useState<string | null>(null);
-  const [doc, setDoc] = useState<StoryDoc | null>(null);
+  const [doc, setDoc] = useState<WeftDoc | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("tab1");
   // 各页首次激活才挂载、之后常驻（实体画布要在页面可见时挂载才有尺寸可取景）
   const [visited, setVisited] = useState<ReadonlySet<Tab>>(
@@ -214,7 +214,7 @@ function App() {
       setActiveError(null);
       // 有解析结果说明文件内容更新了，短暂变色提示
       if (nextDoc !== undefined) {
-        setDoc((nextDoc as StoryDoc) ?? null);
+        setDoc((nextDoc as WeftDoc) ?? null);
         setFlash(true);
         clearTimeout(flashTimer.current);
         flashTimer.current = setTimeout(() => setFlash(false), 400);
@@ -245,7 +245,7 @@ function App() {
         path: p,
       });
       setPath(p);
-      setDoc((payload.doc as StoryDoc) ?? null);
+      setDoc((payload.doc as WeftDoc) ?? null);
       setActiveError(payload.error ?? null);
       remember(p);
     } catch (err) {
@@ -350,7 +350,7 @@ function App() {
   );
 }
 
-function StoryView({ doc, lang }: { doc: StoryDoc; lang: Lang }) {
+function StoryView({ doc, lang }: { doc: WeftDoc; lang: Lang }) {
   const t = strings[lang];
   const story = doc.story;
   if (!story) return null;
@@ -373,7 +373,7 @@ function StoryView({ doc, lang }: { doc: StoryDoc; lang: Lang }) {
 }
 
 // 实体卡片节点：数据在 EntityView 里解析好，这里只管展示
-type EntityT = NonNullable<StoryDoc["entity"]>[string];
+type EntityT = NonNullable<WeftDoc["entity"]>[string];
 type EntityData = {
   name: string;
   baseTime?: string;
@@ -544,7 +544,7 @@ function EntityViewInner({
   lang,
   path,
 }: {
-  doc: StoryDoc | null;
+  doc: WeftDoc | null;
   lang: Lang;
   path: string;
 }) {
@@ -875,7 +875,7 @@ function EventGantt({
   );
 }
 
-function EventViewInner({ doc, lang }: { doc: StoryDoc | null; lang: Lang }) {
+function EventViewInner({ doc, lang }: { doc: WeftDoc | null; lang: Lang }) {
   const t = strings[lang];
   const nameOf = (r: string) => doc?.entity?.[r]?.name ?? r;
   const entries = Object.entries(doc?.event ?? {})
@@ -928,7 +928,7 @@ function NarrativeGantt({
   name: string;
   nar: Narrative;
   byId: Map<string, EventItem>;
-  doc: StoryDoc | null;
+  doc: WeftDoc | null;
   nameOf: (r: string) => string;
   t: (typeof strings)[Lang];
 }) {
@@ -1069,7 +1069,7 @@ function NarrativeViewInner({
   doc,
   lang,
 }: {
-  doc: StoryDoc | null;
+  doc: WeftDoc | null;
   lang: Lang;
 }) {
   const t = strings[lang];
