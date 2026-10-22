@@ -52,20 +52,20 @@ entity:
     description: 大难不死的男孩，入学当晚被分院帽分入格兰芬多。
     base_time: [1980, 7, 31]
     belong_to: [gryffindor]
-    # 材料：按 base_time 计算，归属链写进 belong_to（哈利 → 狮子座 → 星座，星座实体自动生成）
-    materials: [constellation]
+    # 可计算标签：按 base_time 计算，归属链写进 belong_to（哈利 → 狮子座 → 星座，星座实体自动生成）
+    calculable_tags: [constellation]
   ron:
     name: 罗恩·韦斯莱
     description: 哈利在火车上结识的好友，韦斯莱家幼子。
     base_time: [1980, 3, 1]
     belong_to: [gryffindor]
-    materials: [constellation]
+    calculable_tags: [constellation]
   hermione:
     name: 赫敏·格兰杰
     description: 麻瓜出身、成绩拔尖的女巫，与哈利罗恩同寝。
     base_time: [1979, 9, 19]
     belong_to: [gryffindor]
-    materials: [constellation]
+    calculable_tags: [constellation]
   neville:
     name: 纳威·隆巴顿
     description: 健忘胆小的同院同学，蟾蜍莱夫总在跑丢。
@@ -82,7 +82,7 @@ entity:
     description: 纯血世家出身的傲慢男生，入学前就想拉拢哈利。
     base_time: [1980, 6, 5]
     belong_to: [slytherin]
-    materials: [constellation]
+    calculable_tags: [constellation]
   crabbe:
     name: 文森特·克拉布
     description: 德拉科的跟班，胳膊粗脑子钝。
@@ -110,11 +110,11 @@ entity:
     description: 放弃麻瓜私立名校来读霍格沃茨的赫奇帕奇学生。
     belong_to: [hufflepuff]
 
-# 材料：注册名 → rhai 脚本清单（相对故事文件），与 calendar 同构；
-# 脚本入口固定 fn material(ctx)，ctx = { api, date_mode, entity: { id, name, base_time, … } }，
+# 可计算标签：注册名 → rhai 脚本清单（相对故事文件），与 calendar 同构；
+# 脚本入口固定 fn calculable_tag(ctx)，ctx = { api, date_mode, entity: { id, name, base_time, … } }，
 # 返回字符串列表当归属链：实体 → chain[0] → chain[1] …，缺失的环上实体自动生成。
 # 内置 constellation / constellation_cn / constellation_en 免注册，按 base_time 算十二星座（需写全 年月日）。
-material: {}
+calculable_tag: {}
 
 # 实体关系：按组组织，每组是一批关系对；引用写实体 id 或名称都行
 entity_link:

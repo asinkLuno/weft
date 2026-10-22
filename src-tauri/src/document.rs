@@ -72,7 +72,7 @@ fn parse(content: &str, base: &Path) -> Result<Value, DocumentError> {
             entity.base_time = Some(normalized);
         }
     }
-    apply_materials(&mut doc, base, &mode)?;
+    apply_calculable_tags(&mut doc, base, &mode)?;
     // 事件：展平相对时间 → 归一化 → tick（排序与先后校验的基准）→ humanize
     for events in doc.event.values_mut() {
         for ev in &mut *events {
@@ -169,15 +169,15 @@ fn parse(content: &str, base: &Path) -> Result<Value, DocumentError> {
     serde_json::to_value(doc).map_err(DocumentError::raw)
 }
 
-// 材料：按各实体 base_time 执行脚本，归属链 chain[0] 并入 belong_to，其余逐级生成缺失实体
-fn apply_materials(doc: &mut StoryDoc, base: &Path, mode: &str) -> Result<(), DocumentError> {
-    if doc.material.is_empty() && doc.entity.values().all(|e| e.materials.is_empty()) {
+// 可计算标签：按各实体 base_time 执行脚本，归属链 chain[0] 并入 belong_to，其余逐级生成缺失实体
+fn apply_calculable_tags(doc: &mut StoryDoc, base: &Path, mode: &str) -> Result<(), DocumentError> {
+    if doc.calculable_tag.is_empty() && doc.entity.values().all(|e| e.calculable_tags.is_empty()) {
         return Ok(());
     }
-    let runtime = crate::material::MaterialRuntime::load(&doc.material, base)?;
+    let runtime = crate::calculable_tag::CalculableTagRuntime::load(&doc.calculable_tag, base)?;
     let ids: Vec<String> = doc.entity.keys().cloned().collect();
     for id in ids {
-        for name in doc.entity[&id].materials.clone() {
+        for name in doc.entity[&id].calculable_tags.clone() {
             let entity = &doc.entity[&id];
             let context = serde_json::json!({
                 "api": 1,
@@ -190,13 +190,13 @@ fn apply_materials(doc: &mut StoryDoc, base: &Path, mode: &str) -> Result<(), Do
                     "belong_to": entity.belong_to,
                 },
             });
-            let chain = runtime.material(&name, &context)?;
+            let chain = runtime.calculable_tag(&name, &context)?;
             let chain: Vec<String> = serde_json::from_value(chain)
-                .map_err(|_| format!("材料 `{name}` 必须返回字符串列表（归属链）"))?;
+                .map_err(|_| format!("可计算标签 `{name}` 必须返回字符串列表（归属链）"))?;
             apply_chain(&mut doc.entity, &id, &chain)?;
         }
     }
-    // 材料生成的归属可能成环（比如把实体自己算进链里），复查 belong_to 无环
+    // 可计算标签生成的归属可能成环（比如把实体自己算进链里），复查 belong_to 无环
     crate::model::check_acyclic(&doc.entity)
 }
 
@@ -223,13 +223,13 @@ fn apply_chain(
                 base_time_display: None,
                 description: None,
                 belong_to: chain.get(i + 1).cloned().into_iter().collect(),
-                materials: Vec::new(),
+                calculable_tags: Vec::new(),
             },
         );
     }
     let owner = entity
         .get_mut(id)
-        .ok_or_else(|| format!("材料归属链引用了不存在的实体 `{id}`"))?;
+        .ok_or_else(|| format!("可计算标签归属链引用了不存在的实体 `{id}`"))?;
     if !owner.belong_to.contains(first) {
         owner.belong_to.push(first.clone());
     }

@@ -600,7 +600,7 @@ function EntityViewInner({
   const activePick =
     dim === "belong" && pick && targets.includes(pick) ? pick : null;
 
-  // 归属目标按顶层祖先分组：霍格沃茨 → 四学院一组，材料生成的维度（星座）各自成组，
+  // 归属目标按顶层祖先分组：霍格沃茨 → 四学院一组，可计算标签生成的维度（星座）各自成组，
   // 组内按层级深度排（根在前），组间在前端画分隔线
   const byRoot: Record<string, Array<{ v: string; label: string }>> = {};
   for (const tg of targets) {

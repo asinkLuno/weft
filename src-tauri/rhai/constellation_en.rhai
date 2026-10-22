@@ -1,6 +1,6 @@
-// Built-in material: twelve constellations (English) — returns the belong_to chain [sign, "Zodiac"]
+// Built-in calculable tag: twelve constellations (English) — returns the belong_to chain [sign, "Zodiac"]
 
-fn material(ctx) {
+fn calculable_tag(ctx) {
     // names[m] is the sign for the first half of month m+1; cutoff[m] is the switchover day
     let names = ["Capricorn", "Aquarius", "Pisces", "Aries", "Taurus", "Gemini",
                  "Cancer", "Leo", "Virgo", "Libra", "Scorpio", "Sagittarius"];

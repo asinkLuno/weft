@@ -243,7 +243,7 @@ impl Calendar {
     }
 }
 
-// 脚本来自用户文件，限制资源防止失控（材料脚本同款，material.rs 复用）
+// 脚本来自用户文件，限制资源防止失控（可计算标签脚本同款，calculable_tag.rs 复用）
 pub(crate) fn limited_engine() -> Engine {
     let mut engine = Engine::new();
     engine.set_max_expr_depths(64, 32);
