@@ -6,7 +6,7 @@ fn sign_ids() {
 }
 
 fn calculable_tag(ctx) {
-    if !ctx.date_mode.starts_with("gregorian") {
+    if ctx.date_mode != () {
         throw humanizer("calendar_error", ctx.date_mode, ctx.language);
     }
     let bt = ctx.entity.base_time;

@@ -12,18 +12,11 @@ use crate::weft::phase::Phase;
 pub struct Entity {
     pub name: Option<String>,
     // 原始 Phase 用于偏移运算，展示归一化不会改写它。
-    #[serde(
-        default,
-        rename = "base_time",
-        skip_serializing,
-        deserialize_with = "deserialize_base_phase"
-    )]
-    pub base_phase: Option<Phase>,
-    #[serde(skip_deserializing)]
-    pub base_time: Option<Vec<i64>>,
+    #[serde(default, deserialize_with = "deserialize_base_time")]
+    pub base_time: Option<Phase>,
     // humanize 结果，加载历法后由 apply_times 填充，不来自 YAML
     #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
-    pub base_time_display: Option<String>,
+    pub base_time_humanizer: Option<String>,
     pub description: Option<String>,
     // 归属的上层实体 id 列表（如人物 → 团体）；可计算标签算出的归属也并到这里，不单独存
     #[serde(default)]
@@ -113,7 +106,7 @@ pub(crate) fn check_acyclic(graph: &HashMap<String, Entity>) -> Result<(), Docum
 }
 
 // 单个整数仍等价于单分量 Phase；列表支持递归嵌套。
-fn deserialize_base_phase<'de, D>(d: D) -> Result<Option<Phase>, D::Error>
+fn deserialize_base_time<'de, D>(d: D) -> Result<Option<Phase>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -134,10 +127,9 @@ pub(crate) fn apply_times(
     cal: &Calendar,
 ) -> Result<(), DocumentError> {
     for entity in entity.values_mut() {
-        if let Some(phase) = &entity.base_phase {
+        if let Some(phase) = &entity.base_time {
             let normalized = cal.normalize(&phase.flatten(cal.component_count())?)?;
-            entity.base_time_display = Some(cal.humanize(&normalized)?);
-            entity.base_time = Some(normalized);
+            entity.base_time_humanizer = Some(cal.humanize(&normalized)?);
         }
     }
     Ok(())
@@ -145,5 +137,5 @@ pub(crate) fn apply_times(
 
 // 按实体 id 取 base_time；事件与叙事线都要拿它算偏移
 pub(crate) fn resolve_base<'a>(entity: &'a HashMap<String, Entity>, id: &str) -> Option<&'a Phase> {
-    entity.get(id).and_then(|e| e.base_phase.as_ref())
+    entity.get(id).and_then(|e| e.base_time.as_ref())
 }

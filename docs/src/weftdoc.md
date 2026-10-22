@@ -11,8 +11,7 @@ WeftDoc 是 Weft 的故事文档格式：一个 YAML 文件（习惯命名 `stor
 | `entity_link` | 实体关系对，按组组织 |
 | `event` | 事件，按组组织，事件 id 为 `组名/标题` |
 | `narrative` | 叙事线：以观察者实体的时间为基准展开的事件序列 |
-| `calendar` | 自定义历法注册表，见 [Rhai 历法脚本](rhai-calendar.md) |
-| `calculable_tag` | 可计算标签注册表，与 `calendar` 同构，见 [Calculable tags 脚本](rhai-calculable-tags.md) |
+| `calculable_tag` | 可计算标签注册表，见 [Calculable tags 脚本](rhai-calculable-tags.md) |
 
 除 `story` 外都可以省略。反序列化时未声明的顶层键会被静默滤掉。
 
@@ -31,11 +30,11 @@ WeftDoc 是 Weft 的故事文档格式：一个 YAML 文件（习惯命名 `stor
 
 1. 反序列化成 `WeftDoc`，未知键滤掉；
 2. 按段检查：story → entity → event → narrative，每段先引用后结构，断开的引用按段批量报出——
-   - story：`date_mode` 指向存在的历法（内置 gregorian 或顶层 `calendar` 注册名）；
+   - story：通过 `date_mode` 的脚本路径加载历法，留空则使用内置公历，并提前加载可计算标签插件；
    - entity：`belong_to` 与 `entity_link` 引用的实体存在，归属图无环；
    - event：参与实体存在，事件标题全局唯一；
    - narrative：`observer` 与 `subject` 引用的事件、实体存在；
-3. 加载 `story.date_mode` 所指历法，把所有时间归一化、算出可比较的刻度与展示文案；
+3. 使用已加载的历法，把所有时间归一化、算出可比较的刻度与展示文案；
 4. 执行可计算标签，把算出的归属链并入实体的 `belong_to`；
 5. 序列化成 JSON 交给前端。
 

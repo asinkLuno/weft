@@ -16,7 +16,8 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_log::log::{error, warn};
 
-use crate::calendar::{Calendar, CalendarMetadata};
+use crate::calculable_tag::CalculableTagRuntime;
+use crate::calendar::Calendar;
 use crate::weft::entity::{self, Entity, EntityLink, check as check_entity};
 use crate::weft::errors::{DocumentError, ValidationError};
 use crate::weft::event::{
@@ -26,7 +27,7 @@ use crate::weft::narrative::{
     self, Narrative, RawNarrative, check as check_narrative, resolve_narratives,
 };
 use crate::weft::plugin::CalendarSpec;
-use crate::weft::story::{Story, check as check_story};
+use crate::weft::story::{Story, StoryPlugins};
 
 // YAML 数据模型：顶层键逐个补齐，未知键在反序列化时滤掉。
 #[derive(Debug, Serialize)]
@@ -36,10 +37,7 @@ pub struct WeftDoc {
     // 关系分组：组名 → 关系对列表
     #[serde(default)]
     pub entity_link: HashMap<String, Vec<EntityLink>>,
-    // 自定义历法注册表：注册名 → Rhai 脚本清单（相对故事文件的路径）
-    #[serde(default)]
-    pub calendar: HashMap<String, CalendarSpec>,
-    // 可计算标签注册表：注册名 → Rhai 脚本清单（与 calendar 同构），按实体 base_time 计算归属
+    // 可计算标签注册表：注册名 → Rhai 脚本清单，按实体 base_time 计算归属
     #[serde(default)]
     pub calculable_tag: HashMap<String, CalendarSpec>,
     // 事件分组：组名 → 按 tick 排序的事件列表
@@ -48,9 +46,12 @@ pub struct WeftDoc {
     // 叙事线：组名 → 相对 observer base_time 展开的事件时间轴
     #[serde(default)]
     pub narrative: BTreeMap<String, Narrative>,
-    // 运行时填充：story.date_mode 所指历法的元数据，不来自 YAML
+    // 运行时填充：所选历法的时间分量数，不来自 YAML
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub calendar_meta: Option<CalendarMetadata>,
+    pub calendar_components: Option<usize>,
+    // 当前语言的动态展示信息，由历法 serialize 生成。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar_display: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -65,17 +66,22 @@ struct RawWeftDoc {
     #[serde(default)]
     narrative: HashMap<String, RawNarrative>,
     #[serde(default)]
-    calendar: HashMap<String, CalendarSpec>,
-    #[serde(default)]
     calculable_tag: HashMap<String, CalendarSpec>,
 }
 
 impl WeftDoc {
-    pub fn from_yaml(yaml: &serde_yaml_ng::Value) -> Result<Self, DocumentError> {
+    fn from_yaml(
+        yaml: &serde_yaml_ng::Value,
+        base: &Path,
+        gregorian: &Path,
+        lang: &str,
+    ) -> Result<(Self, StoryPlugins), DocumentError> {
         let raw = RawWeftDoc::deserialize(yaml).map_err(DocumentError::raw)?;
         // 按段检查：story → entity → event → narrative；每段先引用后结构，
         // 前面的段不成立，后面段的问题没有报告价值
-        check_story(&raw.story, &raw.calendar)?;
+        let plugins = raw
+            .story
+            .load_plugins(&raw.calculable_tag, base, gregorian, lang)?;
         check_entity(&raw.entity, &raw.entity_link)?;
         // 标题索引只含名字不含事件体，event 与 narrative 的检查、重写都单独对它做
         let index = build_event_index(&raw.event);
@@ -83,16 +89,17 @@ impl WeftDoc {
         check_narrative(&raw.narrative, &raw.entity, &index)?;
         let narrative = resolve_narratives(raw.narrative, &index);
         let event = build_events(raw.event)?;
-        Ok(WeftDoc {
+        let doc = WeftDoc {
             story: raw.story,
             entity: raw.entity,
             entity_link: raw.entity_link,
             event,
             narrative,
-            calendar: raw.calendar,
             calculable_tag: raw.calculable_tag,
-            calendar_meta: None,
-        })
+            calendar_components: None,
+            calendar_display: None,
+        };
+        Ok((doc, plugins))
     }
 }
 
@@ -134,37 +141,56 @@ impl DocumentPayload {
     }
 }
 
-fn parse(content: &str, base: &Path, lang: &str) -> Result<Value, DocumentError> {
+fn parse(app: &AppHandle, content: &str, base: &Path, lang: &str) -> Result<Value, DocumentError> {
     let yaml: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(content).map_err(DocumentError::raw)?;
     // 序列化 weft_doc.rs 声明过的结构：未知键在这里被滤掉
-    let mut doc = WeftDoc::from_yaml(&yaml)?;
-    // 加载历法并解析所有时间：历法错误等同 YAML 错误，阻止展示
-    let mode = doc.story.date_mode().to_owned();
-    let cal = Calendar::load(&mode, doc.calendar.get(&mode), base, lang)?;
-    doc.calendar_meta = Some(cal.metadata());
-    entity::apply_times(&mut doc.entity, &cal)?;
-    apply_calculable_tags(&mut doc, base, &mode, lang)?;
-    event::apply_times(&mut doc.event, &doc.entity, &cal)?;
-    narrative::apply_times(&mut doc.narrative, &doc.entity, &doc.event, &cal)?;
+    let gregorian = app
+        .path()
+        .resolve(
+            crate::calendar::GREGORIAN,
+            tauri::path::BaseDirectory::Resource,
+        )
+        .map_err(DocumentError::raw)?;
+    let (mut doc, plugins) = WeftDoc::from_yaml(&yaml, base, &gregorian, lang)?;
+    // 插件已在 story 阶段加载完毕，按所选历法解析所有时间。
+    let mode = doc.story.date_mode().map(str::to_owned);
+    let cal = &plugins.calendar;
+    doc.calendar_components = Some(cal.component_count());
+    doc.calendar_display = Some(cal.serialize(lang)?);
+    entity::apply_times(&mut doc.entity, cal)?;
+    apply_calculable_tags(
+        &mut doc,
+        &plugins.calculable_tags,
+        mode.as_deref(),
+        lang,
+        cal,
+    )?;
+    event::apply_times(&mut doc.event, &doc.entity, cal)?;
+    narrative::apply_times(&mut doc.narrative, &doc.entity, &doc.event, cal)?;
     serde_json::to_value(doc).map_err(DocumentError::raw)
 }
 
 // 可计算标签：按各实体 base_time 执行脚本，归属链 chain[0] 并入 belong_to，其余逐级生成缺失实体
 fn apply_calculable_tags(
     doc: &mut WeftDoc,
-    base: &Path,
-    mode: &str,
+    runtime: &CalculableTagRuntime,
+    mode: Option<&str>,
     lang: &str,
+    cal: &Calendar,
 ) -> Result<(), DocumentError> {
     if doc.calculable_tag.is_empty() && doc.entity.values().all(|e| e.calculable_tags.is_empty()) {
         return Ok(());
     }
-    let runtime = crate::calculable_tag::CalculableTagRuntime::load(&doc.calculable_tag, base)?;
     let ids: Vec<String> = doc.entity.keys().cloned().collect();
     for id in ids {
         for name in doc.entity[&id].calculable_tags.clone() {
             let entity = &doc.entity[&id];
+            let base_time = entity
+                .base_time
+                .as_ref()
+                .map(|phase| cal.normalize(&phase.flatten(cal.component_count())?))
+                .transpose()?;
             let context = serde_json::json!({
                 "api": 1,
                 "date_mode": mode,
@@ -172,7 +198,7 @@ fn apply_calculable_tags(
                 "entity": {
                     "id": id,
                     "name": entity.name,
-                    "base_time": entity.base_time,
+                    "base_time": base_time,
                     "description": entity.description,
                     "belong_to": entity.belong_to,
                 },
@@ -227,9 +253,8 @@ fn apply_chain(
             target.clone(),
             Entity {
                 name: Some(target.clone()),
-                base_phase: None,
                 base_time: None,
-                base_time_display: None,
+                base_time_humanizer: None,
                 description: None,
                 belong_to: ids.get(i + 1).cloned().into_iter().collect(),
                 calculable_tags: Vec::new(),
@@ -247,12 +272,13 @@ fn apply_chain(
 }
 
 fn read_doc(
+    app: &AppHandle,
     path: &Path,
     lang: &str,
 ) -> Result<(String, Result<Value, DocumentError>), DocumentError> {
     let content = fs::read_to_string(path).map_err(DocumentError::raw)?;
     // 语法错误不算绑定失败：正常进入展示页，错误原样带给前端
-    let parsed = parse(&content, path.parent().unwrap_or(Path::new(".")), lang);
+    let parsed = parse(app, &content, path.parent().unwrap_or(Path::new(".")), lang);
     Ok((content, parsed))
 }
 
@@ -282,6 +308,7 @@ fn push_changed(app: &AppHandle, path: &Path) {
         }
     }
     let payload = match parse(
+        app,
         &content,
         path.parent().unwrap_or(Path::new(".")),
         &crate::current_lang(app),
@@ -306,7 +333,7 @@ pub fn refresh_language(app: &AppHandle) {
         st.path.clone()
     };
     let Some(path) = path else { return };
-    let payload = match read_doc(&path, &crate::current_lang(app)) {
+    let payload = match read_doc(app, &path, &crate::current_lang(app)) {
         Ok((content, Ok(doc))) => DocumentPayload::ready(doc, content),
         Ok((_, Err(error))) | Err(error) => DocumentPayload::failed(error, None),
     };
@@ -320,9 +347,10 @@ pub fn bind_document(
     path: String,
 ) -> Result<DocumentPayload, DocumentError> {
     let path = PathBuf::from(path);
-    let (content, parsed) = read_doc(&path, &crate::current_lang(&app)).inspect_err(|error| {
-        error!("failed to read document {}: {error}", path.display());
-    })?;
+    let (content, parsed) =
+        read_doc(&app, &path, &crate::current_lang(&app)).inspect_err(|error| {
+            error!("failed to read document {}: {error}", path.display());
+        })?;
 
     // 监听父目录再按路径过滤：直接 watch 单文件会漏掉 rename 型写入（我们的原子写就是 rename）
     let target = path.clone();
@@ -385,6 +413,7 @@ pub fn save_document(
         .ok_or(DocumentError::validation(ValidationError::DocumentNotBound))?;
     // 非法 YAML / 历法错误不落盘；目录取自当前绑定，保存不改路径
     parse(
+        &app,
         &content,
         path.parent().unwrap_or(Path::new(".")),
         &crate::current_lang(&app),

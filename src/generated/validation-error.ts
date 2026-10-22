@@ -20,22 +20,14 @@ export type ValidationError =
   | { code: "time_nonempty_list" }
   | { code: "time_integer_component" }
   | { code: "event_end_before_start"; params: { event: string } }
-  | { code: "unregistered_calendar"; params: { calendar: string } }
+  | { code: "invalid_calendar_path"; params: { path: string } }
   | { code: "invalid_plugin_spec"; params: { name: string; kind: string } }
-  | {
-      code: "calendar_components_not_positive_integer";
-      params: { calendar: string };
-    }
   | { code: "calendar_components_out_of_range"; params: { calendar: string } }
   | { code: "calendar_file_read"; params: { calendar: string; source: string } }
   | { code: "calendar_compile"; params: { calendar: string; source: string } }
   | {
       code: "calendar_call";
       params: { calendar: string; entry: string; source: string };
-    }
-  | {
-      code: "calendar_invalid_metadata";
-      params: { calendar: string; source: string };
     }
   | {
       code: "calendar_invalid_return";

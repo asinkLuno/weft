@@ -9,7 +9,6 @@ Calculable tag 根据实体数据算出一条归属链。计算先返回稳定�
 ```yaml
 story:
   title: 示例
-  date_mode: gregorian
 
 calculable_tag:
   age_group:
@@ -47,7 +46,7 @@ entity:
 | 字段 | 内容 |
 | --- | --- |
 | `api` | 数字 `1` |
-| `date_mode` | 故事当前历法名；省略时为 `gregorian` |
+| `date_mode` | 自定义历法脚本路径；使用内置公历时为空值 |
 | `language` | 应用设置语言，`zh` 或 `en` |
 | `entity.id` | 实体 ID |
 | `entity.name` | 实体名称；未填写时为空值 |

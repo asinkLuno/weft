@@ -66,18 +66,22 @@ type DocumentPayload = {
 };
 
 // 后端已按 src-tauri/src/model.rs 校验并滤掉未声明键，这里只读序列化结果
+type Phase = {
+  components: number[];
+  anchor: Phase | null;
+};
+
 type WeftDoc = {
   story?: {
     title?: string;
     description?: string;
     author?: string;
   };
-  // story.date_mode 所指历法的元数据（后端解析时填充）
-  calendar_meta?: {
-    name?: string;
+  // 所选历法的时间分量数（后端解析时填充）
+  calendar_components?: number;
+  calendar_display?: {
     title?: string;
     description?: string;
-    components?: number;
   };
   entity?: Record<
     string,
@@ -85,8 +89,8 @@ type WeftDoc = {
       name?: string;
       description?: string;
       belong_to?: string[];
-      base_time?: number[];
-      base_time_display?: string;
+      base_time?: Phase | null;
+      base_time_humanizer?: string;
     }
   >;
   entity_link?: Record<
@@ -368,10 +372,13 @@ function StoryView({ doc, lang }: { doc: WeftDoc; lang: Lang }) {
           {t.author}: {story.author}
         </p>
       )}
-      {doc.calendar_meta?.title && (
+      {doc.calendar_display?.title && (
         <p className="story-author">
-          {t.calendar}: {doc.calendar_meta.title}
+          {t.calendar}: {doc.calendar_display.title}
         </p>
+      )}
+      {doc.calendar_display?.description && (
+        <p className="story-desc">{doc.calendar_display.description}</p>
       )}
     </div>
   );
@@ -656,8 +663,8 @@ function EntityViewInner({
   const entityData = (id: string, e: EntityT): EntityData => ({
     name: nameOf(id),
     baseTime:
-      e.base_time_display !== undefined
-        ? `${t.baseTime}: ${e.base_time_display}`
+      e.base_time_humanizer !== undefined
+        ? `${t.baseTime}: ${e.base_time_humanizer}`
         : undefined,
     parents: (e.belong_to ?? []).map((b) => ({ id: b, name: nameOf(b) })),
     description: e.description,
@@ -984,8 +991,8 @@ function NarrativeGantt({
       <h2 className="mb-1 text-lg font-medium">{name}</h2>
       <p className="mb-2 text-sm text-muted-foreground">
         {t.observer}: {nameOf(nar.observer)}
-        {observer?.base_time_display &&
-          ` · ${t.baseTime} ${observer.base_time_display}`}
+        {observer?.base_time_humanizer &&
+          ` · ${t.baseTime} ${observer.base_time_humanizer}`}
       </p>
       <div className="overflow-hidden rounded-lg border bg-card">
         <div className="grid grid-cols-[220px_1fr] border-b bg-muted/50 text-xs text-muted-foreground">
@@ -996,7 +1003,7 @@ function NarrativeGantt({
                 className="absolute bottom-1 -translate-x-1/2 font-mono"
                 style={{ left: `${zero}%` }}
               >
-                {observer?.base_time_display}
+                {observer?.base_time_humanizer}
               </span>
               {last && (last.end ?? last.start) && (
                 <span className="absolute right-3 bottom-1 font-mono">

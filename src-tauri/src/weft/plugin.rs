@@ -1,7 +1,7 @@
 use crate::weft::errors::ValidationError;
 use serde::{Deserialize, Serialize};
 
-// 顶层 calendar / calculable_tag 共用的插件清单：rhai 脚本 + 固定入口约定
+// 顶层 calculable_tag 的插件清单：rhai 脚本 + 固定入口约定
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CalendarSpec {
     pub runtime: String,

@@ -32,12 +32,10 @@ pub enum ValidationError {
     TimeIntegerComponent,
     #[error("event {event} ends before it starts")]
     EventEndBeforeStart { event: String },
-    #[error("unregistered calendar: {calendar}")]
-    UnregisteredCalendar { calendar: String },
+    #[error("calendar path must point to an existing .rhai file: {path}")]
+    InvalidCalendarPath { path: String },
     #[error("invalid {kind} plugin specification: {name}")]
     InvalidPluginSpec { name: String, kind: String },
-    #[error("calendar {calendar} must have a positive component count")]
-    CalendarComponentsNotPositiveInteger { calendar: String },
     #[error("calendar {calendar} component count is out of range")]
     CalendarComponentsOutOfRange { calendar: String },
     #[error("failed to read calendar {calendar}: {details}")]
@@ -56,12 +54,6 @@ pub enum ValidationError {
     CalendarCall {
         calendar: String,
         entry: String,
-        #[serde(rename = "source")]
-        details: String,
-    },
-    #[error("invalid metadata from calendar {calendar}: {details}")]
-    CalendarInvalidMetadata {
-        calendar: String,
         #[serde(rename = "source")]
         details: String,
     },
