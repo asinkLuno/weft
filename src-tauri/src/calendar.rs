@@ -35,17 +35,23 @@ impl std::fmt::Debug for RhaiCalendar {
 }
 
 impl RhaiCalendar {
-    pub fn load(name: &str, path: &Path) -> Result<Self, String> {
-        let script = fs::read_to_string(path)
-            .map_err(|error| format!("读取历法 {} 失败: {error}", path.display()))?;
+    pub fn load(name: &str, path: &Path) -> Result<Self, ValidationError> {
+        let script =
+            fs::read_to_string(path).map_err(|error| ValidationError::CalendarFileRead {
+                calendar: name.into(),
+                details: error.to_string(),
+            })?;
         Self::load_script(name, &script)
     }
 
-    pub fn load_script(name: &str, script: &str) -> Result<Self, String> {
+    pub fn load_script(name: &str, script: &str) -> Result<Self, ValidationError> {
         let engine = limited_engine();
         let ast = engine
             .compile(script)
-            .map_err(|error| format!("历法 {name} 编译失败: {error}"))?;
+            .map_err(|error| ValidationError::CalendarCompile {
+                calendar: name.into(),
+                details: error.to_string(),
+            })?;
         Ok(Self {
             engine,
             ast,
@@ -53,45 +59,56 @@ impl RhaiCalendar {
         })
     }
 
-    fn call(&self, entry: &str, args: impl rhai::FuncArgs) -> Result<Dynamic, String> {
+    fn call(&self, entry: &str, args: impl rhai::FuncArgs) -> Result<Dynamic, ValidationError> {
         self.engine
             .call_fn(&mut Scope::new(), &self.ast, entry, args)
-            .map_err(|error| format!("历法 {} 的 {entry} 执行失败: {error}", self.name))
+            .map_err(|error| ValidationError::CalendarCall {
+                calendar: self.name.clone(),
+                entry: entry.into(),
+                details: error.to_string(),
+            })
+    }
+
+    fn invalid_return(&self, entry: &str) -> ValidationError {
+        ValidationError::CalendarInvalidReturn {
+            calendar: self.name.clone(),
+            entry: entry.into(),
+        }
     }
 
     fn ints(&self, values: &[i64]) -> rhai::Array {
         values.iter().copied().map(Dynamic::from_int).collect()
     }
 
-    pub fn metadata(&self) -> Result<Value, String> {
+    pub fn metadata(&self) -> Result<Value, ValidationError> {
         let output = self.call("metadata", ())?;
-        from_dynamic(&output).map_err(|error| format!("历法 metadata 无效: {error}"))
+        from_dynamic(&output).map_err(|error| ValidationError::CalendarInvalidMetadata {
+            calendar: self.name.clone(),
+            details: error.to_string(),
+        })
     }
 
-    pub fn normalize(&self, values: &[i64]) -> Result<Vec<i64>, String> {
+    pub fn normalize(&self, values: &[i64]) -> Result<Vec<i64>, ValidationError> {
         let output = self
             .call("normalize", (self.ints(values),))?
             .try_cast::<rhai::Array>()
-            .ok_or("normalize 必须返回数组")?;
+            .ok_or_else(|| self.invalid_return("normalize"))?;
         output
             .into_iter()
-            .map(|item| {
-                item.as_int()
-                    .map_err(|_| "normalize 必须返回整数数组".into())
-            })
+            .map(|item| item.as_int().map_err(|_| self.invalid_return("normalize")))
             .collect()
     }
 
-    pub fn to_tick(&self, values: &[i64]) -> Result<i64, String> {
+    pub fn to_tick(&self, values: &[i64]) -> Result<i64, ValidationError> {
         self.call("to_tick", (self.ints(values),))?
             .as_int()
-            .map_err(|_| "to_tick 必须返回整数".into())
+            .map_err(|_| self.invalid_return("to_tick"))
     }
 
-    pub fn humanize(&self, values: &[i64]) -> Result<String, String> {
+    pub fn humanize(&self, values: &[i64]) -> Result<String, ValidationError> {
         self.call("humanize", (self.ints(values),))?
             .into_string()
-            .map_err(|_| "humanize 必须返回字符串".into())
+            .map_err(|_| self.invalid_return("humanize"))
     }
 }
 
@@ -211,7 +228,7 @@ impl Calendar {
                 .inner
                 .call("humanize_duration", (seconds,))?
                 .into_string()
-                .map_err(|_| DocumentError::raw("humanize_duration 必须返回字符串"));
+                .map_err(|_| self.inner.invalid_return("humanize_duration").into());
         }
         let diff: Vec<i64> = (0..time.len().max(base.len()))
             .map(|i| {

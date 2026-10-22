@@ -30,6 +30,8 @@ sys-locale = "0.3.2"
 tauri-plugin-dialog = "2.8.3"
 rhai = { version = "1.26.1", features = ["serde"] }
 ts-rs = { version = "12.0.1", features = ["serde-compat"] }
+thiserror = "2"
+tauri-plugin-log = "2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

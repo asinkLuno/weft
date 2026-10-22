@@ -27,6 +27,20 @@ export type ValidationError =
       params: { calendar: string };
     }
   | { code: "calendar_components_out_of_range"; params: { calendar: string } }
+  | { code: "calendar_file_read"; params: { calendar: string; source: string } }
+  | { code: "calendar_compile"; params: { calendar: string; source: string } }
+  | {
+      code: "calendar_call";
+      params: { calendar: string; entry: string; source: string };
+    }
+  | {
+      code: "calendar_invalid_metadata";
+      params: { calendar: string; source: string };
+    }
+  | {
+      code: "calendar_invalid_return";
+      params: { calendar: string; entry: string };
+    }
   | {
       code: "too_many_time_components";
       params: { actual: string; maximum: string };

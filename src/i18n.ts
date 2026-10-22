@@ -32,6 +32,12 @@ const validationMessages = {
       "历法 {calendar} 的 metadata.components 必须是正整数",
     calendar_components_out_of_range:
       "历法 {calendar} 的 metadata.components 必须在 1 到 64 之间",
+    calendar_file_read: "读取历法 `{calendar}` 的脚本失败：{source}",
+    calendar_compile: "历法 `{calendar}` 编译失败：{source}",
+    calendar_call: "历法 `{calendar}` 的 `{entry}` 执行失败：{source}",
+    calendar_invalid_metadata:
+      "历法 `{calendar}` 返回的 metadata 无效：{source}",
+    calendar_invalid_return: "历法 `{calendar}` 的 `{entry}` 返回值类型无效",
     too_many_time_components:
       "时间分量过多：{actual} 个，该历法最多 {maximum} 个",
     normalize_wrong_component_count: "normalize 必须返回 {expected} 个时间分量",
@@ -63,6 +69,14 @@ const validationMessages = {
       "metadata.components for calendar {calendar} must be a positive integer",
     calendar_components_out_of_range:
       "metadata.components for calendar {calendar} must be between 1 and 64",
+    calendar_file_read:
+      "Failed to read the script of calendar `{calendar}`: {source}",
+    calendar_compile: "Failed to compile calendar `{calendar}`: {source}",
+    calendar_call: "Error running `{entry}` of calendar `{calendar}`: {source}",
+    calendar_invalid_metadata:
+      "Invalid metadata returned by calendar `{calendar}`: {source}",
+    calendar_invalid_return:
+      "`{entry}` of calendar `{calendar}` returned an invalid value",
     too_many_time_components:
       "Too many time components: {actual}; this calendar allows at most {maximum}",
     normalize_wrong_component_count:

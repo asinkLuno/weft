@@ -1,36 +1,89 @@
 use serde::Serialize;
+use thiserror::Error;
 use ts_rs::TS;
 
 // 校验错误的唯一代码定义。Serde 和 ts-rs 共用这些变体名与参数字段。
-#[derive(Clone, Debug, Serialize, TS)]
+#[derive(Clone, Debug, Error, Serialize, TS)]
 #[serde(tag = "code", content = "params", rename_all = "snake_case")]
 pub enum ValidationError {
+    #[error("file deleted or moved")]
     FileDeleted,
+    #[error("no document is bound")]
     DocumentNotBound,
+    #[error("invalid path")]
     InvalidPath,
+    #[error("duplicate event title: {title}")]
     DuplicateEventTitle { title: String },
+    #[error("entity link {group} refers to unknown entity {entity}")]
     UnknownLinkEntity { group: String, entity: String },
+    #[error("event {event} refers to unknown entity {entity}")]
     UnknownEventEntity { event: String, entity: String },
+    #[error("narrative {narrative} refers to unknown observer {entity}")]
     UnknownObserver { narrative: String, entity: String },
+    #[error("narrative {narrative} refers to unknown event {event}")]
     UnknownSubjectEvent { narrative: String, event: String },
+    #[error("entity {entity} refers to unknown parent {target}")]
     EntityUnknownParent { entity: String, target: String },
+    #[error("entity {entity} has a parent cycle")]
     EntityCycle { entity: String },
+    #[error("time must be a nonempty list")]
     TimeNonemptyList,
+    #[error("time component must be an integer")]
     TimeIntegerComponent,
+    #[error("event {event} ends before it starts")]
     EventEndBeforeStart { event: String },
+    #[error("unregistered calendar: {calendar}")]
     UnregisteredCalendar { calendar: String },
+    #[error("invalid {kind} plugin specification: {name}")]
     InvalidPluginSpec { name: String, kind: String },
+    #[error("calendar {calendar} must have a positive component count")]
     CalendarComponentsNotPositiveInteger { calendar: String },
+    #[error("calendar {calendar} component count is out of range")]
     CalendarComponentsOutOfRange { calendar: String },
+    #[error("failed to read calendar {calendar}: {details}")]
+    CalendarFileRead {
+        calendar: String,
+        #[serde(rename = "source")]
+        details: String,
+    },
+    #[error("failed to compile calendar {calendar}: {details}")]
+    CalendarCompile {
+        calendar: String,
+        #[serde(rename = "source")]
+        details: String,
+    },
+    #[error("failed to call {entry} in calendar {calendar}: {details}")]
+    CalendarCall {
+        calendar: String,
+        entry: String,
+        #[serde(rename = "source")]
+        details: String,
+    },
+    #[error("invalid metadata from calendar {calendar}: {details}")]
+    CalendarInvalidMetadata {
+        calendar: String,
+        #[serde(rename = "source")]
+        details: String,
+    },
+    #[error("invalid return value from {entry} in calendar {calendar}")]
+    CalendarInvalidReturn { calendar: String, entry: String },
+    #[error("too many time components: {actual}, maximum {maximum}")]
     TooManyTimeComponents { actual: String, maximum: String },
+    #[error("normalize returned the wrong number of components; expected {expected}")]
     NormalizeWrongComponentCount { expected: String },
+    #[error("time offset is out of range")]
     TimeOffsetOutOfRange,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Error, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DocumentError {
-    Validation { error: ValidationError },
+    #[error("{error}")]
+    Validation {
+        #[source]
+        error: ValidationError,
+    },
+    #[error("{message}")]
     Raw { message: String },
 }
 

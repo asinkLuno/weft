@@ -4,10 +4,11 @@ mod material;
 mod model;
 mod validation;
 
-use std::sync::Mutex;
 use serde_json::json;
+use std::sync::Mutex;
 use tauri::menu::{CheckMenuItem, Menu, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Wry};
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind, log::LevelFilter};
 use tauri_plugin_store::StoreExt;
 
 // 菜单无法就地改文字，切语言时整体重建
@@ -61,6 +62,14 @@ fn apply_lang(app: &AppHandle, lang: &str) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(LevelFilter::Info)
+                .max_file_size(1_000_000)
+                .rotation_strategy(RotationStrategy::KeepSome(3))
+                .target(Target::new(TargetKind::Webview))
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())

@@ -10,6 +10,7 @@ use notify_debouncer_full::{Debouncer, RecommendedCache, new_debouncer};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_log::log::{error, warn};
 
 use crate::calendar::Calendar;
 use crate::model::StoryDoc;
@@ -247,6 +248,7 @@ fn push_changed(app: &AppHandle, path: &Path) {
     let Ok(content) = fs::read_to_string(path) else {
         // 读失败但文件还在：写入中途的瞬时状态，等下一个防抖事件；不在了就是被删/移走
         if !path.exists() {
+            warn!("bound document deleted or moved: {}", path.display());
             let _ = app.emit(
                 EVENT,
                 DocumentPayload {
@@ -272,11 +274,17 @@ fn push_changed(app: &AppHandle, path: &Path) {
             content: Some(content),
             error: None,
         },
-        Err(error) => DocumentPayload {
-            doc: None,
-            content: None,
-            error: Some(error),
-        },
+        Err(error) => {
+            error!(
+                "failed to parse changed document {}: {error}",
+                path.display()
+            );
+            DocumentPayload {
+                doc: None,
+                content: None,
+                error: Some(error),
+            }
+        }
     };
     let _ = app.emit(EVENT, payload);
 }
@@ -288,7 +296,9 @@ pub fn bind_document(
     path: String,
 ) -> Result<DocumentPayload, DocumentError> {
     let path = PathBuf::from(path);
-    let (content, parsed) = read_doc(&path)?;
+    let (content, parsed) = read_doc(&path).inspect_err(|error| {
+        error!("failed to read document {}: {error}", path.display());
+    })?;
 
     // 监听父目录再按路径过滤：直接 watch 单文件会漏掉 rename 型写入（我们的原子写就是 rename）
     let target = path.clone();
@@ -296,20 +306,35 @@ pub fn bind_document(
         Duration::from_millis(300),
         None,
         move |res: Result<Vec<notify_debouncer_full::DebouncedEvent>, Vec<notify::Error>>| {
-            let Ok(events) = res else { return };
+            let events = match res {
+                Ok(events) => events,
+                Err(errors) => {
+                    warn!(
+                        "document watcher failed for {}: {errors:?}",
+                        target.display()
+                    );
+                    return;
+                }
+            };
             if events.iter().any(|e| e.paths.iter().any(|p| p == &target)) {
                 push_changed(&app, &target);
             }
         },
     )
-    .map_err(DocumentError::raw)?;
+    .map_err(|error| {
+        error!("failed to create watcher for {}: {error}", path.display());
+        DocumentError::raw(error)
+    })?;
     let parent = path.parent().unwrap_or(Path::new("."));
     debouncer
         .watch(parent, RecursiveMode::NonRecursive)
-        .map_err(DocumentError::raw)?;
+        .map_err(|error| {
+            error!("failed to watch directory {}: {error}", parent.display());
+            DocumentError::raw(error)
+        })?;
 
     let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
-    st.path = Some(path);
+    st.path = Some(path.clone());
     st.last_written = None;
     st._watcher = Some(debouncer);
 
@@ -319,11 +344,14 @@ pub fn bind_document(
             content: Some(content),
             error: None,
         },
-        Err(error) => DocumentPayload {
-            doc: None,
-            content: Some(content),
-            error: Some(error),
-        },
+        Err(error) => {
+            error!("failed to parse document {}: {error}", path.display());
+            DocumentPayload {
+                doc: None,
+                content: Some(content),
+                error: Some(error),
+            }
+        }
     })
 }
 
@@ -341,7 +369,9 @@ pub fn save_document(
         .map(Path::to_path_buf)
         .unwrap_or_default();
     drop(st_guard);
-    parse(&content, &base)?;
+    parse(&content, &base).inspect_err(|error| {
+        error!("failed to validate document before saving: {error}");
+    })?;
     let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
     let path = st
         .path
@@ -353,8 +383,15 @@ pub fn save_document(
         .file_name()
         .ok_or(DocumentError::validation(ValidationError::InvalidPath))?;
     let tmp = path.with_file_name(format!(".{}.weft-tmp", name.to_string_lossy()));
-    fs::write(&tmp, &content).map_err(DocumentError::raw)?;
+    fs::write(&tmp, &content).map_err(|error| {
+        error!(
+            "failed to write temporary document {}: {error}",
+            tmp.display()
+        );
+        DocumentError::raw(error)
+    })?;
     if let Err(e) = fs::rename(&tmp, &path) {
+        error!("failed to replace document {}: {e}", path.display());
         st.last_written = None;
         let _ = fs::remove_file(&tmp);
         return Err(DocumentError::raw(e));
