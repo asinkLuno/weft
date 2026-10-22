@@ -59,29 +59,7 @@ impl WeftDoc {
         check_acyclic(&raw.entity)?;
         check_unique_event_titles(&index)?;
         let narrative = resolve_narratives(raw.narrative, &index);
-        // 事件 id = `组名/标题`；时间解析要等历法加载，document.rs 里做
-        let mut event: BTreeMap<String, Vec<EventItem>> = BTreeMap::new();
-        for (group, events) in raw.event {
-            let mut list = Vec::with_capacity(events.len());
-            for (title, ev) in events {
-                list.push(EventItem {
-                    id: format!("{group}/{title}"),
-                    title,
-                    description: ev.description,
-                    entities: ev.entities,
-                    offsets: Vec::new(),
-                    start_phase: Phase::from_yaml(&ev.start_time)?,
-                    end_phase: ev.end_time.as_ref().map(Phase::from_yaml).transpose()?,
-                    start: None,
-                    end: None,
-                    start_tick: None,
-                    end_tick: None,
-                    start_display: None,
-                    end_display: None,
-                });
-            }
-            event.insert(group, list);
-        }
+        let event = build_events(raw.event)?;
         Ok(WeftDoc {
             story: raw.story,
             entity: raw.entity,
@@ -93,6 +71,35 @@ impl WeftDoc {
             calendar_meta: None,
         })
     }
+}
+
+// 事件 id = `组名/标题`；时间解析要等历法加载，document.rs 里做
+fn build_events(
+    event: HashMap<String, HashMap<String, RawEvent>>,
+) -> Result<BTreeMap<String, Vec<EventItem>>, DocumentError> {
+    let mut out = BTreeMap::new();
+    for (group, events) in event {
+        let mut list = Vec::with_capacity(events.len());
+        for (title, ev) in events {
+            list.push(EventItem {
+                id: format!("{group}/{title}"),
+                title,
+                description: ev.description,
+                entities: ev.entities,
+                offsets: Vec::new(),
+                start_phase: Phase::from_yaml(&ev.start_time)?,
+                end_phase: ev.end_time.as_ref().map(Phase::from_yaml).transpose()?,
+                start: None,
+                end: None,
+                start_tick: None,
+                end_tick: None,
+                start_display: None,
+                end_display: None,
+            });
+        }
+        out.insert(group, list);
+    }
+    Ok(out)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -304,17 +311,16 @@ fn build_event_index(events: &HashMap<String, HashMap<String, RawEvent>>) -> Eve
     by_title
 }
 
-// 事件引用：`组名/标题` 全 id，或裸标题（须先过全局唯一查重才能定组）
-fn resolve_event(index: &EventIndex<'_>, r: &str) -> Option<(String, String)> {
-    if let Some((g, t)) = r.split_once('/') {
-        return index
-            .get(t)
-            .is_some_and(|groups| groups.contains(&g))
-            .then(|| (g.to_string(), t.to_string()));
+// 事件引用：`组名/标题` 全 id，或裸标题（须先过全局唯一查重才能定组）。
+// 只返回借用，校验时不必为每条引用分配字符串
+fn resolve_event<'a>(index: &'a EventIndex<'a>, r: &'a str) -> Option<(&'a str, &'a str)> {
+    match r.split_once('/') {
+        Some((group, title)) => index
+            .get(title)
+            .is_some_and(|groups| groups.contains(&group))
+            .then_some((group, title)),
+        None => index.get(r).map(|groups| (groups[0], r)),
     }
-    index
-        .get(r)
-        .map(|groups| (groups[0].to_string(), r.to_string()))
 }
 
 // narrative：引用已在 check_references 校验，这里把 subject 重写成事件 id。
@@ -410,12 +416,13 @@ fn check_references(raw: &RawWeftDoc, index: &EventIndex<'_>) -> Result<(), Vec<
 }
 
 // 归属图不许成环（如 a belong_to b、b belong_to a），否则按层级递归展示无法终止。
-// 可计算标签算出的归属也要复查，所以开放给 document.rs。DFS 三色标记：0 未访问 / 1 在当前路径上 / 2 已完成
+// 可计算标签算出的归属也要复查，所以开放给 document.rs。DFS 三色标记：0 未访问 / 1 在当前路径上 / 2 已完成。
+// 状态键借用图里的 id，递归时不再反复克隆
 pub(crate) fn check_acyclic(graph: &HashMap<String, Entity>) -> Result<(), DocumentError> {
-    fn visit(
-        id: &str,
-        graph: &HashMap<String, Entity>,
-        state: &mut HashMap<String, u8>,
+    fn visit<'a>(
+        id: &'a str,
+        graph: &'a HashMap<String, Entity>,
+        state: &mut HashMap<&'a str, u8>,
     ) -> Result<(), DocumentError> {
         match state.get(id) {
             Some(1) => {
@@ -427,11 +434,14 @@ pub(crate) fn check_acyclic(graph: &HashMap<String, Entity>) -> Result<(), Docum
             Some(2) => return Ok(()),
             _ => {}
         }
-        state.insert(id.to_string(), 1);
-        for parent in &graph[id].belong_to {
+        // belong_to 的目标由 check_references / apply_chain 保证存在
+        let (key, entity) = graph.get_key_value(id).expect("belong_to 的目标已校验存在");
+        let key = key.as_str();
+        state.insert(key, 1);
+        for parent in &entity.belong_to {
             visit(parent, graph, state)?;
         }
-        state.insert(id.to_string(), 2);
+        state.insert(key, 2);
         Ok(())
     }
     let mut state = HashMap::new();
@@ -473,7 +483,9 @@ where
         }
 
         fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
-            Ok(Some(vec![v as i64]))
+            i64::try_from(v)
+                .map(|v| Some(vec![v]))
+                .map_err(|_| E::custom("time component does not fit in i64"))
         }
 
         fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {

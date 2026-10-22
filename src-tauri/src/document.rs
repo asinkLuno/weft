@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -13,7 +14,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_log::log::{error, warn};
 
 use crate::calendar::Calendar;
-use crate::model::WeftDoc;
+use crate::model::{Entity, EntityOffset, EventItem, WeftDoc};
 use crate::validation::{DocumentError, ValidationError};
 
 const EVENT: &str = "document-changed";
@@ -35,17 +36,39 @@ pub struct DocumentPayload {
     error: Option<DocumentError>,
 }
 
-// base 是故事文件所在目录，自定义历法的脚本路径相对它
-// 事件引用按 id 对回实体，取其 base_time
-fn resolve_base<'a>(
-    entity: &'a std::collections::HashMap<String, crate::model::Entity>,
-    r: &str,
-) -> Option<&'a Vec<i64>> {
-    entity.get(r).and_then(|e| e.base_time.as_ref())
+impl DocumentPayload {
+    fn ready(doc: Value, content: String) -> Self {
+        Self {
+            doc: Some(doc),
+            content: Some(content),
+            error: None,
+        }
+    }
+
+    // 解析失败时可视情况保留原文：绑定的文件即使有语法错误，编辑器仍要能显示它
+    fn failed(error: DocumentError, content: Option<String>) -> Self {
+        Self {
+            doc: None,
+            content,
+            error: Some(error),
+        }
+    }
 }
 
-fn offset_display(cal: &Calendar, time: &[i64], base: &[i64]) -> Result<String, DocumentError> {
-    cal.offset_display(time, base)
+// 按实体 id 取 base_time；事件与叙事线都要拿它算偏移
+fn resolve_base<'a>(entity: &'a HashMap<String, Entity>, id: &str) -> Option<&'a [i64]> {
+    entity.get(id).and_then(|e| e.base_time.as_deref())
+}
+
+// 两个 tick 相减；任一端没有时间就得到 None
+fn offset_tick(base: Option<i64>, time: Option<i64>) -> Result<Option<i64>, DocumentError> {
+    base.zip(time)
+        .map(|(base, time)| {
+            time.checked_sub(base)
+                .ok_or(ValidationError::TimeOffsetOutOfRange)
+        })
+        .transpose()
+        .map_err(DocumentError::from)
 }
 
 fn parse(content: &str, base: &Path, lang: &str) -> Result<Value, DocumentError> {
@@ -59,9 +82,17 @@ fn parse(content: &str, base: &Path, lang: &str) -> Result<Value, DocumentError>
         .date_mode
         .clone()
         .unwrap_or_else(|| "gregorian".into());
-    let spec = doc.calendar.get(&mode);
-    let cal = Calendar::load(&mode, spec, base, lang)?;
+    let cal = Calendar::load(&mode, doc.calendar.get(&mode), base, lang)?;
     doc.calendar_meta = Some(cal.metadata());
+    apply_entity_times(&mut doc, &cal)?;
+    apply_calculable_tags(&mut doc, base, &mode, lang)?;
+    apply_event_times(&mut doc, &cal)?;
+    apply_narrative_times(&mut doc, &cal)?;
+    serde_json::to_value(doc).map_err(DocumentError::raw)
+}
+
+// base_time：归一化后写回原字段，展示文案单独存一份
+fn apply_entity_times(doc: &mut WeftDoc, cal: &Calendar) -> Result<(), DocumentError> {
     for entity in doc.entity.values_mut() {
         if let Some(values) = &entity.base_time {
             let normalized = cal.normalize(values)?;
@@ -69,18 +100,23 @@ fn parse(content: &str, base: &Path, lang: &str) -> Result<Value, DocumentError>
             entity.base_time = Some(normalized);
         }
     }
-    apply_calculable_tags(&mut doc, base, &mode, lang)?;
-    // 事件：展平相对时间 → 归一化 → tick（排序与先后校验的基准）→ humanize
-    for events in doc.event.values_mut() {
+    Ok(())
+}
+
+// 事件：展平相对时间 → 归一化 → tick（排序与先后校验的基准）→ humanize，
+// 同时算出每个参与实体相对其 base_time 的偏移
+fn apply_event_times(doc: &mut WeftDoc, cal: &Calendar) -> Result<(), DocumentError> {
+    let WeftDoc { entity, event, .. } = doc;
+    for events in event.values_mut() {
         for ev in &mut *events {
             let start = cal.normalize(&ev.start_phase.flatten())?;
             let start_tick = cal.to_tick(&start)?;
             let end = ev
                 .end_phase
                 .as_ref()
-                .map(|p| cal.normalize(&p.flatten()))
+                .map(|phase| cal.normalize(&phase.flatten()))
                 .transpose()?;
-            let end_tick = end.as_ref().map(|v| cal.to_tick(v)).transpose()?;
+            let end_tick = end.as_ref().map(|end| cal.to_tick(end)).transpose()?;
             if end_tick.is_some_and(|end| end < start_tick) {
                 return Err(ValidationError::EventEndBeforeStart {
                     event: ev.id.clone(),
@@ -88,26 +124,25 @@ fn parse(content: &str, base: &Path, lang: &str) -> Result<Value, DocumentError>
                 .into());
             }
             let start_display = cal.humanize(&start)?;
-            let end_display = match &end {
-                Some(v) => Some(cal.humanize(v)?),
-                None => None,
-            };
-            // 参与者相对各自 base_time 的偏移；没有 base_time 的实体 start 留空
-            let mut offsets = Vec::with_capacity(ev.entities.len());
-            for r in &ev.entities {
-                let off = resolve_base(&doc.entity, r);
-                let start_off = off.map(|b| offset_display(&cal, &start, b)).transpose()?;
-                let end_off = match (&off, &end) {
-                    (Some(b), Some(t)) => offset_display(&cal, t, b).map(Some)?,
-                    _ => None,
-                };
-                offsets.push(crate::model::EntityOffset {
-                    entity: r.clone(),
-                    start: start_off,
-                    end: end_off,
-                });
-            }
-            ev.offsets = offsets;
+            let end_display = end.as_ref().map(|end| cal.humanize(end)).transpose()?;
+            // 没有 base_time 的实体 start 留空
+            ev.offsets = ev
+                .entities
+                .iter()
+                .map(|r| {
+                    let base = resolve_base(entity, r);
+                    Ok(EntityOffset {
+                        entity: r.clone(),
+                        start: base
+                            .map(|base| cal.offset_display(&start, base))
+                            .transpose()?,
+                        end: match (base, &end) {
+                            (Some(base), Some(end)) => cal.offset_display(end, base).map(Some)?,
+                            _ => None,
+                        },
+                    })
+                })
+                .collect::<Result<_, DocumentError>>()?;
             ev.start = Some(start);
             ev.end = end;
             ev.start_tick = Some(start_tick);
@@ -117,53 +152,45 @@ fn parse(content: &str, base: &Path, lang: &str) -> Result<Value, DocumentError>
         }
         events.sort_by_key(|e| e.start_tick.unwrap_or(i64::MAX));
     }
-    // 叙事线：subject 事件相对 observer base_time 的偏移（tick 定位 + humanize 展示）
+    Ok(())
+}
+
+// 叙事线：subject 事件相对 observer base_time 的偏移（tick 定位 + humanize 展示）。
+// subject.event 在 model 层已重写成 `组名/标题` 全 id，这里按 id 直接取事件
+fn apply_narrative_times(doc: &mut WeftDoc, cal: &Calendar) -> Result<(), DocumentError> {
     let WeftDoc {
         entity,
         event,
         narrative,
         ..
-    } = &mut doc;
+    } = doc;
+    let by_id: HashMap<&str, &EventItem> = event
+        .values()
+        .flatten()
+        .map(|ev| (ev.id.as_str(), ev))
+        .collect();
     for nar in narrative.values_mut() {
         let base = resolve_base(entity, &nar.observer);
-        let base_tick = base.map(|b| cal.to_tick(b)).transpose()?;
-        for s in &mut nar.subject {
-            let Some((g, t)) = s.event.split_once('/') else {
+        let base_tick = base.map(|base| cal.to_tick(base)).transpose()?;
+        for subject in &mut nar.subject {
+            let Some(ev) = by_id.get(subject.event.as_str()) else {
                 continue;
             };
-            let Some(ev) = event
-                .get(g)
-                .and_then(|evs| evs.iter().find(|e| e.title == t))
-            else {
-                continue;
-            };
-            s.start_tick = base_tick
-                .zip(ev.start_tick)
-                .map(|(b, t)| {
-                    t.checked_sub(b)
-                        .ok_or(ValidationError::TimeOffsetOutOfRange)
-                })
-                .transpose()?;
-            s.end_tick = base_tick
-                .zip(ev.end_tick)
-                .map(|(b, t)| {
-                    t.checked_sub(b)
-                        .ok_or(ValidationError::TimeOffsetOutOfRange)
-                })
-                .transpose()?;
-            s.start = match (base, &ev.start) {
-                (Some(b), Some(t)) => Some(offset_display(&cal, t, b)?),
+            subject.start_tick = offset_tick(base_tick, ev.start_tick)?;
+            subject.end_tick = offset_tick(base_tick, ev.end_tick)?;
+            subject.start = match (base, &ev.start) {
+                (Some(base), Some(time)) => Some(cal.offset_display(time, base)?),
                 _ => None,
             };
-            s.end = match (base, &ev.end) {
-                (Some(b), Some(t)) => Some(offset_display(&cal, t, b)?),
+            subject.end = match (base, &ev.end) {
+                (Some(base), Some(time)) => Some(cal.offset_display(time, base)?),
                 _ => None,
             };
         }
         nar.subject
             .sort_by_key(|s| s.start_tick.unwrap_or(i64::MAX));
     }
-    serde_json::to_value(doc).map_err(DocumentError::raw)
+    Ok(())
 }
 
 // 可计算标签：按各实体 base_time 执行脚本，归属链 chain[0] 并入 belong_to，其余逐级生成缺失实体
@@ -193,7 +220,7 @@ fn apply_calculable_tags(
                     "belong_to": entity.belong_to,
                 },
             });
-            let chain = runtime.calculable_tag(&name, &context)?;
+            let chain = runtime.calculable_tag(&name, &context, lang)?;
             let chain: Vec<String> = serde_json::from_value(chain)
                 .map_err(|_| format!("可计算标签 `{name}` 必须返回字符串列表（归属链）"))?;
             apply_chain(&mut doc.entity, &id, &chain)?;
@@ -203,29 +230,50 @@ fn apply_calculable_tags(
     crate::model::check_acyclic(&doc.entity)
 }
 
-// 归属链：实体 → chain[0] → chain[1] …；缺失的环上实体自动生成，撞到已有实体即停（YAML 自定义的归属不动）
+// 名称 → 已有实体 id：tag 返回的是名称，实体 id 可以与之不同
+fn resolve_entity_id(entity: &HashMap<String, Entity>, target: &str) -> Option<String> {
+    if entity.contains_key(target) {
+        return Some(target.to_owned());
+    }
+    entity
+        .iter()
+        .find(|(_, e)| e.name.as_deref() == Some(target))
+        .map(|(id, _)| id.clone())
+}
+
+// 归属链：实体 → chain[0] → chain[1] …。链上缺失的实体按名称自动生成，
+// 撞到已有实体（id 或名称相同）即停；已有实体自己的归属不动
 fn apply_chain(
-    entity: &mut std::collections::HashMap<String, crate::model::Entity>,
+    entity: &mut HashMap<String, Entity>,
     id: &str,
     chain: &[String],
 ) -> Result<(), String> {
-    let Some(first) = chain.first() else {
+    if chain.is_empty() {
         return Ok(());
-    };
+    }
+    // 先把每个名称解析成 id：已有实体用它自己的 id，新建实体用名称作 id。
+    // 新建实体的 belong_to 因此总能指向真实存在的 id
+    let existing: Vec<Option<String>> = chain
+        .iter()
+        .map(|target| resolve_entity_id(entity, target))
+        .collect();
+    let ids: Vec<String> = chain
+        .iter()
+        .zip(&existing)
+        .map(|(target, id)| id.clone().unwrap_or_else(|| target.clone()))
+        .collect();
     for (i, target) in chain.iter().enumerate() {
-        let exists = entity.contains_key(target)
-            || entity.values().any(|e| e.name.as_deref() == Some(target));
-        if exists {
+        if existing[i].is_some() {
             break;
         }
         entity.insert(
             target.clone(),
-            crate::model::Entity {
+            Entity {
                 name: Some(target.clone()),
                 base_time: None,
                 base_time_display: None,
                 description: None,
-                belong_to: chain.get(i + 1).cloned().into_iter().collect(),
+                belong_to: ids.get(i + 1).cloned().into_iter().collect(),
                 calculable_tags: Vec::new(),
             },
         );
@@ -233,8 +281,9 @@ fn apply_chain(
     let owner = entity
         .get_mut(id)
         .ok_or_else(|| format!("可计算标签归属链引用了不存在的实体 `{id}`"))?;
-    if !owner.belong_to.contains(first) {
-        owner.belong_to.push(first.clone());
+    let first_id = &ids[0];
+    if !owner.belong_to.contains(first_id) {
+        owner.belong_to.push(first_id.clone());
     }
     Ok(())
 }
@@ -279,21 +328,13 @@ fn push_changed(app: &AppHandle, path: &Path) {
         path.parent().unwrap_or(Path::new(".")),
         &crate::current_lang(app),
     ) {
-        Ok(doc) => DocumentPayload {
-            doc: Some(doc),
-            content: Some(content),
-            error: None,
-        },
+        Ok(doc) => DocumentPayload::ready(doc, content),
         Err(error) => {
             error!(
                 "failed to parse changed document {}: {error}",
                 path.display()
             );
-            DocumentPayload {
-                doc: None,
-                content: None,
-                error: Some(error),
-            }
+            DocumentPayload::failed(error, None)
         }
     };
     let _ = app.emit(EVENT, payload);
@@ -308,16 +349,8 @@ pub fn refresh_language(app: &AppHandle) {
     };
     let Some(path) = path else { return };
     let payload = match read_doc(&path, &crate::current_lang(app)) {
-        Ok((content, Ok(doc))) => DocumentPayload {
-            doc: Some(doc),
-            content: Some(content),
-            error: None,
-        },
-        Ok((_, Err(error))) | Err(error) => DocumentPayload {
-            doc: None,
-            content: None,
-            error: Some(error),
-        },
+        Ok((content, Ok(doc))) => DocumentPayload::ready(doc, content),
+        Ok((_, Err(error))) | Err(error) => DocumentPayload::failed(error, None),
     };
     let _ = app.emit(EVENT, payload);
 }
@@ -372,18 +405,10 @@ pub fn bind_document(
     st._watcher = Some(debouncer);
 
     Ok(match parsed {
-        Ok(doc) => DocumentPayload {
-            doc: Some(doc),
-            content: Some(content),
-            error: None,
-        },
+        Ok(doc) => DocumentPayload::ready(doc, content),
         Err(error) => {
             error!("failed to parse document {}: {error}", path.display());
-            DocumentPayload {
-                doc: None,
-                content: Some(content),
-                error: Some(error),
-            }
+            DocumentPayload::failed(error, Some(content))
         }
     })
 }
@@ -394,24 +419,21 @@ pub fn save_document(
     state: State<'_, Mutex<DocumentState>>,
     content: String,
 ) -> Result<(), DocumentError> {
-    // 非法 YAML / 历法错误不落盘；目录取自当前绑定，保存不改路径
-    let st_guard = state.lock().unwrap_or_else(|p| p.into_inner());
-    let base = st_guard
-        .path
-        .as_ref()
-        .and_then(|p| p.parent())
-        .map(Path::to_path_buf)
-        .unwrap_or_default();
-    drop(st_guard);
-    parse(&content, &base, &crate::current_lang(&app)).inspect_err(|error| {
-        error!("failed to validate document before saving: {error}");
-    })?;
+    // 全程持锁：绑定路径在保存期间不能变，watcher 线程最多等这次校验和写盘
     let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
     let path = st
         .path
         .clone()
         .ok_or(DocumentError::validation(ValidationError::DocumentNotBound))?;
-    st.last_written = Some(content.clone());
+    // 非法 YAML / 历法错误不落盘；目录取自当前绑定，保存不改路径
+    parse(
+        &content,
+        path.parent().unwrap_or(Path::new(".")),
+        &crate::current_lang(&app),
+    )
+    .inspect_err(|error| {
+        error!("failed to validate document before saving: {error}");
+    })?;
     // 原子写：先写临时文件再 rename，外部 watcher 不会读到半截内容
     let name = path
         .file_name()
@@ -426,10 +448,11 @@ pub fn save_document(
     })?;
     if let Err(e) = fs::rename(&tmp, &path) {
         error!("failed to replace document {}: {e}", path.display());
-        st.last_written = None;
         let _ = fs::remove_file(&tmp);
         return Err(DocumentError::raw(e));
     }
+    // 写成功后才记录回声内容；写失败时下一次 watcher 事件照常处理
+    st.last_written = Some(content);
     Ok(())
 }
 

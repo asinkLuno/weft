@@ -32,14 +32,13 @@ impl CalculableTagRuntime {
             validate_interface(name, &ast)?;
             calculable_tags.insert(name.clone(), ast);
         }
-        for name in ["constellation"] {
-            if !calculable_tags.contains_key(name) {
-                let ast = engine
-                    .compile(CONSTELLATION)
-                    .map_err(|error| format!("内置可计算标签 {name} 编译失败: {error}"))?;
-                validate_interface(name, &ast)?;
-                calculable_tags.insert(name.to_string(), ast);
-            }
+        let builtin = "constellation";
+        if !calculable_tags.contains_key(builtin) {
+            let ast = engine
+                .compile(CONSTELLATION)
+                .map_err(|error| format!("内置可计算标签 {builtin} 编译失败: {error}"))?;
+            validate_interface(builtin, &ast)?;
+            calculable_tags.insert(builtin.to_string(), ast);
         }
         Ok(Self {
             engine,
@@ -47,7 +46,8 @@ impl CalculableTagRuntime {
         })
     }
 
-    pub fn calculable_tag(&self, name: &str, context: &Value) -> Result<Value, String> {
+    // 计算按语言无关的 id 进行，展示统一走 humanizer(kind, value, language)
+    pub fn calculable_tag(&self, name: &str, context: &Value, lang: &str) -> Result<Value, String> {
         let ast = self
             .calculable_tags
             .get(name)
@@ -58,10 +58,6 @@ impl CalculableTagRuntime {
             .engine
             .call_fn::<Dynamic>(&mut Scope::new(), ast, "calculable_tag", (argument,))
             .map_err(|error| format!("可计算标签 {name} 执行失败: {error}"))?;
-        let lang = context
-            .get("language")
-            .and_then(Value::as_str)
-            .unwrap_or("en");
         let localized = self
             .engine
             .call_fn::<Dynamic>(

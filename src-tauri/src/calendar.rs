@@ -154,6 +154,8 @@ impl RhaiCalendar {
 pub struct Calendar {
     inner: RhaiCalendar,
     metadata: CalendarMetadata,
+    // 只有内置公历能跨时间点比较：补全缺失分量按最早时刻、时长按 tick 差展示；自定义历法逐分量处理
+    gregorian: bool,
 }
 
 impl Calendar {
@@ -163,15 +165,15 @@ impl Calendar {
         base: &Path,
         lang: &str,
     ) -> Result<Self, DocumentError> {
-        let inner = match name {
-            "gregorian" => RhaiCalendar::load_script(name, GREGORIAN, lang)?,
-            other => {
-                let spec = spec.ok_or_else(|| ValidationError::UnregisteredCalendar {
-                    calendar: other.to_string(),
-                })?;
-                spec.validate(other, "calendar")?;
-                RhaiCalendar::load(other, &base.join(&spec.source), lang)?
-            }
+        let gregorian = name == "gregorian";
+        let inner = if gregorian {
+            RhaiCalendar::load_script(name, GREGORIAN, lang)?
+        } else {
+            let spec = spec.ok_or_else(|| ValidationError::UnregisteredCalendar {
+                calendar: name.to_string(),
+            })?;
+            spec.validate(name, "calendar")?;
+            RhaiCalendar::load(name, &base.join(&spec.source), lang)?
         };
         let value = inner.metadata()?;
         let components = value
@@ -200,7 +202,11 @@ impl Calendar {
                 .into(),
             components: components as usize,
         };
-        Ok(Self { inner, metadata })
+        Ok(Self {
+            inner,
+            metadata,
+            gregorian,
+        })
     }
 
     pub fn metadata(&self) -> CalendarMetadata {
@@ -239,7 +245,7 @@ impl Calendar {
 
     pub fn to_tick(&self, values: &[i64]) -> Result<i64, DocumentError> {
         let mut padded = self.pad(values)?;
-        if self.inner.name == "gregorian" {
+        if self.gregorian {
             // 部分日期排序按其最早可能时刻；展示仍保留未指定的 0 分量。
             if padded[1] == 0 {
                 padded[1] = 1;
@@ -252,7 +258,7 @@ impl Calendar {
     }
 
     pub fn offset_display(&self, time: &[i64], base: &[i64]) -> Result<String, DocumentError> {
-        if self.inner.name == "gregorian" {
+        if self.gregorian {
             let seconds = self
                 .to_tick(time)?
                 .checked_sub(self.to_tick(base)?)
