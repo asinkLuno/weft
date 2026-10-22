@@ -1,41 +1,41 @@
 // 格里高利历核心：历算逻辑，不包含语言/本地化相关内容
 
-fn days_in_month(year, month) {
-    if month == 2 {
-        if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 { 29 } else { 28 }
-    } else if month == 4 || month == 6 || month == 9 || month == 11 {
-        30
-    } else {
-        31
+// 反算 tick；用整段日期换算处理跨月、跨年及负的时分秒。
+fn from_tick(tick) {
+    let days = tick / 86400;
+    let seconds = tick % 86400;
+    if seconds < 0 {
+        days -= 1;
+        seconds += 86400;
     }
+    let era = if days >= 0 { days / 146097 } else { (days - 146096) / 146097 };
+    let doe = days - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    year += if month <= 2 { 1 } else { 0 };
+    [year, month, day, seconds / 3600, seconds % 3600 / 60, seconds % 60]
 }
 
-// shortcut: 月/日是 1 基，0 值不向高位借位（[2024,1,1,0,0,-1] 归一成 1 月 0 日）；
-// 上游原样行为。做 drift 负偏移时改走 to_tick 加法，别依赖 normalize
 fn normalize(values) {
     let result = values;
-    // 月/日 1 基：上限本身合法（12月、当月末日），超出才进位；时分秒 0 基：达到上限即进位
-    let limits = [0, 12, days_in_month(result[0], result[1]), 24, 60, 60];
-    let idx = 5;
-    while idx > 0 {
-        let limit = limits[idx];
-        let overflow = if idx <= 2 {
-            result[idx] > limit
-        } else {
-            result[idx] >= limit
-        };
-        if limit > 0 && (overflow || result[idx] < 0) {
-            let carry = if result[idx] >= 0 {
-                result[idx] / limit
-            } else {
-                (result[idx] - limit + 1) / limit
-            };
-            result[idx - 1] += carry;
-            result[idx] -= carry * limit;
-        }
-        idx -= 1;
+    // 0 月/0 日表示未指定，保留展示精度；只有实际进位时才补出日期。
+    if result[1] != 0 {
+        let month_idx = (result[1] - 1) % 12;
+        if month_idx < 0 { month_idx += 12; }
+        result[0] += (result[1] - 1 - month_idx) / 12;
+        result[1] = month_idx + 1;
     }
-    result
+    if result[2] == 0 && result[3] >= 0 && result[3] < 24
+        && result[4] >= 0 && result[4] < 60 && result[5] >= 0 && result[5] < 60 {
+        return result;
+    }
+    if result[1] == 0 { result[1] = 1; }
+    if result[2] == 0 { result[2] = 1; }
+    from_tick(to_tick(result))
 }
 
 fn to_tick(values) {

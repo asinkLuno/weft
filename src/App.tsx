@@ -47,7 +47,14 @@ import {
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { asLang, initialLang, type Lang, strings } from "./i18n";
+import {
+  asLang,
+  type DocumentError,
+  formatDocumentError,
+  initialLang,
+  type Lang,
+  strings,
+} from "./i18n";
 import "./App.css";
 
 const settings = new LazyStore("settings.json");
@@ -55,7 +62,7 @@ const settings = new LazyStore("settings.json");
 type DocumentPayload = {
   doc?: unknown;
   content?: string;
-  error?: string;
+  error?: DocumentError;
 };
 
 // 后端已按 src-tauri/src/model.rs 校验并滤掉未声明键，这里只读序列化结果
@@ -131,10 +138,6 @@ const TABS = ["tab1", "tab2", "tab3", "tab4"] as const;
 type Tab = (typeof TABS)[number];
 
 // 常驻错误提示：不自动消失，可手动关闭，下一条正常事件时清除
-function showError(message: string) {
-  toast.error(message, { duration: Infinity, closeButton: true });
-}
-
 function App() {
   const [path, setPath] = useState<string | null>(null);
   const [doc, setDoc] = useState<StoryDoc | null>(null);
@@ -161,6 +164,7 @@ function App() {
     if (el && top) el.scrollTop = top;
   }, [activeTab]);
   const [lang, setLang] = useState<Lang>(initialLang);
+  const [activeError, setActiveError] = useState<unknown>(null);
   const [recents, setRecents] = useState<string[]>([]);
   const [flash, setFlash] = useState(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
@@ -190,14 +194,24 @@ function App() {
   }, []);
 
   useEffect(() => {
+    toast.dismiss();
+    if (activeError !== null) {
+      toast.error(formatDocumentError(activeError, lang), {
+        duration: Infinity,
+        closeButton: true,
+      });
+    }
+  }, [activeError, lang]);
+
+  useEffect(() => {
     if (!path) return;
     const unlisten = listen<DocumentPayload>("document-changed", (e) => {
       const { doc: nextDoc, error } = e.payload;
       if (error) {
-        showError(error === "deleted" ? strings[lang].deleted : error);
+        setActiveError(error);
         return;
       }
-      toast.dismiss();
+      setActiveError(null);
       // 有解析结果说明文件内容更新了，短暂变色提示
       if (nextDoc !== undefined) {
         setDoc((nextDoc as StoryDoc) ?? null);
@@ -210,7 +224,7 @@ function App() {
       unlisten.then((fn) => fn());
       clearTimeout(flashTimer.current);
     };
-  }, [path, lang]);
+  }, [path]);
 
   function remember(p: string) {
     const next = [p, ...recents.filter((r) => r !== p)].slice(0, 5);
@@ -232,10 +246,10 @@ function App() {
       });
       setPath(p);
       setDoc((payload.doc as StoryDoc) ?? null);
-      if (payload.error) showError(payload.error);
+      setActiveError(payload.error ?? null);
       remember(p);
     } catch (err) {
-      showError(String(err));
+      setActiveError(err);
       forget(p);
     }
   }

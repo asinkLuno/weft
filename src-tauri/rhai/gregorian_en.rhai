@@ -42,6 +42,11 @@ fn humanize(values) {
         return "0 years, 0 months, 0 days";
     }
 
+    if v[0] >= 100 && v[2] == 0 && v[3] == 0 && v[4] == 0 && v[5] == 0 {
+        if v[1] == 0 { return `${v[0]}`; }
+        if v[1] >= 1 && v[1] <= 12 { return `${MONTHS[v[1] - 1]} ${v[0]}`; }
+    }
+
     // Absolute date: year >= 100 and month in 1..12 → "Mon DD, YYYY"
     if v[0] >= 100 && v[1] >= 1 && v[1] <= 12 && v[2] >= 1 && v[2] <= 31 {
         let date = `${MONTHS[v[1] - 1]} ${v[2]}, ${v[0]}`;
@@ -72,6 +77,39 @@ fn humanize(values) {
             out += ", ";
         }
         out += parts[i];
+    }
+    out
+}
+
+fn humanize_duration(seconds) {
+    let sign = if seconds < 0 { "-" } else { "" };
+    let days = if seconds < 0 { -(seconds / 86400) } else { seconds / 86400 };
+    let remaining = if seconds < 0 { -(seconds % 86400) } else { seconds % 86400 };
+    let hours = remaining / 3600;
+    let minutes = remaining % 3600 / 60;
+    let secs = remaining % 60;
+    let parts = [];
+    if days != 0 {
+        let unit = if days == 1 { "day" } else { "days" };
+        parts.push(`${days} ${unit}`);
+    }
+    if hours != 0 {
+        let unit = if hours == 1 { "hour" } else { "hours" };
+        parts.push(`${hours} ${unit}`);
+    }
+    if minutes != 0 {
+        let unit = if minutes == 1 { "minute" } else { "minutes" };
+        parts.push(`${minutes} ${unit}`);
+    }
+    if secs != 0 {
+        let unit = if secs == 1 { "second" } else { "seconds" };
+        parts.push(`${secs} ${unit}`);
+    }
+    if parts.len() == 0 { return "0 seconds"; }
+    let out = sign;
+    for part in parts {
+        if out != sign { out += ", "; }
+        out += part;
     }
     out
 }

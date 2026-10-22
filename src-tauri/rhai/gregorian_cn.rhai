@@ -47,3 +47,21 @@ fn humanize(values) {
     }
     out
 }
+
+fn humanize_duration(seconds) {
+    let sign = if seconds < 0 { "-" } else { "" };
+    let days = if seconds < 0 { -(seconds / 86400) } else { seconds / 86400 };
+    let remaining = if seconds < 0 { -(seconds % 86400) } else { seconds % 86400 };
+    let hours = remaining / 3600;
+    let minutes = remaining % 3600 / 60;
+    let secs = remaining % 60;
+    let parts = [];
+    if days != 0 { parts.push(`${days}日`); }
+    if hours != 0 { parts.push(`${hours}时`); }
+    if minutes != 0 { parts.push(`${minutes}分`); }
+    if secs != 0 { parts.push(`${secs}秒`); }
+    if parts.len() == 0 { return "0秒"; }
+    let out = sign;
+    for part in parts { out += part; }
+    out
+}

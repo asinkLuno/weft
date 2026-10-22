@@ -7,16 +7,15 @@ use std::{
 
 use notify::RecursiveMode;
 use notify_debouncer_full::{Debouncer, RecommendedCache, new_debouncer};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::calendar::Calendar;
 use crate::model::StoryDoc;
+use crate::validation::{DocumentError, ValidationError};
 
 const EVENT: &str = "document-changed";
-// 删除/移走哨兵：前端按当前语言翻译这条错误
-const DELETED: &str = "deleted";
 
 #[derive(Default)]
 pub struct DocumentState {
@@ -32,7 +31,7 @@ pub struct DocumentState {
 pub struct DocumentPayload {
     doc: Option<Value>,
     content: Option<String>,
-    error: Option<String>,
+    error: Option<DocumentError>,
 }
 
 // base 是故事文件所在目录，自定义历法的脚本路径相对它
@@ -41,30 +40,21 @@ fn resolve_base<'a>(
     entity: &'a std::collections::HashMap<String, crate::model::Entity>,
     r: &str,
 ) -> Option<&'a Vec<i64>> {
-    entity.get(r).or_else(|| {
-        entity
-            .values()
-            .find(|e| e.name.as_deref() == Some(r))
-    })
-    .and_then(|e| e.base_time.as_ref())
+    entity
+        .get(r)
+        .or_else(|| entity.values().find(|e| e.name.as_deref() == Some(r)))
+        .and_then(|e| e.base_time.as_ref())
 }
 
-// 逐分量差值 → 归一化 → humanize（旧版 journal 的偏移口径）
-fn offset_display(cal: &Calendar, time: &[i64], base: &[i64]) -> Result<String, String> {
-    let diff: Vec<i64> = (0..time.len().max(base.len()))
-        .map(|i| {
-            time.get(i).copied().unwrap_or_default()
-                - base.get(i).copied().unwrap_or_default()
-        })
-        .collect();
-    cal.humanize(&cal.normalize(&diff)?)
+fn offset_display(cal: &Calendar, time: &[i64], base: &[i64]) -> Result<String, DocumentError> {
+    cal.offset_display(time, base)
 }
 
-fn parse(content: &str, base: &Path) -> Result<Value, String> {
+fn parse(content: &str, base: &Path) -> Result<Value, DocumentError> {
     let yaml: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(content).map_err(|e| e.to_string())?;
+        serde_yaml_ng::from_str(content).map_err(DocumentError::raw)?;
     // 序列化 model.rs 声明过的结构：未知键在这里被滤掉
-    let mut doc = StoryDoc::deserialize(&yaml).map_err(|e| e.to_string())?;
+    let mut doc = StoryDoc::from_yaml(&yaml)?;
     // 加载历法并解析所有时间：历法错误等同 YAML 错误，阻止展示
     let mode = doc
         .story
@@ -73,7 +63,7 @@ fn parse(content: &str, base: &Path) -> Result<Value, String> {
         .unwrap_or_else(|| "gregorian".into());
     let spec = doc.calendar.get(&mode);
     let cal = Calendar::load(&mode, spec, base)?;
-    doc.calendar_meta = Some(cal.metadata(&mode));
+    doc.calendar_meta = Some(cal.metadata());
     for entity in doc.entity.values_mut() {
         if let Some(values) = &entity.base_time {
             let normalized = cal.normalize(values)?;
@@ -94,7 +84,10 @@ fn parse(content: &str, base: &Path) -> Result<Value, String> {
                 .transpose()?;
             let end_tick = end.as_ref().map(|v| cal.to_tick(v)).transpose()?;
             if end_tick.is_some_and(|end| end < start_tick) {
-                return Err(format!("事件 `{}` 的结束时间早于开始时间", ev.id));
+                return Err(ValidationError::EventEndBeforeStart {
+                    event: ev.id.clone(),
+                }
+                .into());
             }
             let start_display = cal.humanize(&start)?;
             let end_display = match &end {
@@ -105,9 +98,7 @@ fn parse(content: &str, base: &Path) -> Result<Value, String> {
             let mut offsets = Vec::with_capacity(ev.entities.len());
             for r in &ev.entities {
                 let off = resolve_base(&doc.entity, r);
-                let start_off = off
-                    .map(|b| offset_display(&cal, &start, b))
-                    .transpose()?;
+                let start_off = off.map(|b| offset_display(&cal, &start, b)).transpose()?;
                 let end_off = match (&off, &end) {
                     (Some(b), Some(t)) => offset_display(&cal, t, b).map(Some)?,
                     _ => None,
@@ -130,7 +121,10 @@ fn parse(content: &str, base: &Path) -> Result<Value, String> {
     }
     // 叙事线：subject 事件相对 observer base_time 的偏移（tick 定位 + humanize 展示）
     let StoryDoc {
-        entity, event, narrative, ..
+        entity,
+        event,
+        narrative,
+        ..
     } = &mut doc;
     for nar in narrative.values_mut() {
         let base = resolve_base(entity, &nar.observer);
@@ -145,8 +139,20 @@ fn parse(content: &str, base: &Path) -> Result<Value, String> {
             else {
                 continue;
             };
-            s.start_tick = base_tick.zip(ev.start_tick).map(|(b, t)| t - b);
-            s.end_tick = base_tick.zip(ev.end_tick).map(|(b, t)| t - b);
+            s.start_tick = base_tick
+                .zip(ev.start_tick)
+                .map(|(b, t)| {
+                    t.checked_sub(b)
+                        .ok_or(ValidationError::TimeOffsetOutOfRange)
+                })
+                .transpose()?;
+            s.end_tick = base_tick
+                .zip(ev.end_tick)
+                .map(|(b, t)| {
+                    t.checked_sub(b)
+                        .ok_or(ValidationError::TimeOffsetOutOfRange)
+                })
+                .transpose()?;
             s.start = match (base, &ev.start) {
                 (Some(b), Some(t)) => Some(offset_display(&cal, t, b)?),
                 _ => None,
@@ -156,13 +162,14 @@ fn parse(content: &str, base: &Path) -> Result<Value, String> {
                 _ => None,
             };
         }
-        nar.subject.sort_by_key(|s| s.start_tick.unwrap_or(i64::MAX));
+        nar.subject
+            .sort_by_key(|s| s.start_tick.unwrap_or(i64::MAX));
     }
-    serde_json::to_value(doc).map_err(|e| e.to_string())
+    serde_json::to_value(doc).map_err(DocumentError::raw)
 }
 
 // 材料：按各实体 base_time 执行脚本，归属链 chain[0] 并入 belong_to，其余逐级生成缺失实体
-fn apply_materials(doc: &mut StoryDoc, base: &Path, mode: &str) -> Result<(), String> {
+fn apply_materials(doc: &mut StoryDoc, base: &Path, mode: &str) -> Result<(), DocumentError> {
     if doc.material.is_empty() && doc.entity.values().all(|e| e.materials.is_empty()) {
         return Ok(());
     }
@@ -228,8 +235,8 @@ fn apply_chain(
     Ok(())
 }
 
-fn read_doc(path: &Path) -> Result<(String, Result<Value, String>), String> {
-    let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
+fn read_doc(path: &Path) -> Result<(String, Result<Value, DocumentError>), DocumentError> {
+    let content = fs::read_to_string(path).map_err(DocumentError::raw)?;
     // 语法错误不算绑定失败：正常进入展示页，错误原样带给前端
     let parsed = parse(&content, path.parent().unwrap_or(Path::new(".")));
     Ok((content, parsed))
@@ -245,7 +252,7 @@ fn push_changed(app: &AppHandle, path: &Path) {
                 DocumentPayload {
                     doc: None,
                     content: None,
-                    error: Some(DELETED.to_string()),
+                    error: Some(ValidationError::FileDeleted.into()),
                 },
             );
         }
@@ -279,7 +286,7 @@ pub fn bind_document(
     app: AppHandle,
     state: State<'_, Mutex<DocumentState>>,
     path: String,
-) -> Result<DocumentPayload, String> {
+) -> Result<DocumentPayload, DocumentError> {
     let path = PathBuf::from(path);
     let (content, parsed) = read_doc(&path)?;
 
@@ -290,19 +297,16 @@ pub fn bind_document(
         None,
         move |res: Result<Vec<notify_debouncer_full::DebouncedEvent>, Vec<notify::Error>>| {
             let Ok(events) = res else { return };
-            if events
-                .iter()
-                .any(|e| e.paths.iter().any(|p| p == &target))
-            {
+            if events.iter().any(|e| e.paths.iter().any(|p| p == &target)) {
                 push_changed(&app, &target);
             }
         },
     )
-    .map_err(|e| e.to_string())?;
+    .map_err(DocumentError::raw)?;
     let parent = path.parent().unwrap_or(Path::new("."));
     debouncer
         .watch(parent, RecursiveMode::NonRecursive)
-        .map_err(|e| e.to_string())?;
+        .map_err(DocumentError::raw)?;
 
     let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
     st.path = Some(path);
@@ -324,7 +328,10 @@ pub fn bind_document(
 }
 
 #[tauri::command]
-pub fn save_document(state: State<'_, Mutex<DocumentState>>, content: String) -> Result<(), String> {
+pub fn save_document(
+    state: State<'_, Mutex<DocumentState>>,
+    content: String,
+) -> Result<(), DocumentError> {
     // 非法 YAML / 历法错误不落盘；目录取自当前绑定，保存不改路径
     let st_guard = state.lock().unwrap_or_else(|p| p.into_inner());
     let base = st_guard
@@ -336,16 +343,21 @@ pub fn save_document(state: State<'_, Mutex<DocumentState>>, content: String) ->
     drop(st_guard);
     parse(&content, &base)?;
     let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
-    let path = st.path.clone().ok_or("尚未绑定文档")?;
+    let path = st
+        .path
+        .clone()
+        .ok_or(DocumentError::validation(ValidationError::DocumentNotBound))?;
     st.last_written = Some(content.clone());
     // 原子写：先写临时文件再 rename，外部 watcher 不会读到半截内容
-    let name = path.file_name().ok_or("无效路径")?;
+    let name = path
+        .file_name()
+        .ok_or(DocumentError::validation(ValidationError::InvalidPath))?;
     let tmp = path.with_file_name(format!(".{}.weft-tmp", name.to_string_lossy()));
-    fs::write(&tmp, &content).map_err(|e| e.to_string())?;
+    fs::write(&tmp, &content).map_err(DocumentError::raw)?;
     if let Err(e) = fs::rename(&tmp, &path) {
         st.last_written = None;
         let _ = fs::remove_file(&tmp);
-        return Err(e.to_string());
+        return Err(DocumentError::raw(e));
     }
     Ok(())
 }

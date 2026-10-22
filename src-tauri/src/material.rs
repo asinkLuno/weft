@@ -1,10 +1,11 @@
 use rhai::serde::{from_dynamic, to_dynamic};
-use rhai::{Dynamic, Engine, Scope, AST};
+use rhai::{AST, Dynamic, Engine, Scope};
 use serde_json::Value;
 use std::{collections::HashMap, fs, path::Path};
 
 use crate::calendar::limited_engine;
 use crate::model::CalendarSpec;
+use crate::validation::DocumentError;
 
 const CONSTELLATION_CN: &str = include_str!("../rhai/constellation_cn.rhai");
 const CONSTELLATION_EN: &str = include_str!("../rhai/constellation_en.rhai");
@@ -19,7 +20,7 @@ pub struct MaterialRuntime {
 
 impl MaterialRuntime {
     // specs 是顶层 material 注册表，脚本路径相对故事文件；内置星座材料免注册，注册可覆盖
-    pub fn load(specs: &HashMap<String, CalendarSpec>, base: &Path) -> Result<Self, String> {
+    pub fn load(specs: &HashMap<String, CalendarSpec>, base: &Path) -> Result<Self, DocumentError> {
         let engine = limited_engine();
         let mut materials = HashMap::new();
         for (name, spec) in specs {

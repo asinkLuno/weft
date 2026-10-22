@@ -2,6 +2,7 @@ mod calendar;
 mod document;
 mod material;
 mod model;
+mod validation;
 
 use std::sync::Mutex;
 use serde_json::json;

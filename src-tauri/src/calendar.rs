@@ -1,10 +1,11 @@
 use rhai::serde::from_dynamic;
-use rhai::{Dynamic, Engine, Scope, AST};
+use rhai::{AST, Dynamic, Engine, Scope};
 use serde::Serialize;
 use serde_json::Value;
 use std::{fs, path::Path};
 
 use crate::model::CalendarSpec;
+use crate::validation::{DocumentError, ValidationError};
 
 const GREGORIAN_CORE: &str = include_str!("../rhai/gregorian_core.rhai");
 const GREGORIAN_CN: &str = include_str!("../rhai/gregorian_cn.rhai");
@@ -27,7 +28,9 @@ pub struct RhaiCalendar {
 
 impl std::fmt::Debug for RhaiCalendar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RhaiCalendar").field("name", &self.name).finish()
+        f.debug_struct("RhaiCalendar")
+            .field("name", &self.name)
+            .finish()
     }
 }
 
@@ -72,7 +75,10 @@ impl RhaiCalendar {
             .ok_or("normalize 必须返回数组")?;
         output
             .into_iter()
-            .map(|item| item.as_int().map_err(|_| "normalize 必须返回整数数组".into()))
+            .map(|item| {
+                item.as_int()
+                    .map_err(|_| "normalize 必须返回整数数组".into())
+            })
             .collect()
     }
 
@@ -92,12 +98,16 @@ impl RhaiCalendar {
 #[derive(Debug)]
 pub struct Calendar {
     inner: RhaiCalendar,
-    component_count: usize,
+    metadata: CalendarMetadata,
 }
 
 impl Calendar {
     // name 是 story.date_mode：内置 gregorian/gregorian_en，或在顶层 calendar 注册的自定义历法
-    pub fn load(name: &str, spec: Option<&CalendarSpec>, base: &Path) -> Result<Self, String> {
+    pub fn load(
+        name: &str,
+        spec: Option<&CalendarSpec>,
+        base: &Path,
+    ) -> Result<Self, DocumentError> {
         let inner = match name {
             "gregorian" => {
                 RhaiCalendar::load_script(name, &format!("{GREGORIAN_CORE}\n{GREGORIAN_CN}"))?
@@ -106,25 +116,27 @@ impl Calendar {
                 RhaiCalendar::load_script(name, &format!("{GREGORIAN_CORE}\n{GREGORIAN_EN}"))?
             }
             other => {
-                let spec = spec
-                    .ok_or_else(|| format!("未注册的历法 `{other}`，请在顶层 calendar 中注册"))?;
+                let spec = spec.ok_or_else(|| ValidationError::UnregisteredCalendar {
+                    calendar: other.to_string(),
+                })?;
                 spec.validate(other, "calendar")?;
                 RhaiCalendar::load(other, &base.join(&spec.source))?
             }
         };
-        let metadata = inner.metadata()?;
-        Ok(Self {
-            component_count: metadata
-                .get("components")
-                .and_then(Value::as_u64)
-                .unwrap_or(6) as usize,
-            inner,
-        })
-    }
-
-    pub fn metadata(&self, name: &str) -> CalendarMetadata {
-        let value = self.inner.metadata().unwrap_or(Value::Null);
-        CalendarMetadata {
+        let value = inner.metadata()?;
+        let components = value
+            .get("components")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| ValidationError::CalendarComponentsNotPositiveInteger {
+                calendar: name.to_string(),
+            })?;
+        if !(1..=64).contains(&components) {
+            return Err(ValidationError::CalendarComponentsOutOfRange {
+                calendar: name.to_string(),
+            }
+            .into());
+        }
+        let metadata = CalendarMetadata {
             name: name.into(),
             title: value
                 .get("title")
@@ -136,42 +148,81 @@ impl Calendar {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .into(),
-            components: self.component_count,
-        }
+            components: components as usize,
+        };
+        Ok(Self { inner, metadata })
+    }
+
+    pub fn metadata(&self) -> CalendarMetadata {
+        self.metadata.clone()
     }
 
     // 脚本只认 component_count 个分量：超长是写错了，报错；缺尾补零
-    fn pad(&self, values: &[i64]) -> Result<Vec<i64>, String> {
-        if values.len() > self.component_count {
-            return Err(format!(
-                "时间分量过多：{} 个，该历法最多 {} 个",
-                values.len(),
-                self.component_count
-            ));
+    fn pad(&self, values: &[i64]) -> Result<Vec<i64>, DocumentError> {
+        if values.len() > self.metadata.components {
+            return Err(ValidationError::TooManyTimeComponents {
+                actual: values.len().to_string(),
+                maximum: self.metadata.components.to_string(),
+            }
+            .into());
         }
         let mut v = values.to_vec();
-        v.resize(self.component_count, 0);
+        v.resize(self.metadata.components, 0);
         Ok(v)
     }
 
-    pub fn normalize(&self, values: &[i64]) -> Result<Vec<i64>, String> {
+    pub fn normalize(&self, values: &[i64]) -> Result<Vec<i64>, DocumentError> {
         let padded = self.pad(values)?;
         let result = self.inner.normalize(&padded)?;
-        if result.len() != self.component_count {
-            return Err(format!(
-                "normalize 必须返回 {} 个时间分量",
-                self.component_count
-            ));
+        if result.len() != self.metadata.components {
+            return Err(ValidationError::NormalizeWrongComponentCount {
+                expected: self.metadata.components.to_string(),
+            }
+            .into());
         }
         Ok(result)
     }
 
-    pub fn humanize(&self, values: &[i64]) -> Result<String, String> {
-        self.inner.humanize(&self.pad(values)?)
+    pub fn humanize(&self, values: &[i64]) -> Result<String, DocumentError> {
+        self.inner.humanize(&self.pad(values)?).map_err(Into::into)
     }
 
-    pub fn to_tick(&self, values: &[i64]) -> Result<i64, String> {
-        self.inner.to_tick(&self.pad(values)?)
+    pub fn to_tick(&self, values: &[i64]) -> Result<i64, DocumentError> {
+        let mut padded = self.pad(values)?;
+        if matches!(self.inner.name.as_str(), "gregorian" | "gregorian_en") {
+            // 部分日期排序按其最早可能时刻；展示仍保留未指定的 0 分量。
+            if padded[1] == 0 {
+                padded[1] = 1;
+            }
+            if padded[2] == 0 {
+                padded[2] = 1;
+            }
+        }
+        self.inner.to_tick(&padded).map_err(Into::into)
+    }
+
+    pub fn offset_display(&self, time: &[i64], base: &[i64]) -> Result<String, DocumentError> {
+        if matches!(self.inner.name.as_str(), "gregorian" | "gregorian_en") {
+            let seconds = self
+                .to_tick(time)?
+                .checked_sub(self.to_tick(base)?)
+                .ok_or(ValidationError::TimeOffsetOutOfRange)?;
+            return self
+                .inner
+                .call("humanize_duration", (seconds,))?
+                .into_string()
+                .map_err(|_| DocumentError::raw("humanize_duration 必须返回字符串"));
+        }
+        let diff: Vec<i64> = (0..time.len().max(base.len()))
+            .map(|i| {
+                time.get(i)
+                    .copied()
+                    .unwrap_or_default()
+                    .checked_sub(base.get(i).copied().unwrap_or_default())
+                    .ok_or(ValidationError::TimeOffsetOutOfRange)
+            })
+            .collect::<Result<_, _>>()?;
+        self.humanize(&self.normalize(&diff)?)
     }
 }
 
