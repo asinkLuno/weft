@@ -20,6 +20,7 @@ import {
   memo,
   type ReactNode,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -138,6 +139,27 @@ function App() {
   const [path, setPath] = useState<string | null>(null);
   const [doc, setDoc] = useState<StoryDoc | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("tab1");
+  // 各页首次激活才挂载、之后常驻（实体画布要在页面可见时挂载才有尺寸可取景）
+  const [visited, setVisited] = useState<ReadonlySet<Tab>>(
+    () => new Set<Tab>(["tab1"]),
+  );
+  // 隐藏页用 display:none，滚动位置会丢：切走时记下，切回时补上
+  const panes = useRef<Partial<Record<Tab, HTMLDivElement | null>>>({});
+  const scrollTops = useRef<Partial<Record<Tab, number>>>({});
+
+  function switchTab(next: Tab) {
+    if (next === activeTab) return;
+    const el = panes.current[activeTab];
+    if (el) scrollTops.current[activeTab] = el.scrollTop;
+    setActiveTab(next);
+    setVisited((prev) => new Set(prev).add(next));
+  }
+
+  useLayoutEffect(() => {
+    const el = panes.current[activeTab];
+    const top = scrollTops.current[activeTab];
+    if (el && top) el.scrollTop = top;
+  }, [activeTab]);
   const [lang, setLang] = useState<Lang>(initialLang);
   const [recents, setRecents] = useState<string[]>([]);
   const [flash, setFlash] = useState(false);
@@ -252,11 +274,28 @@ function App() {
     );
   }
 
+  // 首次激活才挂载，之后常驻仅隐藏：切换不重挂载，
+  // 实体画布视角和筛选状态都不丢；滚动位置由 switchTab 存取
+  function pane(tab: Tab, node: ReactNode) {
+    return (
+      <TabsContent
+        value={tab}
+        className="pane"
+        forceMount={visited.has(tab) || undefined}
+        ref={(el) => {
+          panes.current[tab] = el;
+        }}
+      >
+        {node}
+      </TabsContent>
+    );
+  }
+
   return (
     <div className="app">
       <Tabs
         value={activeTab}
-        onValueChange={(v) => setActiveTab(v as Tab)}
+        onValueChange={(v) => switchTab(v as Tab)}
         className="tabbody"
       >
         <div className="tabbar">
@@ -269,18 +308,10 @@ function App() {
           </TabsList>
         </div>
         <main className="content">
-          <TabsContent value="tab1" className="pane">
-            {doc?.story && <StoryView doc={doc} lang={lang} />}
-          </TabsContent>
-          <TabsContent value="tab2" className="pane">
-            <EntityView doc={doc} lang={lang} path={path} />
-          </TabsContent>
-          <TabsContent value="tab3" className="pane">
-            <EventView doc={doc} lang={lang} />
-          </TabsContent>
-          <TabsContent value="tab4" className="pane">
-            <NarrativeView doc={doc} lang={lang} />
-          </TabsContent>
+          {pane("tab1", doc?.story && <StoryView doc={doc} lang={lang} />)}
+          {pane("tab2", <EntityView doc={doc} lang={lang} path={path} />)}
+          {pane("tab3", <EventView doc={doc} lang={lang} />)}
+          {pane("tab4", <NarrativeView doc={doc} lang={lang} />)}
         </main>
       </Tabs>
       <footer className={flash ? "statusbar flash" : "statusbar"}>

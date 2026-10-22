@@ -6,7 +6,7 @@ use std::{
 };
 
 use notify::RecursiveMode;
-use notify_debouncer_full::{Debouncer, FileIdMap, new_debouncer};
+use notify_debouncer_full::{Debouncer, RecommendedCache, new_debouncer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -24,7 +24,7 @@ pub struct DocumentState {
     // 最近一次由我们写盘的内容，用于抑制自己保存触发的 watcher 回声
     last_written: Option<String>,
     // drop 即停止监听，因此 bind 时直接用新 watcher 覆盖旧值
-    _watcher: Option<Debouncer<notify::RecommendedWatcher, FileIdMap>>,
+    _watcher: Option<Debouncer<notify::RecommendedWatcher, RecommendedCache>>,
 }
 
 #[derive(Serialize, Clone)]

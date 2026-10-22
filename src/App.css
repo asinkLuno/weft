@@ -37,6 +37,13 @@ body,
   padding: 20px 24px;
 }
 
+/* 配合 TabsContent 的 forceMount：页面常驻仅隐藏，切回不重挂载。
+   必须用 display:none（visibility 在 WebKitGTK 有绘制残留），
+   滚动位置因此会丢，由 App.tsx 切换时手工存取 */
+.pane[data-state="inactive"] {
+  display: none;
+}
+
 .story-body h1 {
   margin: 0 0 8px;
   font-size: 22px;
