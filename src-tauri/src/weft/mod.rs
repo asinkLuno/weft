@@ -5,5 +5,4 @@ pub mod errors;
 pub mod event;
 pub mod narrative;
 pub mod phase;
-pub mod plugin;
 pub mod story;

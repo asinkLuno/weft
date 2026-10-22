@@ -60,7 +60,7 @@ fn to_tick(values) {
 fn serialize(lang) {
     let zh = lang == "zh";
     let result = #{};
-    result.title = if zh { "格里高利历" } else { "Gregorian Calendar" };
+    result.name = if zh { "格里高利历" } else { "Gregorian Calendar" };
     result.description = if zh {
         "采用年、月、日和时分秒表示时间，并包含公历闰年规则。"
     } else {

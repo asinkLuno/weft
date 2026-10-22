@@ -6,4 +6,4 @@
 - [历法脚本](rhai-calendar.md)：时间分量、归一化、排序和日期展示。
 - [Calculable tags 脚本](rhai-calculable-tags.md)：根据实体数据计算归属链。
 
-内置实现可参考仓库中的 `src-tauri/rhai/gregorian.rhai` 和 `src-tauri/rhai/constellation.rhai`。
+内置历法见 `src-tauri/rhai/gregorian.rhai`；星座标签示例见 `examples/constellation.rhai`，需要在故事中显式注册。

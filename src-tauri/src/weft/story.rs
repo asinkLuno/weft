@@ -1,43 +1,50 @@
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashMap, path::Path};
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::calculable_tag::CalculableTagRuntime;
 use crate::calendar::Calendar;
-
-use serde::{Deserialize, Serialize};
-
 use crate::weft::errors::{DocumentError, ValidationError};
-use crate::weft::plugin::CalendarSpec;
 
-/// story 段：作品的元数据与历法选择
-#[derive(Debug, Serialize, Deserialize)]
+// YAML 输入只包含元数据和脚本路径。
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawStory {
+    pub title: String,
+    pub description: Option<String>,
+    pub author: Option<String>,
+    pub date_mode: Option<String>,
+    #[serde(default)]
+    pub calculatable_tags: HashMap<String, String>,
+}
+
+/// 已完成历法和可计算标签加载的故事。
+#[derive(Debug, Serialize)]
 pub struct Story {
     pub title: String,
     pub description: Option<String>,
     pub author: Option<String>,
-    // 自定义历法 Rhai 脚本路径，相对故事文件；缺省或留空使用内置公历。
-    pub date_mode: Option<String>,
+    pub date: Value,
+    pub calculatable_tags: HashMap<String, Value>,
+    #[serde(skip)]
+    pub calendar: Calendar,
+    #[serde(skip)]
+    pub calculable_tag_runtime: CalculableTagRuntime,
 }
 
 impl Story {
-    pub(crate) fn date_mode(&self) -> Option<&str> {
-        self.date_mode
+    pub(crate) fn new(
+        raw: RawStory,
+        base: &Path,
+        gregorian: &Path,
+        lang: &str,
+    ) -> Result<Self, DocumentError> {
+        // 留空使用内置公历，自定义脚本路径相对于故事文件。
+        let path = match raw
+            .date_mode
             .as_deref()
             .filter(|source| !source.trim().is_empty())
-    }
-}
-
-// story 阶段统一加载插件，后续各段只使用已编译的运行时。
-pub(crate) struct StoryPlugins {
-    pub calendar: Calendar,
-    pub calculable_tags: CalculableTagRuntime,
-}
-
-impl Story {
-    fn calendar_path(&self, base: &Path, gregorian: &Path) -> Result<PathBuf, DocumentError> {
-        let path = match self.date_mode() {
+        {
             Some(source) => base.join(source),
             None => gregorian.to_path_buf(),
         };
@@ -47,20 +54,18 @@ impl Story {
             }
             .into());
         }
-        Ok(path)
-    }
-
-    pub(crate) fn load_plugins(
-        &self,
-        calculable_tags: &HashMap<String, CalendarSpec>,
-        base: &Path,
-        gregorian: &Path,
-        lang: &str,
-    ) -> Result<StoryPlugins, DocumentError> {
-        let path = self.calendar_path(base, gregorian)?;
-        Ok(StoryPlugins {
-            calendar: Calendar::new(&path, lang)?,
-            calculable_tags: CalculableTagRuntime::load(calculable_tags, base)?,
+        let calendar = Calendar::new(&path, lang)?;
+        let date = calendar.serialize(lang)?;
+        let calculable_tag_runtime = CalculableTagRuntime::load(&raw.calculatable_tags, base)?;
+        let calculatable_tags = calculable_tag_runtime.serialize(lang)?;
+        Ok(Self {
+            title: raw.title,
+            description: raw.description,
+            author: raw.author,
+            date,
+            calculatable_tags,
+            calendar,
+            calculable_tag_runtime,
         })
     }
 }

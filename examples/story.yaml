@@ -3,139 +3,110 @@
 story:
   title: 哈利·波特与魔法石
   author: J.K. 罗琳
+  calculatable_tags:
+    constellation: constellation.rhai
   description: >-
     十一岁的哈利·波特进入霍格沃茨魔法学校，
     与同伴一起揭开魔法石的秘密。
 
 entity:
-  hogwarts:
-    name: 霍格沃茨魔法学校
+  霍格沃茨魔法学校:
     description: 英国的魔法学校，下设四大学院。
 
-  gryffindor:
-    name: 格兰芬多
+  格兰芬多:
     description: 以勇气著称的学院，院徽为狮子。
-    belong_to: [hogwarts]
-  slytherin:
-    name: 斯莱特林
+    belong_to: [霍格沃茨魔法学校]
+  斯莱特林:
     description: 以野心著称的学院，院徽为蛇。
-    belong_to: [hogwarts]
-  ravenclaw:
-    name: 拉文克劳
+    belong_to: [霍格沃茨魔法学校]
+  拉文克劳:
     description: 以智慧著称的学院，院徽为鹰。
-    belong_to: [hogwarts]
-  hufflepuff:
-    name: 赫奇帕奇
+    belong_to: [霍格沃茨魔法学校]
+  赫奇帕奇:
     description: 以忠诚著称的学院，院徽为獾。
-    belong_to: [hogwarts]
+    belong_to: [霍格沃茨魔法学校]
 
-  dumbledore:
-    name: 阿不思·邓布利多
+  阿不思·邓布利多:
     description: 霍格沃茨校长，巧克力蛙卡片上的著名巫师，开学致辞常常只有几个词。
     base_time: 1881
     # 多父归属示例：既是格兰芬多出身，也直属霍格沃茨
-    belong_to: [gryffindor, hogwarts]
+    belong_to: [格兰芬多, 霍格沃茨魔法学校]
 
-  james:
-    name: 詹姆·波特
+  詹姆·波特:
     description: 哈利的父亲，格兰芬多击球手，掠夺者之首。
     base_time: [1960, 3, 27]
-    belong_to: [gryffindor]
-  lily:
-    name: 莉莉·波特
+    belong_to: [格兰芬多]
+  莉莉·波特:
     description: 哈利的母亲，麻瓜出身却天资出众的女巫。
     base_time: [1960, 1, 30]
-    belong_to: [gryffindor]
+    belong_to: [格兰芬多]
 
-  harry:
-    name: 哈利·波特
+  哈利·波特:
     description: 大难不死的男孩，入学当晚被分院帽分入格兰芬多。
     base_time: [1980, 7, 31]
-    belong_to: [gryffindor]
+    belong_to: [格兰芬多]
     # 可计算标签：按 base_time 计算，归属链写进 belong_to（哈利 → 狮子座 → 星座，星座实体自动生成）
     calculable_tags: [constellation]
-  ron:
-    name: 罗恩·韦斯莱
+  罗恩·韦斯莱:
     description: 哈利在火车上结识的好友，韦斯莱家幼子。
     base_time: [1980, 3, 1]
-    belong_to: [gryffindor]
+    belong_to: [格兰芬多]
     calculable_tags: [constellation]
-  hermione:
-    name: 赫敏·格兰杰
+  赫敏·格兰杰:
     description: 麻瓜出身、成绩拔尖的女巫，与哈利罗恩同寝。
     base_time: [1979, 9, 19]
-    belong_to: [gryffindor]
+    belong_to: [格兰芬多]
     calculable_tags: [constellation]
-  neville:
-    name: 纳威·隆巴顿
+  纳威·隆巴顿:
     description: 健忘胆小的同院同学，蟾蜍莱夫总在跑丢。
     base_time: [1980, 7, 30]
-    belong_to: [gryffindor]
-  ginny:
-    name: 金妮·韦斯莱
+    belong_to: [格兰芬多]
+  金妮·韦斯莱:
     description: 韦斯莱家的小女儿，在国王十字车站送哥哥上学。
     base_time: [1981, 8, 11]
-    belong_to: [gryffindor]
+    belong_to: [格兰芬多]
 
-  draco:
-    name: 德拉科·马尔福
+  德拉科·马尔福:
     description: 纯血世家出身的傲慢男生，入学前就想拉拢哈利。
     base_time: [1980, 6, 5]
-    belong_to: [slytherin]
+    belong_to: [斯莱特林]
     calculable_tags: [constellation]
-  crabbe:
-    name: 文森特·克拉布
+  文森特·克拉布:
     description: 德拉科的跟班，胳膊粗脑子钝。
-    belong_to: [slytherin]
-  goyle:
-    name: 格雷戈里·高尔
+    belong_to: [斯莱特林]
+  格雷戈里·高尔:
     description: 德拉科的跟班，与克拉布形影不离。
-    belong_to: [slytherin]
+    belong_to: [斯莱特林]
 
-  padma:
-    name: 帕德玛·佩蒂尔
+  帕德玛·佩蒂尔:
     description: 帕瓦蒂的双胞胎妹妹，分院礼上被分入拉文克劳。
-    belong_to: [ravenclaw]
+    belong_to: [拉文克劳]
 
-  hannah:
-    name: 汉娜·艾博
+  汉娜·艾博:
     description: 分院礼上被分入赫奇帕奇的女生。
-    belong_to: [hufflepuff]
-  susan:
-    name: 苏珊·博恩斯
+    belong_to: [赫奇帕奇]
+  苏珊·博恩斯:
     description: 分院礼上被分入赫奇帕奇的女生。
-    belong_to: [hufflepuff]
-  justin:
-    name: 贾斯廷·芬列里
+    belong_to: [赫奇帕奇]
+  贾斯廷·芬列里:
     description: 放弃麻瓜私立名校来读霍格沃茨的赫奇帕奇学生。
-    belong_to: [hufflepuff]
-
-# 可计算标签：注册名 → rhai 脚本清单（相对故事文件），与 calendar 同构；
-# 计算入口 fn calculable_tag(ctx)，ctx = { api, date_mode, language, entity: { id, name, base_time, … } }；
-# 返回不随语言变化的字符串 ID 列表。展示入口 fn humanizer(kind, value, language)，
-# kind 为 "chain" 时把 ID 列表变为归属名称：实体 → chain[0] → chain[1] …。
-# 缺失的环上实体自动生成。
-# 内置 constellation 免注册，按 base_time 算十二星座（需写全 年月日），名称跟随应用语言。
-# 自定义 calendar 脚本用 metadata()/normalize(values)/to_tick(values) 计算，
-# 用 humanizer(kind, value, language) 展示；kind 为 "metadata"、"time" 或 "duration"。
-# 加载脚本时会检查这些公开函数的名称和参数个数；返回值在调用时校验。
-calculable_tag: {}
+    belong_to: [赫奇帕奇]
 
 # 实体关系：按组组织，每组是一批关系对；引用写实体 id
 entity_link:
   波特一家:
-    - entities: [harry, lily]
+    - entities: [哈利·波特, 莉莉·波特]
       relations: 母子
-    - entities: [harry, james]
+    - entities: [哈利·波特, 詹姆·波特]
       relations: 父子
-    - entities: [lily, james]
+    - entities: [莉莉·波特, 詹姆·波特]
       relations: 夫妻
   格兰芬多伙伴:
-    - entities: [harry, ron]
+    - entities: [哈利·波特, 罗恩·韦斯莱]
       relations: 同学与朋友
-    - entities: [harry, hermione]
+    - entities: [哈利·波特, 赫敏·格兰杰]
       relations: 同学与朋友
-    - entities: [ron, hermione]
+    - entities: [罗恩·韦斯莱, 赫敏·格兰杰]
       relations: 同学与朋友
 
 # 事件：按组组织，组内按开始时间排序；时间列表末尾嵌套列表表示锚点相对时间
@@ -144,17 +115,17 @@ event:
     分院帽晚宴:
       start_time: &feast [1991, 9, 1, 19]
       end_time: [0, 0, 0, 2, *feast] # 宴会两小时后结束
-      entities: [harry, ron, hermione, draco]
+      entities: [哈利·波特, 罗恩·韦斯莱, 赫敏·格兰杰, 德拉科·马尔福]
       description: 开学宴会上分院帽把新生分入四大学院。
     厄里斯魔镜:
       start_time: [1991, 12, 25, 21]
-      entities: [harry]
+      entities: [哈利·波特]
       description: 圣诞夜哈利在镜中看见了家人。
   密室事件:
     蛇怪袭击:
       start_time: &basilisk [1993, 4, 20, 8]
       end_time: [0, 0, 6, 0, *basilisk] # 锚点：自己开始后 6 小时
-      entities: [ginny]
+      entities: [金妮·韦斯莱]
       description: 金妮被里德的日记控制，打开密室。
 
 # 叙事线：subject 引用事件（`组名/标题` 全 id，或裸标题——事件标题全局唯一），
@@ -162,4 +133,4 @@ event:
 narrative:
   哈利的第一学年:
     subject: [入学之夜/分院帽晚宴, 入学之夜/厄里斯魔镜, 密室事件/蛇怪袭击]
-    observer: harry
+    observer: 哈利·波特

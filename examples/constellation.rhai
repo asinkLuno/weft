@@ -1,3 +1,10 @@
+fn serialize(lang) {
+    #{
+        name: if lang == "zh" { "星座" } else { "Zodiac" },
+        description: if lang == "zh" { "按公历生日计算十二星座归属。" } else { "Assigns one of the twelve zodiac signs from a Gregorian birthday." }
+    }
+}
+
 // 十二星座：计算只返回稳定 ID；归属名称和错误文字交给 humanizer。
 
 fn sign_ids() {

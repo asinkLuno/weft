@@ -16,9 +16,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_log::log::{error, warn};
 
-use crate::calculable_tag::CalculableTagRuntime;
-use crate::calendar::Calendar;
-use crate::weft::entity::{self, Entity, EntityLink, check as check_entity};
+use crate::weft::entity::{EntityCollection, RawEntity, RawEntityLink};
 use crate::weft::errors::{DocumentError, ValidationError};
 use crate::weft::event::{
     self, EventItem, RawEvent, build_event_index, build_events, check as check_event,
@@ -26,20 +24,14 @@ use crate::weft::event::{
 use crate::weft::narrative::{
     self, Narrative, RawNarrative, check as check_narrative, resolve_narratives,
 };
-use crate::weft::plugin::CalendarSpec;
-use crate::weft::story::{Story, StoryPlugins};
+use crate::weft::story::{RawStory, Story};
 
 // YAML 数据模型：顶层键逐个补齐，未知键在反序列化时滤掉。
 #[derive(Debug, Serialize)]
 pub struct WeftDoc {
     pub story: Story,
-    pub entity: HashMap<String, Entity>,
-    // 关系分组：组名 → 关系对列表
-    #[serde(default)]
-    pub entity_link: HashMap<String, Vec<EntityLink>>,
-    // 可计算标签注册表：注册名 → Rhai 脚本清单，按实体 base_time 计算归属
-    #[serde(default)]
-    pub calculable_tag: HashMap<String, CalendarSpec>,
+    #[serde(flatten)]
+    pub entity: EntityCollection,
     // 事件分组：组名 → 按 tick 排序的事件列表
     #[serde(default)]
     pub event: BTreeMap<String, Vec<EventItem>>,
@@ -49,24 +41,19 @@ pub struct WeftDoc {
     // 运行时填充：所选历法的时间分量数，不来自 YAML
     #[serde(skip_serializing_if = "Option::is_none")]
     pub calendar_components: Option<usize>,
-    // 当前语言的动态展示信息，由历法 serialize 生成。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub calendar_display: Option<Value>,
 }
 
 #[derive(Deserialize)]
 struct RawWeftDoc {
-    story: Story,
+    story: RawStory,
     #[serde(default)]
-    entity: HashMap<String, Entity>,
+    entity: HashMap<String, RawEntity>,
     #[serde(default)]
-    entity_link: HashMap<String, Vec<EntityLink>>,
+    entity_link: HashMap<String, Vec<RawEntityLink>>,
     #[serde(default)]
     event: HashMap<String, HashMap<String, RawEvent>>,
     #[serde(default)]
     narrative: HashMap<String, RawNarrative>,
-    #[serde(default)]
-    calculable_tag: HashMap<String, CalendarSpec>,
 }
 
 impl WeftDoc {
@@ -75,31 +62,39 @@ impl WeftDoc {
         base: &Path,
         gregorian: &Path,
         lang: &str,
-    ) -> Result<(Self, StoryPlugins), DocumentError> {
+    ) -> Result<Self, DocumentError> {
         let raw = RawWeftDoc::deserialize(yaml).map_err(DocumentError::raw)?;
         // 按段检查：story → entity → event → narrative；每段先引用后结构，
         // 前面的段不成立，后面段的问题没有报告价值
-        let plugins = raw
+        // 历法路径仅在输入构建阶段用于标签上下文，不保存到运行时 Story。
+        let date_mode = raw
             .story
-            .load_plugins(&raw.calculable_tag, base, gregorian, lang)?;
-        check_entity(&raw.entity, &raw.entity_link)?;
+            .date_mode
+            .clone()
+            .filter(|source| !source.trim().is_empty());
+        let story = Story::new(raw.story, base, gregorian, lang)?;
+        let entity = EntityCollection::new(
+            raw.entity,
+            raw.entity_link,
+            &story.calendar,
+            &story.calculable_tag_runtime,
+            date_mode.as_deref(),
+            lang,
+        )?;
         // 标题索引只含名字不含事件体，event 与 narrative 的检查、重写都单独对它做
         let index = build_event_index(&raw.event);
-        check_event(&raw.event, &raw.entity, &index)?;
-        check_narrative(&raw.narrative, &raw.entity, &index)?;
+        check_event(&raw.event, entity.as_map(), &index)?;
+        check_narrative(&raw.narrative, entity.as_map(), &index)?;
         let narrative = resolve_narratives(raw.narrative, &index);
         let event = build_events(raw.event)?;
         let doc = WeftDoc {
-            story: raw.story,
-            entity: raw.entity,
-            entity_link: raw.entity_link,
+            story,
+            entity,
             event,
             narrative,
-            calculable_tag: raw.calculable_tag,
             calendar_components: None,
-            calendar_display: None,
         };
-        Ok((doc, plugins))
+        Ok(doc)
     }
 }
 
@@ -152,123 +147,13 @@ fn parse(app: &AppHandle, content: &str, base: &Path, lang: &str) -> Result<Valu
             tauri::path::BaseDirectory::Resource,
         )
         .map_err(DocumentError::raw)?;
-    let (mut doc, plugins) = WeftDoc::from_yaml(&yaml, base, &gregorian, lang)?;
-    // 插件已在 story 阶段加载完毕，按所选历法解析所有时间。
-    let mode = doc.story.date_mode().map(str::to_owned);
-    let cal = &plugins.calendar;
+    let mut doc = WeftDoc::from_yaml(&yaml, base, &gregorian, lang)?;
+    // 实体及可计算归属已构建完毕，继续计算事件与叙事线时间。
+    let cal = &doc.story.calendar;
     doc.calendar_components = Some(cal.component_count());
-    doc.calendar_display = Some(cal.serialize(lang)?);
-    entity::apply_times(&mut doc.entity, cal)?;
-    apply_calculable_tags(
-        &mut doc,
-        &plugins.calculable_tags,
-        mode.as_deref(),
-        lang,
-        cal,
-    )?;
-    event::apply_times(&mut doc.event, &doc.entity, cal)?;
-    narrative::apply_times(&mut doc.narrative, &doc.entity, &doc.event, cal)?;
+    event::apply_times(&mut doc.event, doc.entity.as_map(), cal)?;
+    narrative::apply_times(&mut doc.narrative, doc.entity.as_map(), &doc.event, cal)?;
     serde_json::to_value(doc).map_err(DocumentError::raw)
-}
-
-// 可计算标签：按各实体 base_time 执行脚本，归属链 chain[0] 并入 belong_to，其余逐级生成缺失实体
-fn apply_calculable_tags(
-    doc: &mut WeftDoc,
-    runtime: &CalculableTagRuntime,
-    mode: Option<&str>,
-    lang: &str,
-    cal: &Calendar,
-) -> Result<(), DocumentError> {
-    if doc.calculable_tag.is_empty() && doc.entity.values().all(|e| e.calculable_tags.is_empty()) {
-        return Ok(());
-    }
-    let ids: Vec<String> = doc.entity.keys().cloned().collect();
-    for id in ids {
-        for name in doc.entity[&id].calculable_tags.clone() {
-            let entity = &doc.entity[&id];
-            let base_time = entity
-                .base_time
-                .as_ref()
-                .map(|phase| cal.normalize(&phase.flatten(cal.component_count())?))
-                .transpose()?;
-            let context = serde_json::json!({
-                "api": 1,
-                "date_mode": mode,
-                "language": lang,
-                "entity": {
-                    "id": id,
-                    "name": entity.name,
-                    "base_time": base_time,
-                    "description": entity.description,
-                    "belong_to": entity.belong_to,
-                },
-            });
-            let chain = runtime.calculable_tag(&name, &context, lang)?;
-            let chain: Vec<String> = serde_json::from_value(chain)
-                .map_err(|_| format!("可计算标签 `{name}` 必须返回字符串列表（归属链）"))?;
-            apply_chain(&mut doc.entity, &id, &chain)?;
-        }
-    }
-    // 可计算标签生成的归属可能成环（比如把实体自己算进链里），复查 belong_to 无环
-    crate::weft::entity::check_acyclic(&doc.entity)
-}
-
-// 名称 → 已有实体 id：tag 返回的是名称，实体 id 可以与之不同
-fn resolve_entity_id(entity: &HashMap<String, Entity>, target: &str) -> Option<String> {
-    if entity.contains_key(target) {
-        return Some(target.to_owned());
-    }
-    entity
-        .iter()
-        .find(|(_, e)| e.name.as_deref() == Some(target))
-        .map(|(id, _)| id.clone())
-}
-
-// 归属链：实体 → chain[0] → chain[1] …。链上缺失的实体按名称自动生成，
-// 撞到已有实体（id 或名称相同）即停；已有实体自己的归属不动
-fn apply_chain(
-    entity: &mut HashMap<String, Entity>,
-    id: &str,
-    chain: &[String],
-) -> Result<(), String> {
-    if chain.is_empty() {
-        return Ok(());
-    }
-    // 先把每个名称解析成 id：已有实体用它自己的 id，新建实体用名称作 id。
-    // 新建实体的 belong_to 因此总能指向真实存在的 id
-    let existing: Vec<Option<String>> = chain
-        .iter()
-        .map(|target| resolve_entity_id(entity, target))
-        .collect();
-    let ids: Vec<String> = chain
-        .iter()
-        .zip(&existing)
-        .map(|(target, id)| id.clone().unwrap_or_else(|| target.clone()))
-        .collect();
-    for (i, target) in chain.iter().enumerate() {
-        if existing[i].is_some() {
-            break;
-        }
-        entity.insert(
-            target.clone(),
-            Entity {
-                name: Some(target.clone()),
-                base_time: None,
-                base_time_humanizer: None,
-                description: None,
-                belong_to: ids.get(i + 1).cloned().into_iter().collect(),
-                calculable_tags: Vec::new(),
-            },
-        );
-    }
-    let owner = entity
-        .get_mut(id)
-        .ok_or_else(|| format!("可计算标签归属链引用了不存在的实体 `{id}`"))?;
-    let first_id = &ids[0];
-    if !owner.belong_to.contains(first_id) {
-        owner.belong_to.push(first_id.clone());
-    }
-    Ok(())
 }
 
 fn read_doc(

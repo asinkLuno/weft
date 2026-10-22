@@ -27,7 +27,17 @@ const validationMessages = {
     time_integer_component: "时间分量必须是整数",
     event_end_before_start: "事件 `{event}` 的结束时间早于开始时间",
     invalid_calendar_path: "历法路径 `{path}` 必须指向现有的 .rhai 文件",
-    invalid_plugin_spec: "`{name}` 需要 runtime: rhai, kind: {kind}, api: 1",
+    invalid_calculable_tag_path:
+      "可计算标签 `{tag}` 的路径 `{path}` 必须指向 .rhai 文件",
+    calculable_tag_file_read: "读取可计算标签 `{tag}` 的脚本失败：{source}",
+    calculable_tag_compile: "可计算标签 `{tag}` 编译失败：{source}",
+    calculable_tag_missing_interface:
+      "可计算标签 `{tag}` 缺少公开接口：{functions}",
+    unknown_calculable_tag: "引用了未注册的可计算标签 `{tag}`",
+    calculable_tag_argument: "可计算标签 `{tag}` 入参转换失败：{source}",
+    calculable_tag_call: "可计算标签 `{tag}` 的 `{entry}` 执行失败：{source}",
+    calculable_tag_invalid_return:
+      "可计算标签 `{tag}` 的 `{entry}` 返回值无效，预期 {expected}",
     calendar_components_out_of_range:
       "历法 {calendar} 必须声明整数常量 COMPONENTS，取值为 1 到 64",
     calendar_file_read: "读取历法 `{calendar}` 的脚本失败：{source}",
@@ -59,8 +69,20 @@ const validationMessages = {
     event_end_before_start: "End time is before start time for event `{event}`",
     invalid_calendar_path:
       "Calendar path `{path}` must point to an existing .rhai file",
-    invalid_plugin_spec:
-      "`{name}` requires runtime: rhai, kind: {kind}, api: 1",
+    invalid_calculable_tag_path:
+      "Path `{path}` for calculable tag `{tag}` must point to a .rhai file",
+    calculable_tag_file_read: "Failed to read calculable tag `{tag}`: {source}",
+    calculable_tag_compile:
+      "Failed to compile calculable tag `{tag}`: {source}",
+    calculable_tag_missing_interface:
+      "Calculable tag `{tag}` is missing public interfaces: {functions}",
+    unknown_calculable_tag: "Unknown calculable tag `{tag}`",
+    calculable_tag_argument:
+      "Failed to convert arguments for calculable tag `{tag}`: {source}",
+    calculable_tag_call:
+      "Error running `{entry}` of calculable tag `{tag}`: {source}",
+    calculable_tag_invalid_return:
+      "`{entry}` of calculable tag `{tag}` returned an invalid value; expected {expected}",
     calendar_components_out_of_range:
       "Calendar {calendar} must declare an integer constant COMPONENTS between 1 and 64",
     calendar_file_read:

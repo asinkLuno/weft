@@ -34,8 +34,43 @@ pub enum ValidationError {
     EventEndBeforeStart { event: String },
     #[error("calendar path must point to an existing .rhai file: {path}")]
     InvalidCalendarPath { path: String },
-    #[error("invalid {kind} plugin specification: {name}")]
-    InvalidPluginSpec { name: String, kind: String },
+    #[error("calculable tag {tag} path must point to a .rhai file: {path}")]
+    InvalidCalculableTagPath { tag: String, path: String },
+    #[error("failed to read calculable tag {tag}: {details}")]
+    CalculableTagFileRead {
+        tag: String,
+        #[serde(rename = "source")]
+        details: String,
+    },
+    #[error("failed to compile calculable tag {tag}: {details}")]
+    CalculableTagCompile {
+        tag: String,
+        #[serde(rename = "source")]
+        details: String,
+    },
+    #[error("calculable tag {tag} is missing public interfaces: {functions}")]
+    CalculableTagMissingInterface { tag: String, functions: String },
+    #[error("unknown calculable tag: {tag}")]
+    UnknownCalculableTag { tag: String },
+    #[error("failed to convert arguments for calculable tag {tag}: {details}")]
+    CalculableTagArgument {
+        tag: String,
+        #[serde(rename = "source")]
+        details: String,
+    },
+    #[error("failed to call {entry} in calculable tag {tag}: {details}")]
+    CalculableTagCall {
+        tag: String,
+        entry: String,
+        #[serde(rename = "source")]
+        details: String,
+    },
+    #[error("invalid return value from {entry} in calculable tag {tag}; expected {expected}")]
+    CalculableTagInvalidReturn {
+        tag: String,
+        entry: String,
+        expected: String,
+    },
     #[error("calendar {calendar} component count is out of range")]
     CalendarComponentsOutOfRange { calendar: String },
     #[error("failed to read calendar {calendar}: {details}")]

@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -41,7 +42,7 @@ pub(crate) struct RawNarrative {
 // 引用错误批量收集，一次报出该段全部断链
 pub(crate) fn check(
     narrative: &HashMap<String, RawNarrative>,
-    entity: &HashMap<String, Entity>,
+    entity: &HashMap<String, Arc<Entity>>,
     index: &EventIndex<'_>,
 ) -> Result<(), DocumentError> {
     let mut errors = Vec::new();
@@ -103,7 +104,7 @@ pub(crate) fn resolve_narratives(
 // subject.event 在 model 层已重写成 `组名/标题` 全 id，这里按 id 直接取事件
 pub(crate) fn apply_times(
     narrative: &mut BTreeMap<String, Narrative>,
-    entity: &HashMap<String, Entity>,
+    entity: &HashMap<String, Arc<Entity>>,
     event: &BTreeMap<String, Vec<EventItem>>,
     cal: &Calendar,
 ) -> Result<(), DocumentError> {

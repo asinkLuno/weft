@@ -21,7 +21,29 @@ export type ValidationError =
   | { code: "time_integer_component" }
   | { code: "event_end_before_start"; params: { event: string } }
   | { code: "invalid_calendar_path"; params: { path: string } }
-  | { code: "invalid_plugin_spec"; params: { name: string; kind: string } }
+  | {
+      code: "invalid_calculable_tag_path";
+      params: { tag: string; path: string };
+    }
+  | {
+      code: "calculable_tag_file_read";
+      params: { tag: string; source: string };
+    }
+  | { code: "calculable_tag_compile"; params: { tag: string; source: string } }
+  | {
+      code: "calculable_tag_missing_interface";
+      params: { tag: string; functions: string };
+    }
+  | { code: "unknown_calculable_tag"; params: { tag: string } }
+  | { code: "calculable_tag_argument"; params: { tag: string; source: string } }
+  | {
+      code: "calculable_tag_call";
+      params: { tag: string; entry: string; source: string };
+    }
+  | {
+      code: "calculable_tag_invalid_return";
+      params: { tag: string; entry: string; expected: string };
+    }
   | { code: "calendar_components_out_of_range"; params: { calendar: string } }
   | { code: "calendar_file_read"; params: { calendar: string; source: string } }
   | { code: "calendar_compile"; params: { calendar: string; source: string } }

@@ -76,17 +76,15 @@ type WeftDoc = {
     title?: string;
     description?: string;
     author?: string;
+    date: { name: string; description?: string };
+    calculatable_tags: Record<string, { name: string; description?: string }>;
   };
   // 所选历法的时间分量数（后端解析时填充）
   calendar_components?: number;
-  calendar_display?: {
-    title?: string;
-    description?: string;
-  };
   entity?: Record<
     string,
     {
-      name?: string;
+      id: string;
       description?: string;
       belong_to?: string[];
       base_time?: Phase | null;
@@ -372,13 +370,13 @@ function StoryView({ doc, lang }: { doc: WeftDoc; lang: Lang }) {
           {t.author}: {story.author}
         </p>
       )}
-      {doc.calendar_display?.title && (
+      {story.date?.name && (
         <p className="story-author">
-          {t.calendar}: {doc.calendar_display.title}
+          {t.calendar}: {story.date.name}
         </p>
       )}
-      {doc.calendar_display?.description && (
-        <p className="story-desc">{doc.calendar_display.description}</p>
+      {story.date?.description && (
+        <p className="story-desc">{story.date.description}</p>
       )}
     </div>
   );
@@ -584,7 +582,7 @@ function EntityViewInner({
   );
   if (entities.length === 0 || !saved) return null;
 
-  const nameOf = (id: string) => doc?.entity?.[id]?.name ?? id;
+  const nameOf = (id: string) => doc?.entity?.[id]?.id ?? id;
 
   // entity_link 的引用按 id 对回实体；未知引用取 null 丢弃（后端已校验，防御手滑）
   const idOf = (r: string) => (doc?.entity && r in doc.entity ? r : null);
@@ -889,7 +887,7 @@ function EventGantt({
 
 function EventViewInner({ doc, lang }: { doc: WeftDoc | null; lang: Lang }) {
   const t = strings[lang];
-  const nameOf = (r: string) => doc?.entity?.[r]?.name ?? r;
+  const nameOf = (r: string) => doc?.entity?.[r]?.id ?? r;
   const entries = Object.entries(doc?.event ?? {})
     .filter(([, events]) => events.length > 0)
     .sort(([a], [b]) => a.localeCompare(b));
@@ -1085,7 +1083,7 @@ function NarrativeViewInner({
   lang: Lang;
 }) {
   const t = strings[lang];
-  const nameOf = (r: string) => doc?.entity?.[r]?.name ?? r;
+  const nameOf = (r: string) => doc?.entity?.[r]?.id ?? r;
   // 事件索引：id → 事件（subject 只存 id，展示数据从这里取）
   const byId = new Map(
     Object.values(doc?.event ?? {})

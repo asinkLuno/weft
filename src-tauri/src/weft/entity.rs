@@ -1,62 +1,201 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use serde::de;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::calculable_tag::CalculableTagRuntime;
 use crate::calendar::Calendar;
 use crate::weft::errors::{DocumentError, ValidationError};
 use crate::weft::phase::Phase;
 
-// 抽象实体：人物、团体、地点、道具……都算
-#[derive(Debug, Serialize, Deserialize)]
+// 集合与归属边共享同一份实体；归属图经过无环校验，不会形成 Arc 循环。
+#[derive(Debug, Serialize)]
 pub struct Entity {
-    pub name: Option<String>,
+    pub id: String,
     // 原始 Phase 用于偏移运算，展示归一化不会改写它。
-    #[serde(default, deserialize_with = "deserialize_base_time")]
     pub base_time: Option<Phase>,
-    // humanize 结果，加载历法后由 apply_times 填充，不来自 YAML
-    #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub base_time_humanizer: Option<String>,
     pub description: Option<String>,
-    // 归属的上层实体 id 列表（如人物 → 团体）；可计算标签算出的归属也并到这里，不单独存
+    #[serde(serialize_with = "serialize_parents")]
+    pub belong_to: Vec<Arc<Entity>>,
+}
+
+fn serialize_parents<S: Serializer>(
+    parents: &[Arc<Entity>],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    parents
+        .iter()
+        .map(|parent| &parent.id)
+        .collect::<Vec<_>>()
+        .serialize(serializer)
+}
+
+// 可计算标签仅用于输入阶段，执行结果在构建 Entity 时成为 belong_to 引用。
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct RawEntity {
+    #[serde(default, deserialize_with = "deserialize_base_time")]
+    pub base_time: Option<Phase>,
+    pub description: Option<String>,
     #[serde(default)]
     pub belong_to: Vec<String>,
-    // 可计算标签列表：weft_doc.rs 按 base_time 执行后把归属链写进 belong_to，不来自展示数据
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub calculable_tags: Vec<String>,
 }
 
-// 实体关系对：entities 恰好两个（YAML 列表反序列化成元组，天然限定一对），relations 是关系名
-#[derive(Debug, Serialize, Deserialize)]
-pub struct EntityLink {
+impl Entity {
+    pub(crate) fn new(
+        id: String,
+        raw: RawEntity,
+        belong_to: Vec<Arc<Entity>>,
+        cal: &Calendar,
+    ) -> Result<Self, DocumentError> {
+        let base_time_humanizer = raw
+            .base_time
+            .as_ref()
+            .map(|phase| {
+                let normalized = cal.normalize(&phase.flatten(cal.component_count())?)?;
+                cal.humanize(&normalized)
+            })
+            .transpose()?;
+        Ok(Self {
+            id,
+            base_time: raw.base_time,
+            base_time_humanizer,
+            description: raw.description,
+            belong_to,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawEntityLink {
     pub entities: (String, String),
     pub relations: String,
 }
 
-// entity 段检查：先引用（belong_to 与 entity_link 的目标存在）后结构（归属图无环）。
-// 引用错误批量收集，一次报出该段全部断链
-pub(crate) fn check(
-    entity: &HashMap<String, Entity>,
-    links: &HashMap<String, Vec<EntityLink>>,
+#[derive(Debug, Serialize)]
+pub struct EntityLink {
+    #[serde(serialize_with = "serialize_endpoints")]
+    pub entities: (Arc<Entity>, Arc<Entity>),
+    pub relations: String,
+}
+
+fn serialize_endpoints<S: Serializer>(
+    entities: &(Arc<Entity>, Arc<Entity>),
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    (&entities.0.id, &entities.1.id).serialize(serializer)
+}
+
+#[derive(Debug)]
+pub struct EntityCollection {
+    entities: HashMap<String, Arc<Entity>>,
+    pub entity_link: HashMap<String, Vec<EntityLink>>,
+}
+
+impl Serialize for EntityCollection {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let entities: HashMap<_, _> = self
+            .entities
+            .iter()
+            .map(|(id, entity)| (id, entity.as_ref()))
+            .collect();
+        let mut state = serializer.serialize_struct("EntityCollection", 2)?;
+        state.serialize_field("entity", &entities)?;
+        state.serialize_field("entity_link", &self.entity_link)?;
+        state.end()
+    }
+}
+
+impl EntityCollection {
+    pub(crate) fn new(
+        mut raw: HashMap<String, RawEntity>,
+        links: HashMap<String, Vec<RawEntityLink>>,
+        cal: &Calendar,
+        calculable_tags: &CalculableTagRuntime,
+        mode: Option<&str>,
+        lang: &str,
+    ) -> Result<Self, DocumentError> {
+        // 脚本已在 story 阶段加载；计算归属后才构建 Entity。
+        check(&raw, &links)?;
+        apply_calculable_tags(&mut raw, calculable_tags, mode, lang, cal)?;
+        check(&raw, &links)?;
+        // 先构建父节点，再构建子节点；缓存确保所有引用指向相同实例。
+        fn build(
+            id: &str,
+            raw: &mut HashMap<String, RawEntity>,
+            entities: &mut HashMap<String, Arc<Entity>>,
+            cal: &Calendar,
+        ) -> Result<Arc<Entity>, DocumentError> {
+            if let Some(entity) = entities.get(id) {
+                return Ok(Arc::clone(entity));
+            }
+            let input = raw.remove(id).expect("实体引用已校验存在且归属无环");
+            let mut parents = Vec::new();
+            for parent in &input.belong_to {
+                parents.push(build(parent, raw, entities, cal)?);
+            }
+            let entity = Arc::new(Entity::new(id.to_owned(), input, parents, cal)?);
+            entities.insert(id.to_owned(), Arc::clone(&entity));
+            Ok(entity)
+        }
+        let ids: Vec<_> = raw.keys().cloned().collect();
+        let mut entities = HashMap::new();
+        for id in ids {
+            build(&id, &mut raw, &mut entities, cal)?;
+        }
+        let entity_link = links
+            .into_iter()
+            .map(|(group, links)| {
+                let links = links
+                    .into_iter()
+                    .map(|link| EntityLink {
+                        entities: (
+                            Arc::clone(&entities[&link.entities.0]),
+                            Arc::clone(&entities[&link.entities.1]),
+                        ),
+                        relations: link.relations,
+                    })
+                    .collect();
+                (group, links)
+            })
+            .collect();
+        Ok(Self {
+            entities,
+            entity_link,
+        })
+    }
+
+    pub fn as_map(&self) -> &HashMap<String, Arc<Entity>> {
+        &self.entities
+    }
+}
+
+fn check(
+    entity: &HashMap<String, RawEntity>,
+    links: &HashMap<String, Vec<RawEntityLink>>,
 ) -> Result<(), DocumentError> {
     let mut errors = Vec::new();
-    for (id, e) in entity {
-        for target in &e.belong_to {
-            if !entity.contains_key(target) {
+    for (id, input) in entity {
+        for parent in &input.belong_to {
+            if !entity.contains_key(parent) {
                 errors.push(ValidationError::EntityUnknownParent {
                     entity: id.clone(),
-                    target: target.clone(),
+                    target: parent.clone(),
                 });
             }
         }
     }
     for (group, pairs) in links {
         for link in pairs {
-            for r in [&link.entities.0, &link.entities.1] {
-                if !entity.contains_key(r) {
+            for id in [&link.entities.0, &link.entities.1] {
+                if !entity.contains_key(id) {
                     errors.push(ValidationError::UnknownLinkEntity {
                         group: group.clone(),
-                        entity: r.clone(),
+                        entity: id.clone(),
                     });
                 }
             }
@@ -66,43 +205,85 @@ pub(crate) fn check(
         errors.sort_by_cached_key(ToString::to_string);
         return Err(DocumentError::References { errors });
     }
-    check_acyclic(entity)
-}
-
-// 归属图不许成环（如 a belong_to b、b belong_to a），否则按层级递归展示无法终止。
-// 可计算标签算出的归属也要复查，所以开放给 weft_doc.rs。DFS 三色标记：0 未访问 / 1 在当前路径上 / 2 已完成。
-// 状态键借用图里的 id，递归时不再反复克隆
-pub(crate) fn check_acyclic(graph: &HashMap<String, Entity>) -> Result<(), DocumentError> {
     fn visit<'a>(
         id: &'a str,
-        graph: &'a HashMap<String, Entity>,
+        graph: &'a HashMap<String, RawEntity>,
         state: &mut HashMap<&'a str, u8>,
     ) -> Result<(), DocumentError> {
         match state.get(id) {
             Some(1) => {
                 return Err(ValidationError::EntityCycle {
-                    entity: id.to_string(),
+                    entity: id.to_owned(),
                 }
                 .into());
             }
             Some(2) => return Ok(()),
             _ => {}
         }
-        // belong_to 的目标由段内引用检查 / apply_chain 保证存在
-        let (key, entity) = graph.get_key_value(id).expect("belong_to 的目标已校验存在");
-        let key = key.as_str();
-        state.insert(key, 1);
-        for parent in &entity.belong_to {
+        state.insert(id, 1);
+        for parent in &graph[id].belong_to {
             visit(parent, graph, state)?;
         }
-        state.insert(key, 2);
+        state.insert(id, 2);
         Ok(())
     }
     let mut state = HashMap::new();
-    for id in graph.keys() {
-        visit(id, graph, &mut state)?;
+    for id in entity.keys() {
+        visit(id, entity, &mut state)?;
     }
     Ok(())
+}
+
+fn apply_calculable_tags(
+    raw: &mut HashMap<String, RawEntity>,
+    runtime: &CalculableTagRuntime,
+    mode: Option<&str>,
+    lang: &str,
+    cal: &Calendar,
+) -> Result<(), DocumentError> {
+    let mut ids: Vec<_> = raw.keys().cloned().collect();
+    ids.sort();
+    for id in ids {
+        for name in std::mem::take(&mut raw.get_mut(&id).expect("输入实体存在").calculable_tags)
+        {
+            let entity = &raw[&id];
+            let base_time = entity
+                .base_time
+                .as_ref()
+                .map(|phase| cal.normalize(&phase.flatten(cal.component_count())?))
+                .transpose()?;
+            let context = serde_json::json!({
+                "api": 1, "date_mode": mode, "language": lang,
+                "entity": { "id": id, "base_time": base_time, "description": entity.description, "belong_to": entity.belong_to },
+            });
+            let chain = runtime.calculable_tag(&name, &context, lang)?;
+            apply_chain(raw, &id, &chain);
+        }
+    }
+    Ok(())
+}
+
+fn apply_chain(raw: &mut HashMap<String, RawEntity>, id: &str, chain: &[String]) {
+    let Some(first) = chain.first() else {
+        return;
+    };
+    let existing: Vec<_> = chain.iter().map(|id| raw.contains_key(id)).collect();
+    for (i, target) in chain.iter().enumerate() {
+        if existing[i] {
+            break;
+        }
+        raw.insert(
+            target.clone(),
+            RawEntity {
+                belong_to: chain.get(i + 1).cloned().into_iter().collect(),
+                ..RawEntity::default()
+            },
+        );
+    }
+    let owner = raw.get_mut(id).expect("可计算标签的源实体存在");
+    if !owner.belong_to.contains(first) {
+        owner.belong_to.push(first.clone());
+    }
 }
 
 // 单个整数仍等价于单分量 Phase；列表支持递归嵌套。
@@ -121,21 +302,10 @@ where
         .map_err(de::Error::custom)
 }
 
-// 展示值单独保存；原始 Phase 留给事件做减法。
-pub(crate) fn apply_times(
-    entity: &mut HashMap<String, Entity>,
-    cal: &Calendar,
-) -> Result<(), DocumentError> {
-    for entity in entity.values_mut() {
-        if let Some(phase) = &entity.base_time {
-            let normalized = cal.normalize(&phase.flatten(cal.component_count())?)?;
-            entity.base_time_humanizer = Some(cal.humanize(&normalized)?);
-        }
-    }
-    Ok(())
-}
-
-// 按实体 id 取 base_time；事件与叙事线都要拿它算偏移
-pub(crate) fn resolve_base<'a>(entity: &'a HashMap<String, Entity>, id: &str) -> Option<&'a Phase> {
-    entity.get(id).and_then(|e| e.base_time.as_ref())
+// 按实体 id 取原始 base_time，供事件与叙事线计算偏移。
+pub(crate) fn resolve_base<'a>(
+    entity: &'a HashMap<String, Arc<Entity>>,
+    id: &str,
+) -> Option<&'a Phase> {
+    entity.get(id).and_then(|entity| entity.base_time.as_ref())
 }

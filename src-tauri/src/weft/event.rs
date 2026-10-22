@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
@@ -127,7 +128,7 @@ pub(crate) fn resolve_event<'a>(
 // narrative 等引用才能省略组名）。引用错误批量收集，一次报出该段全部断链
 pub(crate) fn check(
     events: &HashMap<String, HashMap<String, RawEvent>>,
-    entity: &HashMap<String, Entity>,
+    entity: &HashMap<String, Arc<Entity>>,
     index: &EventIndex<'_>,
 ) -> Result<(), DocumentError> {
     let mut errors = Vec::new();
@@ -166,7 +167,7 @@ fn check_unique_event_titles(index: &EventIndex<'_>) -> Result<(), DocumentError
 // 同时算出每个参与实体相对其 base_time 的偏移
 pub(crate) fn apply_times(
     event: &mut BTreeMap<String, Vec<EventItem>>,
-    entity: &HashMap<String, Entity>,
+    entity: &HashMap<String, Arc<Entity>>,
     cal: &Calendar,
 ) -> Result<(), DocumentError> {
     for events in event.values_mut() {

@@ -18,7 +18,7 @@ story:
 
 | 函数 | 输入 | 返回值 | 用途 |
 | --- | --- | --- | --- |
-| `serialize(language)` | 语言代码 | map | Story 页展示信息，如本地化的 `title`、`description` |
+| `serialize(language)` | 语言代码 | map | Story 页展示信息，如本地化的 `name`、`description` |
 | `from_tick(tick)` | 64 位整数刻度 | 归一化的日期数组 | 将刻度转换为合法日期 |
 | `to_tick(values)` | 整数数组 | 64 位整数 | 把时间转成可比较、可相减的刻度 |
 | `humanizer(values, language)` | 已归一化的日期数组、语言 | 字符串 | 仅格式化日期 |
@@ -27,7 +27,7 @@ story:
 
 公历 `to_tick(date)` 返回日期相对零年一月一日的秒数；全零数组也表示原点。月、日为零时按 1 计算，`normalize` 会输出补齐后的合法日期。日期间隔为 `to_tick(end) - to_tick(start)`，除以 `86400` 得到天数，闰年和跨月由日期转换处理。`humanizer` 不再调用 `normalize`。
 
-宿主通过 `calendar_components` 直接输出时间分量数，不包含本地化文字。`serialize(language)` 生成的动态展示信息单独输出到 `calendar_display`，前端从中读取 `title` 和 `description`。
+宿主通过 `calendar_components` 直接输出时间分量数，不包含本地化文字。`serialize(language)` 生成的名称与描述保存到 `story.date`，前端从中读取 `name` 和 `description`；原始 `date_mode` 路径只存在于 YAML 输入。
 
 `language` 是应用设置中的 `zh` 或 `en`。应用切换语言后会重新解析当前文档，因此 `humanizer` 会收到新的语言。脚本也可调用宿主提供的 `language()`，但建议只在 `serialize` 和 `humanizer` 中选择显示文字，让 `from_tick` 和 `to_tick` 的结果不受语言影响。
 
@@ -54,7 +54,7 @@ fn to_tick(values) {
 
 fn serialize(language) {
     #{
-        title: if language == "zh" { "十月历" } else { "Ten Month Calendar" },
+        name: if language == "zh" { "十月历" } else { "Ten Month Calendar" },
         description: if language == "zh" { "每年十个月，每月三十天。" } else { "Ten months per year, thirty days per month." }
     }
 }
