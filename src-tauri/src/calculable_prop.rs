@@ -1,6 +1,6 @@
 use rhai::serde::to_dynamic;
 use rhai::{AST, Dynamic, Engine, Scope};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::{collections::HashMap, fs, path::Path};
 
 use crate::plugin_loader::{limited_engine, missing_rhai_functions};
@@ -13,11 +13,20 @@ pub struct CalculablePropRuntime {
     engine: Engine,
     // 注册 ID → 编译好的脚本，加载时即完成读取、编译与接口检查。
     scripts: HashMap<String, AST>,
+    // 脚本上下文中的文档级常量，加载时确定，实体段只提供 entity。
+    date_mode: Option<String>,
+    lang: String,
 }
 
 impl CalculablePropRuntime {
-    // 注册表来自 story.calculatable_props，脚本路径相对故事文件。
-    pub fn load(specs: &HashMap<String, String>, base: &Path) -> Result<Self, DocumentError> {
+    // 注册表来自 story.calculatable_props，脚本路径相对故事文件；
+    // date_mode 与 lang 随运行时一起固定，切换语言时整个文档会重新解析。
+    pub fn load(
+        specs: &HashMap<String, String>,
+        base: &Path,
+        date_mode: Option<&str>,
+        lang: &str,
+    ) -> Result<Self, DocumentError> {
         let engine = limited_engine();
         let mut scripts = HashMap::new();
         for (name, source) in specs {
@@ -47,14 +56,20 @@ impl CalculablePropRuntime {
             validate_interface(name, &ast)?;
             scripts.insert(name.clone(), ast);
         }
-        Ok(Self { engine, scripts })
+        Ok(Self {
+            engine,
+            scripts,
+            date_mode: date_mode.map(ToOwned::to_owned),
+            lang: lang.to_owned(),
+        })
     }
 
-    // 计算一个属性：顶层 () 表示不写入，其余返回值转成 JSON 交给实体。
+    // 计算一个属性：脚本上下文由文档级常量与实体段提供的 entity 拼成；
+    // 顶层 () 表示不写入，其余返回值转成 JSON 交给实体。
     pub fn calculable_prop(
         &self,
         name: &str,
-        context: &Value,
+        entity: Value,
     ) -> Result<Option<Value>, DocumentError> {
         let ast = self
             .scripts
@@ -62,8 +77,14 @@ impl CalculablePropRuntime {
             .ok_or_else(|| ValidationError::UnknownCalculableProp {
                 prop: name.to_owned(),
             })?;
+        let context = json!({
+            "api": 1,
+            "date_mode": self.date_mode,
+            "language": self.lang,
+            "entity": entity,
+        });
         let argument =
-            to_dynamic(context).map_err(|error| ValidationError::CalculablePropArgument {
+            to_dynamic(&context).map_err(|error| ValidationError::CalculablePropArgument {
                 prop: name.to_owned(),
                 details: error.to_string(),
             })?;

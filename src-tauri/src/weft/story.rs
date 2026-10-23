@@ -49,11 +49,11 @@ impl FromRaw<StoryContext<'_>> for Story {
             lang,
         } = context;
         // 留空使用内置公历，自定义脚本路径相对于故事文件。
-        let path = match raw
+        let date_mode = raw
             .date_mode
             .as_deref()
-            .filter(|source| !source.trim().is_empty())
-        {
+            .filter(|source| !source.trim().is_empty());
+        let path = match date_mode {
             Some(source) => base.join(source),
             None => gregorian.to_path_buf(),
         };
@@ -65,7 +65,8 @@ impl FromRaw<StoryContext<'_>> for Story {
         }
         let calendar = Calendar::new(&path, lang)?;
         let date = calendar.serialize(lang)?;
-        let calculable_prop_runtime = CalculablePropRuntime::load(&raw.calculatable_props, base)?;
+        let calculable_prop_runtime =
+            CalculablePropRuntime::load(&raw.calculatable_props, base, date_mode, lang)?;
         Ok(Self {
             title: raw.title,
             description: raw.description,

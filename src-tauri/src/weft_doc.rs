@@ -18,7 +18,7 @@ use tauri_plugin_log::log::{error, warn};
 
 use crate::weft::FromRaw;
 use crate::weft::entity::{
-    BelongNode, Entity, EntityBuildContext, EntityLink, RawEntity, build as build_entities,
+    BelongNode, Entity, EntityBuildContext, EntityLink, RawEntity, build_entities,
 };
 use crate::weft::errors::{DocumentError, ValidationError};
 use crate::weft::event::{
@@ -71,12 +71,6 @@ impl WeftDoc {
         let raw = RawWeftDoc::deserialize(yaml).map_err(DocumentError::raw)?;
         // 按段检查：story → entity → event → narrative；每段先引用后结构，
         // 前面的段不成立，后面段的问题没有报告价值
-        // 历法路径仅在输入构建阶段用于标签上下文，不保存到运行时 Story。
-        let date_mode = raw
-            .story
-            .date_mode
-            .clone()
-            .filter(|source| !source.trim().is_empty());
         let story = Story::from_raw(
             raw.story,
             StoryContext {
@@ -92,8 +86,6 @@ impl WeftDoc {
                 base,
                 calendar: &story.calendar,
                 calculable_props: &story.calculable_prop_runtime,
-                date_mode: date_mode.as_deref(),
-                lang,
             },
         )?;
         check_event(&raw.event, &entity)?;

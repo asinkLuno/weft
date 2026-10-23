@@ -35,11 +35,10 @@ pub(crate) struct RawEntity {
 
 // ---- 实体 ----
 
-/// 实体构建所需的 ID、历法和 YAML 基准路径。
+/// 单实体构建环境：在整段构建环境上补一个实体 ID。
 struct EntityContext<'a> {
     id: String,
-    calendar: &'a Calendar,
-    base: &'a Path,
+    build: &'a EntityBuildContext<'a>,
 }
 
 /// 已完成头像解析和基准时间展示归一化的实体；事件通过实体 ID 引用。
@@ -70,7 +69,9 @@ impl FromRaw<EntityContext<'_>> for Entity {
     type Raw = RawEntity;
 
     fn from_raw(raw: Self::Raw, context: EntityContext<'_>) -> Result<Self, DocumentError> {
-        let EntityContext { id, calendar, base } = context;
+        let EntityContext { id, build } = context;
+        let base = build.base;
+        let calendar = build.calendar;
         let base_time = Phase::from_yaml_scalar_opt(raw.base_time.as_ref())?;
         let base_time_humanizer = base_time
             .as_ref()
@@ -113,32 +114,23 @@ pub struct EntityLink {
 
 // ---- 构建管线 ----
 
-/// 实体段构建所需的路径、历法和可计算属性环境。
+/// 实体段构建所需的外部环境：文件路径、历法与可计算属性运行时。
 pub(crate) struct EntityBuildContext<'a> {
     pub base: &'a Path,
     pub calendar: &'a Calendar,
     pub calculable_props: &'a CalculablePropRuntime,
-    pub date_mode: Option<&'a str>,
-    pub lang: &'a str,
 }
 
 /// 构建实体段：校验输入，RawEntity 转成 Entity 并执行可计算属性，
 /// 结果写进 extra_props。归属 DAG 的边已去重且无环，反查出的直接上级写进 belong_dag。
 /// 关系只校验 ID，数据仍归文档层所有。
-pub(crate) fn build(
+pub(crate) fn build_entities(
     raw_entities: HashMap<String, RawEntity>,
     entity_link: &HashMap<String, Vec<EntityLink>>,
     context: EntityBuildContext<'_>,
 ) -> Result<(HashMap<String, Entity>, Vec<BelongNode>), DocumentError> {
-    let EntityBuildContext {
-        base,
-        calendar,
-        calculable_props,
-        date_mode,
-        lang,
-    } = context;
     let belong_graph = build_belong_graph(&raw_entities, entity_link)?;
-    validate_avatars(&raw_entities, base)?;
+    validate_avatars(&raw_entities, context.base)?;
     let parents_by_id: HashMap<&str, Vec<String>> = belong_graph
         .graph()
         .node_indices()
@@ -160,19 +152,10 @@ pub(crate) fn build(
             input,
             EntityContext {
                 id: id.clone(),
-                calendar,
-                base,
+                build: &context,
             },
         )?;
-        apply_calculable_props(
-            &mut entity,
-            &props,
-            &belong_to,
-            calculable_props,
-            date_mode,
-            lang,
-            calendar,
-        )?;
+        apply_calculable_props(&mut entity, &props, &belong_to, &context)?;
         entities.insert(id, entity);
     }
     let mut belong_dag: Vec<_> = parents_by_id
@@ -261,22 +244,26 @@ fn apply_calculable_props(
     entity: &mut Entity,
     props: &[String],
     belong_to: &[String],
-    runtime: &CalculablePropRuntime,
-    mode: Option<&str>,
-    lang: &str,
-    cal: &Calendar,
+    context: &EntityBuildContext<'_>,
 ) -> Result<(), DocumentError> {
+    // 归一化后的基准时间对同一实体的所有属性相同，只算一次。
+    let base_time = entity
+        .base_time
+        .as_ref()
+        .map(|phase| {
+            context
+                .calendar
+                .normalize(&phase.flatten(context.calendar.component_count())?)
+        })
+        .transpose()?;
     for name in props {
-        let base_time = entity
-            .base_time
-            .as_ref()
-            .map(|phase| cal.normalize(&phase.flatten(cal.component_count())?))
-            .transpose()?;
-        let context = json!({
-            "api": 1, "date_mode": mode, "language": lang,
-            "entity": { "id": entity.id, "base_time": base_time, "description": entity.description, "belong_to": belong_to },
+        let input = json!({
+            "id": entity.id,
+            "base_time": base_time,
+            "description": entity.description,
+            "belong_to": belong_to,
         });
-        if let Some(value) = runtime.calculable_prop(name, &context)? {
+        if let Some(value) = context.calculable_props.calculable_prop(name, input)? {
             entity.extra_props.insert(name.clone(), value);
         }
     }
