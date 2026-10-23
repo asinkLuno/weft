@@ -3,6 +3,7 @@
 
 use std::{collections::HashMap, fs, path::Path, sync::Arc};
 
+use daggy::{Dag, NodeIndex, Walker};
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
 use serde_json::{Value as JsonValue, json};
 use serde_yaml_ng::Value;
@@ -67,7 +68,10 @@ impl FromRaw<EntityContext<'_>> for Entity {
         let base_time = Phase::from_yaml_scalar_opt(raw.base_time.as_ref())?;
         let base_time_humanizer = base_time
             .as_ref()
-            .map(|phase| base_time_humanizer(phase, calendar))
+            .map(|phase| {
+                let normalized = calendar.normalize(&phase.flatten(calendar.component_count())?)?;
+                calendar.humanize(&normalized)
+            })
             .transpose()?;
         // 头像路径相对 YAML 文件，是否为存在的图片已在输入校验确认，此处仅解析绝对路径。
         let avatar = raw
@@ -84,44 +88,11 @@ impl FromRaw<EntityContext<'_>> for Entity {
             description: raw.description,
             extra_props: raw
                 .extra_props
-                .iter()
-                .map(|(key, value)| (key.clone(), yaml_to_json(value)))
-                .collect(),
+                .into_iter()
+                .map(|(key, value)| serde_json::to_value(value).map(|value| (key, value)))
+                .collect::<Result<_, _>>()
+                .map_err(DocumentError::raw)?,
         })
-    }
-}
-
-// 基准时间的展示：按历法归一化分量后 humanize。
-fn base_time_humanizer(phase: &Phase, calendar: &Calendar) -> Result<String, DocumentError> {
-    let normalized = calendar.normalize(&phase.flatten(calendar.component_count())?)?;
-    calendar.humanize(&normalized)
-}
-
-// extra_props 原样透传给前端：YAML 值转成 JSON，非字符串的映射键转成字符串，
-// 标签值（!tag）只保留内容，非有限浮点按 JSON 惯例落为 null。
-fn yaml_to_json(value: &Value) -> JsonValue {
-    match value {
-        Value::Null => JsonValue::Null,
-        Value::Bool(boolean) => (*boolean).into(),
-        Value::Number(number) => number
-            .as_i64()
-            .map(|i| i.into())
-            .or_else(|| number.as_u64().map(|u| u.into()))
-            .unwrap_or_else(|| number.as_f64().into()),
-        Value::String(string) => string.clone().into(),
-        Value::Sequence(sequence) => sequence.iter().map(yaml_to_json).collect(),
-        Value::Mapping(mapping) => mapping
-            .iter()
-            .map(|(key, value)| (yaml_key_to_string(key), yaml_to_json(value)))
-            .collect(),
-        Value::Tagged(tagged) => yaml_to_json(&tagged.value),
-    }
-}
-
-fn yaml_key_to_string(key: &Value) -> String {
-    match key {
-        Value::String(string) => string.clone(),
-        key => yaml_to_json(key).to_string(),
     }
 }
 
@@ -213,7 +184,7 @@ impl EntityCollection {
     /// 构建管线：校验输入，RawEntity 转成 Entity 并执行可计算属性，
     /// 结果写进 extra_props，最后计算归属森林并构建关系。
     pub fn build(
-        mut raw_entities: HashMap<String, RawEntity>,
+        raw_entities: HashMap<String, RawEntity>,
         raw_links: HashMap<String, Vec<RawEntityLink>>,
         context: EntityCollectionContext<'_>,
     ) -> Result<Self, DocumentError> {
@@ -224,17 +195,12 @@ impl EntityCollection {
             date_mode,
             lang,
         } = context;
-        // 归属边与属性声明属于输入侧，先拆出单独保存。
-        let mut belong_to = HashMap::new();
-        let mut props = HashMap::new();
-        for (id, input) in &mut raw_entities {
-            belong_to.insert(id.clone(), std::mem::take(&mut input.belong_to));
-            props.insert(id.clone(), std::mem::take(&mut input.calculable_props));
-        }
-        validate(&belong_to, &raw_links)?;
+        let belong_graph = build_belong_graph(&raw_entities, &raw_links)?;
         validate_avatars(&raw_entities, base)?;
         let mut entities = HashMap::new();
-        for (id, input) in raw_entities {
+        for (id, mut input) in raw_entities {
+            let props = std::mem::take(&mut input.calculable_props);
+            let parents = std::mem::take(&mut input.belong_to);
             let mut entity = Entity::from_raw(
                 input,
                 EntityContext {
@@ -245,8 +211,8 @@ impl EntityCollection {
             )?;
             apply_calculable_props(
                 &mut entity,
-                &belong_to[&id],
-                &props[&id],
+                &parents,
+                &props,
                 calculable_props,
                 date_mode,
                 lang,
@@ -254,7 +220,7 @@ impl EntityCollection {
             )?;
             entities.insert(id, Arc::new(entity));
         }
-        let entity_forest = build_forest(&belong_to, &entities);
+        let entity_forest = build_forest(&belong_graph, &entities);
         let mut entity_link = HashMap::new();
         for (group, links) in raw_links {
             let links = links
@@ -279,47 +245,38 @@ impl EntityCollection {
     }
 }
 
-// 将已校验的归属关系展开为森林，节点只引用实体数据。
-// 引用存在且无环已由集合校验；根节点和同级子节点按 ID 排序。
-fn build_forest(
-    belong_to: &HashMap<String, Vec<String>>,
-    entities: &HashMap<String, Arc<Entity>>,
-) -> EntityForest {
-    let mut roots = Vec::new();
-    let mut children: HashMap<&str, Vec<&str>> = HashMap::new();
-    for (id, parents) in belong_to {
-        if parents.is_empty() {
-            roots.push(id.as_str());
-        }
-        for parent in parents {
-            children.entry(parent).or_default().push(id);
+// DAG 中父节点指向子节点；展开时按 ID 排序，多重归属出现在各个分支下。
+fn build_forest(graph: &Dag<String, ()>, entities: &HashMap<String, Arc<Entity>>) -> EntityForest {
+    fn build_tree(
+        node: NodeIndex,
+        graph: &Dag<String, ()>,
+        entities: &HashMap<String, Arc<Entity>>,
+    ) -> EntityBelongTo {
+        let mut children: Vec<_> = graph
+            .children(node)
+            .iter(graph)
+            .map(|(_, child)| child)
+            .collect();
+        children.sort_unstable_by_key(|&child| &graph[child]);
+        EntityBelongTo {
+            entity: Arc::clone(&entities[&graph[node]]),
+            children: children
+                .into_iter()
+                .map(|child| build_tree(child, graph, entities))
+                .collect(),
         }
     }
-    roots.sort_unstable();
-    for ids in children.values_mut() {
-        ids.sort_unstable();
-        ids.dedup();
-    }
+
+    let mut roots: Vec<_> = graph
+        .graph()
+        .node_indices()
+        .filter(|&node| graph.parents(node).iter(graph).next().is_none())
+        .collect();
+    roots.sort_unstable_by_key(|&node| &graph[node]);
     roots
         .into_iter()
-        .map(|id| build_tree(id, &children, entities))
+        .map(|node| build_tree(node, graph, entities))
         .collect()
-}
-
-fn build_tree(
-    id: &str,
-    children: &HashMap<&str, Vec<&str>>,
-    entities: &HashMap<String, Arc<Entity>>,
-) -> EntityBelongTo {
-    EntityBelongTo {
-        entity: Arc::clone(&entities[id]),
-        children: children
-            .get(id)
-            .into_iter()
-            .flatten()
-            .map(|child| build_tree(child, children, entities))
-            .collect(),
-    }
 }
 
 // 执行实体的可计算属性：脚本返回值写进 extra_props 的属性注册 ID 下，
@@ -354,14 +311,14 @@ fn apply_calculable_props(
 // 头像经 asset protocol 直接交给 <img>，按扩展名接受 WebView 可渲染的图片。
 const IMAGE_EXTENSIONS: [&str; 8] = ["bmp", "gif", "ico", "jpeg", "jpg", "png", "svg", "webp"];
 
-fn validate(
-    belong_to: &HashMap<String, Vec<String>>,
+fn build_belong_graph(
+    entities: &HashMap<String, RawEntity>,
     links: &HashMap<String, Vec<RawEntityLink>>,
-) -> Result<(), DocumentError> {
+) -> Result<Dag<String, ()>, DocumentError> {
     let mut errors = Vec::new();
-    for (id, parents) in belong_to {
-        for parent in parents {
-            if !belong_to.contains_key(parent) {
+    for (id, input) in entities {
+        for parent in &input.belong_to {
+            if !entities.contains_key(parent) {
                 errors.push(ValidationError::EntityUnknownParent {
                     entity: id.clone(),
                     target: parent.clone(),
@@ -372,7 +329,7 @@ fn validate(
     for (group, pairs) in links {
         for link in pairs {
             for id in [&link.entities.0, &link.entities.1] {
-                if !belong_to.contains_key(id) {
+                if !entities.contains_key(id) {
                     errors.push(ValidationError::UnknownLinkEntity {
                         group: group.clone(),
                         entity: id.clone(),
@@ -382,16 +339,21 @@ fn validate(
         }
     }
     report(errors)?;
-    check_cycles(belong_to)
-}
-
-// 归属边成环检查；构建前对输入归属跑一次。
-fn check_cycles(belong_to: &HashMap<String, Vec<String>>) -> Result<(), DocumentError> {
-    let mut state = HashMap::new();
-    for id in belong_to.keys() {
-        visit(id, belong_to, &mut state)?;
+    let mut graph = Dag::new();
+    let mut ids: Vec<_> = entities.keys().collect();
+    ids.sort_unstable();
+    let indices: HashMap<_, _> = ids
+        .iter()
+        .map(|id| (id.as_str(), graph.add_node((*id).clone())))
+        .collect();
+    for id in ids {
+        for parent in &entities[id].belong_to {
+            graph
+                .update_edge(indices[parent.as_str()], indices[id.as_str()], ())
+                .map_err(|_| ValidationError::EntityCycle { entity: id.clone() })?;
+        }
     }
-    Ok(())
+    Ok(graph)
 }
 
 // 头像路径相对 YAML 文件；必须解析到已存在的图片文件，否则逐条报错。
@@ -433,35 +395,6 @@ fn is_image(path: &Path) -> bool {
         .is_some_and(|extension| {
             IMAGE_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
         })
-}
-
-#[derive(Clone, Copy)]
-enum VisitState {
-    Visiting,
-    Visited,
-}
-
-fn visit<'a>(
-    id: &'a str,
-    graph: &'a HashMap<String, Vec<String>>,
-    state: &mut HashMap<&'a str, VisitState>,
-) -> Result<(), DocumentError> {
-    match state.get(id) {
-        Some(VisitState::Visiting) => {
-            return Err(ValidationError::EntityCycle {
-                entity: id.to_owned(),
-            }
-            .into());
-        }
-        Some(VisitState::Visited) => return Ok(()),
-        _ => {}
-    }
-    state.insert(id, VisitState::Visiting);
-    for parent in &graph[id] {
-        visit(parent, graph, state)?;
-    }
-    state.insert(id, VisitState::Visited);
-    Ok(())
 }
 
 fn serialize_entity<S: Serializer>(entity: &Entity, serializer: S) -> Result<S::Ok, S::Error> {
