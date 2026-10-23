@@ -7,17 +7,16 @@ use crate::calendar::Calendar;
 use crate::weft::entity::Entity;
 use crate::weft::errors::{DocumentError, ValidationError};
 use crate::weft::phase::{Phase, offset_tick};
-use serde::{Serialize, Serializer};
+use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
 
 #[derive(Debug, Serialize)]
 pub struct EventItem {
     pub start_time: Phase,
     pub end_time: Option<Phase>,
     pub description: Option<String>,
-    #[serde(serialize_with = "serialize_entities")]
-    pub entities: Vec<Arc<Entity>>,
+    // 参与实体 ID，引用由 check 校验。
+    pub entities: Vec<String>,
 }
 
 // 展示层的计算结果，不属于事件定义。
@@ -30,17 +29,6 @@ pub struct EventTiming {
     pub start_display: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_display: Option<String>,
-}
-
-fn serialize_entities<S: Serializer>(
-    entities: &[Arc<Entity>],
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    entities
-        .iter()
-        .map(|entity| &entity.id)
-        .collect::<Vec<_>>()
-        .serialize(serializer)
 }
 
 // 参与者相对 base_time 的 tick 偏移用于甘特图定位和长度；start/end 用于文本展示。
@@ -60,7 +48,6 @@ pub struct EntityOffset {
 
 pub(crate) fn build_events(
     events: HashMap<String, RawEvent>,
-    entities: &HashMap<String, Arc<Entity>>,
 ) -> Result<BTreeMap<String, EventItem>, DocumentError> {
     events
         .into_iter()
@@ -69,12 +56,7 @@ pub(crate) fn build_events(
                 start_time: Phase::from_yaml_scalar(&raw.start_time)?,
                 end_time: Phase::from_yaml_scalar_opt(raw.end_time.as_ref())?,
                 description: raw.description,
-                // check 已校验所有实体引用。
-                entities: raw
-                    .entities
-                    .iter()
-                    .map(|id| Arc::clone(&entities[id]))
-                    .collect(),
+                entities: raw.entities,
             };
             Ok((id, event))
         })
@@ -83,7 +65,7 @@ pub(crate) fn build_events(
 
 pub(crate) fn check(
     events: &HashMap<String, RawEvent>,
-    entities: &HashMap<String, Arc<Entity>>,
+    entities: &HashMap<String, Entity>,
 ) -> Result<(), DocumentError> {
     let mut errors = Vec::new();
     for (id, event) in events {
@@ -106,6 +88,7 @@ pub(crate) fn check(
 
 pub(crate) fn apply_times(
     event: &BTreeMap<String, EventItem>,
+    entities: &HashMap<String, Entity>,
     cal: &Calendar,
 ) -> Result<BTreeMap<String, EventTiming>, DocumentError> {
     let mut timings = BTreeMap::new();
@@ -128,8 +111,9 @@ pub(crate) fn apply_times(
         timing.offsets = ev
             .entities
             .iter()
-            .map(|entity| {
-                let base = entity.base_time.as_ref();
+            .map(|entity_id| {
+                // check 已校验所有实体引用。
+                let base = entities[entity_id].base_time.as_ref();
                 let base_tick = base
                     .map(|base| {
                         let normalized = cal.normalize(&base.flatten(cal.component_count())?)?;
@@ -137,7 +121,7 @@ pub(crate) fn apply_times(
                     })
                     .transpose()?;
                 Ok(EntityOffset {
-                    entity: entity.id.clone(),
+                    entity: entity_id.clone(),
                     start_tick: offset_tick(base_tick, Some(start_tick))?,
                     end_tick: offset_tick(base_tick, end_tick)?,
                     start: base

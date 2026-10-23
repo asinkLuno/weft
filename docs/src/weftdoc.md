@@ -50,29 +50,27 @@ entity:
 
 ## 运行时归属
 
-YAML 输入中的 `RawEntity` 保留 `belong_to`。构建时用 DAG 校验归属（引用存在、不成环、重复边去重），再把每个实体的直接上级反查写回 `Entity.belong_to`；DAG 只作为构建期的校验结构，不进入输出。
+YAML 输入中的 `RawEntity` 保留 `belong_to`。构建时用 DAG 校验归属（引用存在、不成环、重复边去重），再反查出每个实体的直接上级，输出为顶层 `belong_dag` 数组；实体本身不再携带归属字段，DAG 是唯一的归属来源。
 
 ```rust
-pub struct Entity {
+pub struct BelongNode {
     pub id: String,
-    pub belong_to: Vec<String>,
-    // ...
+    pub belong_to: Vec<String>, // 无上级时省略
 }
 ```
 
-`belong_to` 已排序去重，没有上级时省略该字段，不再单独输出 `entity_forest`。例如 `哈利·波特` 的 `belong_to: [格兰芬多]` 会生成：
+`belong_dag` 按实体 id 排序，每个实体一个节点，`belong_to` 已排序去重。例如 `哈利·波特` 的 `belong_to: [格兰芬多]` 会生成：
 
 ```json
 {
   "entity": {
     "格兰芬多": { "id": "格兰芬多", "base_time": null, "description": null },
-    "哈利·波特": {
-      "id": "哈利·波特",
-      "belong_to": ["格兰芬多"],
-      "base_time": null,
-      "description": null
-    }
-  }
+    "哈利·波特": { "id": "哈利·波特", "base_time": null, "description": null }
+  },
+  "belong_dag": [
+    { "id": "格兰芬多" },
+    { "id": "哈利·波特", "belong_to": ["格兰芬多"] }
+  ]
 }
 ```
 
@@ -83,10 +81,10 @@ pub struct Entity {
 1. 反序列化成 `RawWeftDoc` 等输入类型，未知键滤掉；
 2. 按段检查：story → entity → event → narrative，每段先引用后结构，断开的引用按段批量报出——
    - story：通过 `date_mode` 的脚本路径加载历法，留空则使用内置公历，并提前加载可计算属性脚本；
-   - entity：校验 `belong_to` 与 `entity_link` 的实体引用及归属环，构建实体表并执行可计算属性（结果写进 `extra_props`），再构建归属 DAG 并把直接上级反查写回实体；`entity_link` 只校验 ID，原样保留；
+   - entity：校验 `belong_to` 与 `entity_link` 的实体引用及归属环，构建实体表并执行可计算属性（结果写进 `extra_props`），再把直接上级反查进 `belong_dag`；`entity_link` 只校验 ID，原样保留；
    - event：参与实体存在，事件标题全局唯一；
    - narrative：`observer` 与 `subject` 引用的事件、实体存在；
 3. 使用已加载的历法，把所有时间归一化、算出可比较的刻度与展示文案；
-4. 序列化成 JSON 交给前端，归属关系由实体的 `belong_to` 提供。
+4. 序列化成 JSON 交给前端，归属关系由 `belong_dag` 提供。
 
 任何一步失败都会阻止展示。

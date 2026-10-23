@@ -101,8 +101,6 @@ type WeftDoc = {
     string,
     {
       id: string;
-      // 直接上级实体 ID（后端从归属 DAG 反查，已排序去重）
-      belong_to?: string[];
       avatar?: string;
       description?: string;
       base_time?: Phase | null;
@@ -111,6 +109,8 @@ type WeftDoc = {
       extra_props?: Record<string, unknown>;
     }
   >;
+  // 归属 DAG：每个节点只含实体 ID 与已解析的直接上级
+  belong_dag?: Array<{ id: string; belong_to?: string[] }>;
   entity_link?: Record<
     string,
     Array<{ entities: [string, string]; relations: string }>
@@ -523,14 +523,12 @@ type EntityData = {
 };
 type EntityFlowNode = Node<EntityData, "entity">;
 
-// 从实体表的 belong_to 收集直接归属；后端已保证 ID 合法且无环。
-function entityParents(entities: WeftDoc["entity"]): Map<string, Set<string>> {
+// 从归属 DAG 收集直接归属；后端已保证 ID 合法且无环。
+function entityParents(dag: WeftDoc["belong_dag"]): Map<string, Set<string>> {
   const parents = new Map<string, Set<string>>();
-  for (const [id, entity] of Object.entries(entities ?? {})) {
-    for (const parent of entity.belong_to ?? []) {
-      const ids = parents.get(id) ?? new Set<string>();
-      ids.add(parent);
-      parents.set(id, ids);
+  for (const node of dag ?? []) {
+    if (node.belong_to?.length) {
+      parents.set(node.id, new Set(node.belong_to));
     }
   }
   return parents;
@@ -876,7 +874,7 @@ function EntityViewInner({
   // entity_link 的引用按 id 对回实体；未知引用取 null 丢弃（后端已校验，防御手滑）
   const idOf = (r: string) => (doc?.entity && r in doc.entity ? r : null);
 
-  const parentsById = entityParents(doc?.entity);
+  const parentsById = entityParents(doc?.belong_dag);
 
   // id 的全部上层归属（跨多级）；后端已保证无环，先占位只是防手滑自环
   const cache = new Map<string, Set<string>>();
@@ -899,24 +897,27 @@ function EntityViewInner({
   const activePick =
     dim === "belong" && pick && targets.includes(pick) ? pick : null;
 
-  // 归属目标按顶层祖先分组：霍格沃茨 → 四学院一组，可计算标签生成的维度（星座）各自成组，
-  // 组内按层级深度排（根在前），组间在前端画分隔线
-  const byRoot: Record<string, Array<{ v: string; label: string }>> = {};
+  // 根 = 没有上级的实体。归属目标按根分组：多棵互不相连的归属树自动拆成
+  // 多个 section，无需在文档里额外声明；组内按层级深度排（根在前），组间画分隔线
+  const rootOf = (id: string) =>
+    [...ancestorsOf(id)].find((a) => (parentsById.get(a)?.size ?? 0) === 0) ??
+    id;
+  const byRoot = new Map<string, Array<{ v: string; label: string }>>();
   for (const tg of targets) {
-    const root =
-      [...ancestorsOf(tg)].find((a) => (parentsById.get(a)?.size ?? 0) === 0) ??
-      tg;
-    if (!byRoot[root]) byRoot[root] = [];
-    byRoot[root].push({ v: tg, label: nameOf(tg) });
+    const root = rootOf(tg);
+    const section = byRoot.get(root) ?? [];
+    section.push({ v: tg, label: nameOf(tg) });
+    byRoot.set(root, section);
   }
-  const belongSections = Object.values(byRoot).map((section) =>
-    section.sort(
-      (a, b) =>
-        ancestorsOf(a.v).size - ancestorsOf(b.v).size ||
-        a.label.localeCompare(b.label),
-    ),
-  );
-  belongSections.sort((x, y) => x[0].label.localeCompare(y[0].label));
+  const belongSections = [...byRoot.entries()]
+    .sort(([a], [b]) => nameOf(a).localeCompare(nameOf(b)))
+    .map(([, section]) =>
+      section.sort(
+        (a, b) =>
+          ancestorsOf(a.v).size - ancestorsOf(b.v).size ||
+          a.label.localeCompare(b.label),
+      ),
+    );
 
   // 关系组筛选同理：组在文件更新后可能消失，失效视为未选
   const groups = Object.keys(doc?.entity_link ?? {}).sort();
@@ -983,7 +984,7 @@ function EntityViewInner({
     belongLabel: t.belongTo,
   });
 
-  // 有归属筛选时按 belong_to 推导的归属连边、dagre 分层；无筛选不连归属线、摆成网格平铺
+  // 有归属筛选时按 DAG 的归属连边、dagre 分层；无筛选不连归属线、摆成网格平铺
   const visibleSet = new Set(filtered.map(([id]) => id));
   const edges: Edge[] = filtered.flatMap(([id]) =>
     [...(parentsById.get(id) ?? [])]

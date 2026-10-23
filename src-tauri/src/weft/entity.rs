@@ -1,7 +1,7 @@
 //! 实体、归属图与关系模型：YAML 输入结构、构建上下文与运行时结构，
 //! 以及校验、可计算属性执行和图构建的完整流程。
 
-use std::{collections::HashMap, fs, path::Path, sync::Arc};
+use std::{collections::HashMap, fs, path::Path};
 
 use daggy::{Dag, Walker};
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,7 @@ use crate::weft::phase::Phase;
 
 // ---- 输入结构 ----
 
-// 归属与可计算属性声明仅用于输入阶段，归属校验后反查写回实体。
+// 归属与可计算属性声明仅用于输入阶段，归属校验后反查进 belong_dag。
 // base_time 保留原始 YAML 值，构建时经 Phase::from_yaml_scalar_opt 解析。
 #[derive(Debug, Deserialize)]
 pub(crate) struct RawEntity {
@@ -35,21 +35,17 @@ pub(crate) struct RawEntity {
 
 // ---- 实体 ----
 
-/// 实体构建所需的 ID、直接归属、历法和 YAML 基准路径。
+/// 实体构建所需的 ID、历法和 YAML 基准路径。
 struct EntityContext<'a> {
     id: String,
-    belong_to: Vec<String>,
     calendar: &'a Calendar,
     base: &'a Path,
 }
 
-/// 已完成头像解析和基准时间展示归一化的实体；顶层实体表和事件共享同一份数据。
+/// 已完成头像解析和基准时间展示归一化的实体；事件通过实体 ID 引用。
 #[derive(Debug, Serialize)]
 pub struct Entity {
     pub id: String,
-    // 直接上级实体 ID，由归属 DAG 反查得出，已排序去重；无归属时省略。
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub belong_to: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
     // 原始 Phase 用于偏移运算，展示归一化不会改写它。
@@ -62,16 +58,19 @@ pub struct Entity {
     pub extra_props: HashMap<String, JsonValue>,
 }
 
+/// 归属 DAG 节点：只含实体 ID 与构建期反查出的直接上级 ID；无上级时省略 belong_to。
+#[derive(Debug, Serialize)]
+pub struct BelongNode {
+    pub id: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub belong_to: Vec<String>,
+}
+
 impl FromRaw<EntityContext<'_>> for Entity {
     type Raw = RawEntity;
 
     fn from_raw(raw: Self::Raw, context: EntityContext<'_>) -> Result<Self, DocumentError> {
-        let EntityContext {
-            id,
-            belong_to,
-            calendar,
-            base,
-        } = context;
+        let EntityContext { id, calendar, base } = context;
         let base_time = Phase::from_yaml_scalar_opt(raw.base_time.as_ref())?;
         let base_time_humanizer = base_time
             .as_ref()
@@ -89,7 +88,6 @@ impl FromRaw<EntityContext<'_>> for Entity {
             .map(|path| path.to_string_lossy().into_owned());
         Ok(Self {
             id,
-            belong_to,
             avatar,
             base_time,
             base_time_humanizer,
@@ -104,9 +102,6 @@ impl FromRaw<EntityContext<'_>> for Entity {
     }
 }
 
-/// 实体 ID → 已构建实体；顶层实体表与事件共享同一份引用。
-pub type EntityMap = HashMap<String, Arc<Entity>>;
-
 // ---- 关系 ----
 
 /// 一条关系：两个实体 ID 与关系类型；ID 是否合法由构建管线统一校验。
@@ -115,9 +110,6 @@ pub struct EntityLink {
     pub entities: (String, String),
     pub relations: String,
 }
-
-/// 关系组名 → 该组的关系列表。
-pub type EntityLinks = HashMap<String, Vec<EntityLink>>;
 
 // ---- 构建管线 ----
 
@@ -131,13 +123,13 @@ pub(crate) struct EntityBuildContext<'a> {
 }
 
 /// 构建实体段：校验输入，RawEntity 转成 Entity 并执行可计算属性，
-/// 结果写进 extra_props。归属 DAG 的边已去重且无环，反查出的直接上级随实体序列化。
-/// 关系只校验 ID，原样保留。
+/// 结果写进 extra_props。归属 DAG 的边已去重且无环，反查出的直接上级写进 belong_dag。
+/// 关系只校验 ID，数据仍归文档层所有。
 pub(crate) fn build(
     raw_entities: HashMap<String, RawEntity>,
-    entity_link: EntityLinks,
+    entity_link: &HashMap<String, Vec<EntityLink>>,
     context: EntityBuildContext<'_>,
-) -> Result<(EntityMap, EntityLinks), DocumentError> {
+) -> Result<(HashMap<String, Entity>, Vec<BelongNode>), DocumentError> {
     let EntityBuildContext {
         base,
         calendar,
@@ -145,9 +137,9 @@ pub(crate) fn build(
         date_mode,
         lang,
     } = context;
-    let belong_graph = build_belong_graph(&raw_entities, &entity_link)?;
+    let belong_graph = build_belong_graph(&raw_entities, entity_link)?;
     validate_avatars(&raw_entities, base)?;
-    let mut parents_by_id: HashMap<&str, Vec<String>> = belong_graph
+    let parents_by_id: HashMap<&str, Vec<String>> = belong_graph
         .graph()
         .node_indices()
         .map(|node| {
@@ -163,12 +155,11 @@ pub(crate) fn build(
     let mut entities = HashMap::new();
     for (id, mut input) in raw_entities {
         let props = std::mem::take(&mut input.calculable_props);
-        let belong_to = parents_by_id.remove(id.as_str()).unwrap_or_default();
+        let belong_to = parents_by_id.get(id.as_str()).cloned().unwrap_or_default();
         let mut entity = Entity::from_raw(
             input,
             EntityContext {
                 id: id.clone(),
-                belong_to,
                 calendar,
                 base,
             },
@@ -176,19 +167,28 @@ pub(crate) fn build(
         apply_calculable_props(
             &mut entity,
             &props,
+            &belong_to,
             calculable_props,
             date_mode,
             lang,
             calendar,
         )?;
-        entities.insert(id, Arc::new(entity));
+        entities.insert(id, entity);
     }
-    Ok((entities, entity_link))
+    let mut belong_dag: Vec<_> = parents_by_id
+        .into_iter()
+        .map(|(id, belong_to)| BelongNode {
+            id: id.to_owned(),
+            belong_to,
+        })
+        .collect();
+    belong_dag.sort_unstable_by(|a, b| a.id.cmp(&b.id));
+    Ok((entities, belong_dag))
 }
 
 fn build_belong_graph(
     entities: &HashMap<String, RawEntity>,
-    links: &EntityLinks,
+    links: &HashMap<String, Vec<EntityLink>>,
 ) -> Result<Dag<String, ()>, DocumentError> {
     let mut errors = Vec::new();
     for (id, input) in entities {
@@ -260,6 +260,7 @@ fn validate_avatars(entity: &HashMap<String, RawEntity>, base: &Path) -> Result<
 fn apply_calculable_props(
     entity: &mut Entity,
     props: &[String],
+    belong_to: &[String],
     runtime: &CalculablePropRuntime,
     mode: Option<&str>,
     lang: &str,
@@ -273,7 +274,7 @@ fn apply_calculable_props(
             .transpose()?;
         let context = json!({
             "api": 1, "date_mode": mode, "language": lang,
-            "entity": { "id": entity.id, "base_time": base_time, "description": entity.description, "belong_to": entity.belong_to },
+            "entity": { "id": entity.id, "base_time": base_time, "description": entity.description, "belong_to": belong_to },
         });
         if let Some(value) = runtime.calculable_prop(name, &context)? {
             entity.extra_props.insert(name.clone(), value);

@@ -18,7 +18,7 @@ use tauri_plugin_log::log::{error, warn};
 
 use crate::weft::FromRaw;
 use crate::weft::entity::{
-    EntityBuildContext, EntityLinks, EntityMap, RawEntity, build as build_entities,
+    BelongNode, Entity, EntityBuildContext, EntityLink, RawEntity, build as build_entities,
 };
 use crate::weft::errors::{DocumentError, ValidationError};
 use crate::weft::event::{
@@ -31,9 +31,11 @@ use crate::weft::story::{RawStory, Story, StoryContext};
 #[derive(Debug, Serialize)]
 pub struct WeftDoc {
     pub story: Story,
-    // 实体段的两份构建结果：实体表与关系组；归属关系写在各实体的 belong_to 上。
-    pub entity: EntityMap,
-    pub entity_link: EntityLinks,
+    pub entity: HashMap<String, Entity>,
+    // 归属 DAG：只含实体 ID 与构建期反查出的直接上级，按 id 排序。
+    pub belong_dag: Vec<BelongNode>,
+    // 关系组名 → 关系列表；只校验引用，随文档原样输出。
+    pub entity_link: HashMap<String, Vec<EntityLink>>,
     // 事件字典：事件 ID → 事件定义
     #[serde(default)]
     pub event: BTreeMap<String, EventItem>,
@@ -52,7 +54,7 @@ struct RawWeftDoc {
     #[serde(default)]
     entity: HashMap<String, RawEntity>,
     #[serde(default)]
-    entity_link: EntityLinks,
+    entity_link: HashMap<String, Vec<EntityLink>>,
     #[serde(default)]
     event: HashMap<String, RawEvent>,
     #[serde(default)]
@@ -83,9 +85,9 @@ impl WeftDoc {
                 lang,
             },
         )?;
-        let (entity, entity_link) = build_entities(
+        let (entity, belong_dag) = build_entities(
             raw.entity,
-            raw.entity_link,
+            &raw.entity_link,
             EntityBuildContext {
                 base,
                 calendar: &story.calendar,
@@ -97,11 +99,12 @@ impl WeftDoc {
         check_event(&raw.event, &entity)?;
         check_narrative(&raw.narrative, &raw.event)?;
         let narrative = raw.narrative.into_iter().collect();
-        let event = build_events(raw.event, &entity)?;
+        let event = build_events(raw.event)?;
         let doc = WeftDoc {
             story,
             entity,
-            entity_link,
+            belong_dag,
+            entity_link: raw.entity_link,
             event,
             event_times: BTreeMap::new(),
             narrative,
@@ -164,7 +167,7 @@ fn parse(app: &AppHandle, content: &str, base: &Path, lang: &str) -> Result<Valu
     // 实体（含可计算属性）已构建完毕，计算事件时间。
     let cal = &doc.story.calendar;
     doc.calendar_components = Some(cal.component_count());
-    doc.event_times = event::apply_times(&doc.event, cal)?;
+    doc.event_times = event::apply_times(&doc.event, &doc.entity, cal)?;
     for entity in doc.entity.values() {
         if let Some(avatar) = &entity.avatar {
             app.asset_protocol_scope()
