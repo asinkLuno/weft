@@ -101,6 +101,8 @@ type WeftDoc = {
     string,
     {
       id: string;
+      // 直接上级实体 ID（后端从归属 DAG 反查，已排序去重）
+      belong_to?: string[];
       avatar?: string;
       description?: string;
       base_time?: Phase | null;
@@ -109,7 +111,6 @@ type WeftDoc = {
       extra_props?: Record<string, unknown>;
     }
   >;
-  entity_forest?: EntityForest;
   entity_link?: Record<
     string,
     Array<{ entities: [string, string]; relations: string }>
@@ -120,13 +121,6 @@ type WeftDoc = {
   // 叙事线名称 → 事件 ID 列表
   narrative?: Record<string, Narrative>;
 };
-
-type EntityBelongTo = {
-  entity: string;
-  children: EntityForest;
-};
-
-type EntityForest = EntityBelongTo[];
 
 type Narrative = string[];
 
@@ -529,21 +523,16 @@ type EntityData = {
 };
 type EntityFlowNode = Node<EntityData, "entity">;
 
-// 从森林收集直接归属；多重归属的实体只遍历一次子树，所有入边均保留。
-function entityParents(forest: EntityForest): Map<string, Set<string>> {
+// 从实体表的 belong_to 收集直接归属；后端已保证 ID 合法且无环。
+function entityParents(entities: WeftDoc["entity"]): Map<string, Set<string>> {
   const parents = new Map<string, Set<string>>();
-  const visited = new Set<string>();
-  function visit(node: EntityBelongTo) {
-    if (visited.has(node.entity)) return;
-    visited.add(node.entity);
-    for (const child of node.children) {
-      const ids = parents.get(child.entity) ?? new Set<string>();
-      ids.add(node.entity);
-      parents.set(child.entity, ids);
-      visit(child);
+  for (const [id, entity] of Object.entries(entities ?? {})) {
+    for (const parent of entity.belong_to ?? []) {
+      const ids = parents.get(id) ?? new Set<string>();
+      ids.add(parent);
+      parents.set(id, ids);
     }
   }
-  for (const root of forest) visit(root);
   return parents;
 }
 
@@ -887,7 +876,7 @@ function EntityViewInner({
   // entity_link 的引用按 id 对回实体；未知引用取 null 丢弃（后端已校验，防御手滑）
   const idOf = (r: string) => (doc?.entity && r in doc.entity ? r : null);
 
-  const parentsById = entityParents(doc?.entity_forest ?? []);
+  const parentsById = entityParents(doc?.entity);
 
   // id 的全部上层归属（跨多级）；后端已保证无环，先占位只是防手滑自环
   const cache = new Map<string, Set<string>>();
@@ -994,7 +983,7 @@ function EntityViewInner({
     belongLabel: t.belongTo,
   });
 
-  // 有归属筛选时按森林中的归属连边、dagre 分层；无筛选不连归属线、摆成网格平铺
+  // 有归属筛选时按 belong_to 推导的归属连边、dagre 分层；无筛选不连归属线、摆成网格平铺
   const visibleSet = new Set(filtered.map(([id]) => id));
   const edges: Edge[] = filtered.flatMap(([id]) =>
     [...(parentsById.get(id) ?? [])]
@@ -1023,7 +1012,7 @@ function EntityViewInner({
   );
   const auto: Record<string, { x: number; y: number }> = {};
   if (activePick || activeLink) {
-    // 归属筛选按森林分层，关系筛选按关系线分层；两个维度互斥
+    // 归属筛选按归属连边分层，关系筛选按关系线分层；两个维度互斥
     Object.assign(auto, dagreLayout(filtered, activePick ? edges : linkEdges));
   } else {
     const cols = Math.ceil(Math.sqrt(filtered.length));

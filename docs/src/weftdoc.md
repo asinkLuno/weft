@@ -48,35 +48,31 @@ entity:
 
 归属图（`belong_to`）不许成环，否则按层级展示无法终止。
 
-## 运行时归属森林
+## 运行时归属
 
-YAML 输入中的 `RawEntity` 保留 `belong_to`。构建后的 `Entity` 只保存实体自身的数据，归属关系单独输出到 `entity_forest`：
+YAML 输入中的 `RawEntity` 保留 `belong_to`。构建时用 DAG 校验归属（引用存在、不成环、重复边去重），再把每个实体的直接上级反查写回 `Entity.belong_to`；DAG 只作为构建期的校验结构，不进入输出。
 
 ```rust
-pub struct EntityBelongTo {
-    pub entity: Arc<Entity>,
-    pub children: EntityForest,
+pub struct Entity {
+    pub id: String,
+    pub belong_to: Vec<String>,
+    // ...
 }
-
-pub type EntityForest = Vec<EntityBelongTo>;
 ```
 
-树从父实体指向直接归属于它的子实体，无归属的实体（包括独立实体）作为根节点。多重归属的实体出现在各个父节点下，节点共享实体数据。根节点和同级子节点按 ID 排序，同一父子关系只保留一次。
-
-序列化给前端时，节点的 `entity` 是实体 ID，完整实体数据统一保存在顶层 `entity` 表中。例如 `哈利·波特` 的 `belong_to: [格兰芬多]` 会生成：
+`belong_to` 已排序去重，没有上级时省略该字段，不再单独输出 `entity_forest`。例如 `哈利·波特` 的 `belong_to: [格兰芬多]` 会生成：
 
 ```json
 {
   "entity": {
     "格兰芬多": { "id": "格兰芬多", "base_time": null, "description": null },
-    "哈利·波特": { "id": "哈利·波特", "base_time": null, "description": null }
-  },
-  "entity_forest": [
-    {
-      "entity": "格兰芬多",
-      "children": [{ "entity": "哈利·波特", "children": [] }]
+    "哈利·波特": {
+      "id": "哈利·波特",
+      "belong_to": ["格兰芬多"],
+      "base_time": null,
+      "description": null
     }
-  ]
+  }
 }
 ```
 
@@ -87,10 +83,10 @@ pub type EntityForest = Vec<EntityBelongTo>;
 1. 反序列化成 `RawWeftDoc` 等输入类型，未知键滤掉；
 2. 按段检查：story → entity → event → narrative，每段先引用后结构，断开的引用按段批量报出——
    - story：通过 `date_mode` 的脚本路径加载历法，留空则使用内置公历，并提前加载可计算属性脚本；
-   - entity：校验 `belong_to` 与 `entity_link` 的实体引用及归属环，先构建实体表并执行可计算属性（结果写进 `extra_props`），再构建归属森林和实体关系；
+   - entity：校验 `belong_to` 与 `entity_link` 的实体引用及归属环，构建实体表并执行可计算属性（结果写进 `extra_props`），再构建归属 DAG 并把直接上级反查写回实体；`entity_link` 只校验 ID，原样保留；
    - event：参与实体存在，事件标题全局唯一；
    - narrative：`observer` 与 `subject` 引用的事件、实体存在；
 3. 使用已加载的历法，把所有时间归一化、算出可比较的刻度与展示文案；
-4. 序列化成 JSON 交给前端，归属关系由 `entity_forest` 提供。
+4. 序列化成 JSON 交给前端，归属关系由实体的 `belong_to` 提供。
 
 任何一步失败都会阻止展示。

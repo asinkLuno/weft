@@ -1,10 +1,10 @@
-//! 实体、归属森林与关系模型：YAML 输入结构、构建上下文与运行时结构，
+//! 实体、归属图与关系模型：YAML 输入结构、构建上下文与运行时结构，
 //! 以及校验、可计算属性执行和图构建的完整流程。
 
 use std::{collections::HashMap, fs, path::Path, sync::Arc};
 
-use daggy::{Dag, NodeIndex, Walker};
-use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
+use daggy::{Dag, Walker};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value as JsonValue, json};
 use serde_yaml_ng::Value;
 
@@ -14,7 +14,9 @@ use crate::weft::FromRaw;
 use crate::weft::errors::{DocumentError, ValidationError};
 use crate::weft::phase::Phase;
 
-// 归属与可计算属性声明仅用于输入阶段，归属构建后统一保存到 EntityForest。
+// ---- 输入结构 ----
+
+// 归属与可计算属性声明仅用于输入阶段，归属校验后反查写回实体。
 // base_time 保留原始 YAML 值，构建时经 Phase::from_yaml_scalar_opt 解析。
 #[derive(Debug, Deserialize)]
 pub(crate) struct RawEntity {
@@ -31,23 +33,23 @@ pub(crate) struct RawEntity {
     pub extra_props: HashMap<String, Value>,
 }
 
-#[derive(Debug, Deserialize)]
-pub(crate) struct RawEntityLink {
-    pub entities: (String, String),
-    pub relations: String,
-}
+// ---- 实体 ----
 
-/// 实体构建所需的 ID、历法和 YAML 基准路径。
+/// 实体构建所需的 ID、直接归属、历法和 YAML 基准路径。
 struct EntityContext<'a> {
     id: String,
+    belong_to: Vec<String>,
     calendar: &'a Calendar,
     base: &'a Path,
 }
 
-/// 已完成头像解析和基准时间展示归一化的实体；集合、森林、关系和事件共享同一份数据。
+/// 已完成头像解析和基准时间展示归一化的实体；顶层实体表和事件共享同一份数据。
 #[derive(Debug, Serialize)]
 pub struct Entity {
     pub id: String,
+    // 直接上级实体 ID，由归属 DAG 反查得出，已排序去重；无归属时省略。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub belong_to: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
     // 原始 Phase 用于偏移运算，展示归一化不会改写它。
@@ -64,7 +66,12 @@ impl FromRaw<EntityContext<'_>> for Entity {
     type Raw = RawEntity;
 
     fn from_raw(raw: Self::Raw, context: EntityContext<'_>) -> Result<Self, DocumentError> {
-        let EntityContext { id, calendar, base } = context;
+        let EntityContext {
+            id,
+            belong_to,
+            calendar,
+            base,
+        } = context;
         let base_time = Phase::from_yaml_scalar_opt(raw.base_time.as_ref())?;
         let base_time_humanizer = base_time
             .as_ref()
@@ -82,6 +89,7 @@ impl FromRaw<EntityContext<'_>> for Entity {
             .map(|path| path.to_string_lossy().into_owned());
         Ok(Self {
             id,
+            belong_to,
             avatar,
             base_time,
             base_time_humanizer,
@@ -96,56 +104,25 @@ impl FromRaw<EntityContext<'_>> for Entity {
     }
 }
 
-/// 归属树节点：父实体包含直接归属于它的子节点。
-#[derive(Debug, Serialize)]
-pub struct EntityBelongTo {
-    #[serde(serialize_with = "serialize_entity")]
-    pub entity: Arc<Entity>,
-    pub children: EntityForest,
-}
+/// 实体 ID → 已构建实体；顶层实体表与事件共享同一份引用。
+pub type EntityMap = HashMap<String, Arc<Entity>>;
 
-/// 以无归属实体为根的树集合；多重归属的实体出现在各个父节点下。
-pub type EntityForest = Vec<EntityBelongTo>;
+// ---- 关系 ----
 
-/// 关系构建所需的关系组名和已构建实体表。
-struct EntityLinkContext<'a> {
-    group: &'a str,
-    entities: &'a HashMap<String, Arc<Entity>>,
-}
-
-/// 端点已解析为共享实体引用的关系。
-#[derive(Debug, Serialize)]
+/// 一条关系：两个实体 ID 与关系类型；ID 是否合法由构建管线统一校验。
+#[derive(Debug, Deserialize, Serialize)]
 pub struct EntityLink {
-    #[serde(serialize_with = "serialize_endpoints")]
-    pub entities: (Arc<Entity>, Arc<Entity>),
+    pub entities: (String, String),
     pub relations: String,
 }
 
-impl FromRaw<EntityLinkContext<'_>> for EntityLink {
-    type Raw = RawEntityLink;
+/// 关系组名 → 该组的关系列表。
+pub type EntityLinks = HashMap<String, Vec<EntityLink>>;
 
-    fn from_raw(raw: Self::Raw, context: EntityLinkContext<'_>) -> Result<Self, DocumentError> {
-        let resolve = |id: &str| {
-            context
-                .entities
-                .get(id)
-                .map(Arc::clone)
-                .ok_or_else(|| DocumentError::References {
-                    errors: vec![ValidationError::UnknownLinkEntity {
-                        group: context.group.to_owned(),
-                        entity: id.to_owned(),
-                    }],
-                })
-        };
-        Ok(Self {
-            entities: (resolve(&raw.entities.0)?, resolve(&raw.entities.1)?),
-            relations: raw.relations,
-        })
-    }
-}
+// ---- 构建管线 ----
 
-/// 实体集合构建所需的路径、历法和可计算属性环境。
-pub(crate) struct EntityCollectionContext<'a> {
+/// 实体段构建所需的路径、历法和可计算属性环境。
+pub(crate) struct EntityBuildContext<'a> {
     pub base: &'a Path,
     pub calendar: &'a Calendar,
     pub calculable_props: &'a CalculablePropRuntime,
@@ -153,167 +130,65 @@ pub(crate) struct EntityCollectionContext<'a> {
     pub lang: &'a str,
 }
 
-/// 已完成校验、标签展开和图构建的实体集合。
-#[derive(Debug)]
-pub struct EntityCollection {
-    entities: HashMap<String, Arc<Entity>>,
-    pub entity_forest: EntityForest,
-    pub entity_link: HashMap<String, Vec<EntityLink>>,
-}
-
-impl Serialize for EntityCollection {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let entities: HashMap<_, _> = self
-            .entities
-            .iter()
-            .map(|(id, entity)| (id, entity.as_ref()))
-            .collect();
-        let mut state = serializer.serialize_struct("EntityCollection", 3)?;
-        state.serialize_field("entity", &entities)?;
-        state.serialize_field("entity_forest", &self.entity_forest)?;
-        state.serialize_field("entity_link", &self.entity_link)?;
-        state.end()
-    }
-}
-
-impl EntityCollection {
-    pub fn as_map(&self) -> &HashMap<String, Arc<Entity>> {
-        &self.entities
-    }
-
-    /// 构建管线：校验输入，RawEntity 转成 Entity 并执行可计算属性，
-    /// 结果写进 extra_props，最后计算归属森林并构建关系。
-    pub fn build(
-        raw_entities: HashMap<String, RawEntity>,
-        raw_links: HashMap<String, Vec<RawEntityLink>>,
-        context: EntityCollectionContext<'_>,
-    ) -> Result<Self, DocumentError> {
-        let EntityCollectionContext {
-            base,
-            calendar,
+/// 构建实体段：校验输入，RawEntity 转成 Entity 并执行可计算属性，
+/// 结果写进 extra_props。归属 DAG 的边已去重且无环，反查出的直接上级随实体序列化。
+/// 关系只校验 ID，原样保留。
+pub(crate) fn build(
+    raw_entities: HashMap<String, RawEntity>,
+    entity_link: EntityLinks,
+    context: EntityBuildContext<'_>,
+) -> Result<(EntityMap, EntityLinks), DocumentError> {
+    let EntityBuildContext {
+        base,
+        calendar,
+        calculable_props,
+        date_mode,
+        lang,
+    } = context;
+    let belong_graph = build_belong_graph(&raw_entities, &entity_link)?;
+    validate_avatars(&raw_entities, base)?;
+    let mut parents_by_id: HashMap<&str, Vec<String>> = belong_graph
+        .graph()
+        .node_indices()
+        .map(|node| {
+            let mut parents: Vec<_> = belong_graph
+                .parents(node)
+                .iter(&belong_graph)
+                .map(|(_, parent)| belong_graph[parent].clone())
+                .collect();
+            parents.sort_unstable();
+            (belong_graph[node].as_str(), parents)
+        })
+        .collect();
+    let mut entities = HashMap::new();
+    for (id, mut input) in raw_entities {
+        let props = std::mem::take(&mut input.calculable_props);
+        let belong_to = parents_by_id.remove(id.as_str()).unwrap_or_default();
+        let mut entity = Entity::from_raw(
+            input,
+            EntityContext {
+                id: id.clone(),
+                belong_to,
+                calendar,
+                base,
+            },
+        )?;
+        apply_calculable_props(
+            &mut entity,
+            &props,
             calculable_props,
             date_mode,
             lang,
-        } = context;
-        let belong_graph = build_belong_graph(&raw_entities, &raw_links)?;
-        validate_avatars(&raw_entities, base)?;
-        let mut entities = HashMap::new();
-        for (id, mut input) in raw_entities {
-            let props = std::mem::take(&mut input.calculable_props);
-            let parents = std::mem::take(&mut input.belong_to);
-            let mut entity = Entity::from_raw(
-                input,
-                EntityContext {
-                    id: id.clone(),
-                    calendar,
-                    base,
-                },
-            )?;
-            apply_calculable_props(
-                &mut entity,
-                &parents,
-                &props,
-                calculable_props,
-                date_mode,
-                lang,
-                calendar,
-            )?;
-            entities.insert(id, Arc::new(entity));
-        }
-        let entity_forest = build_forest(&belong_graph, &entities);
-        let mut entity_link = HashMap::new();
-        for (group, links) in raw_links {
-            let links = links
-                .into_iter()
-                .map(|raw| {
-                    EntityLink::from_raw(
-                        raw,
-                        EntityLinkContext {
-                            group: &group,
-                            entities: &entities,
-                        },
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            entity_link.insert(group, links);
-        }
-        Ok(Self {
-            entities,
-            entity_forest,
-            entity_link,
-        })
+            calendar,
+        )?;
+        entities.insert(id, Arc::new(entity));
     }
+    Ok((entities, entity_link))
 }
-
-// DAG 中父节点指向子节点；展开时按 ID 排序，多重归属出现在各个分支下。
-fn build_forest(graph: &Dag<String, ()>, entities: &HashMap<String, Arc<Entity>>) -> EntityForest {
-    fn build_tree(
-        node: NodeIndex,
-        graph: &Dag<String, ()>,
-        entities: &HashMap<String, Arc<Entity>>,
-    ) -> EntityBelongTo {
-        let mut children: Vec<_> = graph
-            .children(node)
-            .iter(graph)
-            .map(|(_, child)| child)
-            .collect();
-        children.sort_unstable_by_key(|&child| &graph[child]);
-        EntityBelongTo {
-            entity: Arc::clone(&entities[&graph[node]]),
-            children: children
-                .into_iter()
-                .map(|child| build_tree(child, graph, entities))
-                .collect(),
-        }
-    }
-
-    let mut roots: Vec<_> = graph
-        .graph()
-        .node_indices()
-        .filter(|&node| graph.parents(node).iter(graph).next().is_none())
-        .collect();
-    roots.sort_unstable_by_key(|&node| &graph[node]);
-    roots
-        .into_iter()
-        .map(|node| build_tree(node, graph, entities))
-        .collect()
-}
-
-// 执行实体的可计算属性：脚本返回值写进 extra_props 的属性注册 ID 下，
-// 与输入字段同名时以计算结果为准；返回 () 则不写入。
-fn apply_calculable_props(
-    entity: &mut Entity,
-    parents: &[String],
-    props: &[String],
-    runtime: &CalculablePropRuntime,
-    mode: Option<&str>,
-    lang: &str,
-    cal: &Calendar,
-) -> Result<(), DocumentError> {
-    for name in props {
-        let base_time = entity
-            .base_time
-            .as_ref()
-            .map(|phase| cal.normalize(&phase.flatten(cal.component_count())?))
-            .transpose()?;
-        let context = json!({
-            "api": 1, "date_mode": mode, "language": lang,
-            "entity": { "id": entity.id, "base_time": base_time, "description": entity.description, "belong_to": parents },
-        });
-        if let Some(value) = runtime.calculable_prop(name, &context)? {
-            entity.extra_props.insert(name.clone(), value);
-        }
-    }
-    Ok(())
-}
-
-// 实体引用、头像路径与归属图的完整性校验。
-// 头像经 asset protocol 直接交给 <img>，按扩展名接受 WebView 可渲染的图片。
-const IMAGE_EXTENSIONS: [&str; 8] = ["bmp", "gif", "ico", "jpeg", "jpg", "png", "svg", "webp"];
 
 fn build_belong_graph(
     entities: &HashMap<String, RawEntity>,
-    links: &HashMap<String, Vec<RawEntityLink>>,
+    links: &EntityLinks,
 ) -> Result<Dag<String, ()>, DocumentError> {
     let mut errors = Vec::new();
     for (id, input) in entities {
@@ -380,6 +255,35 @@ fn validate_avatars(entity: &HashMap<String, RawEntity>, base: &Path) -> Result<
     report(errors)
 }
 
+// 执行实体的可计算属性：脚本返回值写进 extra_props 的属性注册 ID 下，
+// 与输入字段同名时以计算结果为准；返回 () 则不写入。
+fn apply_calculable_props(
+    entity: &mut Entity,
+    props: &[String],
+    runtime: &CalculablePropRuntime,
+    mode: Option<&str>,
+    lang: &str,
+    cal: &Calendar,
+) -> Result<(), DocumentError> {
+    for name in props {
+        let base_time = entity
+            .base_time
+            .as_ref()
+            .map(|phase| cal.normalize(&phase.flatten(cal.component_count())?))
+            .transpose()?;
+        let context = json!({
+            "api": 1, "date_mode": mode, "language": lang,
+            "entity": { "id": entity.id, "base_time": base_time, "description": entity.description, "belong_to": entity.belong_to },
+        });
+        if let Some(value) = runtime.calculable_prop(name, &context)? {
+            entity.extra_props.insert(name.clone(), value);
+        }
+    }
+    Ok(())
+}
+
+// ---- 校验工具 ----
+
 // 有错误时排序汇总为一条 References，一次暴露全部问题。
 fn report(mut errors: Vec<ValidationError>) -> Result<(), DocumentError> {
     if errors.is_empty() {
@@ -389,21 +293,13 @@ fn report(mut errors: Vec<ValidationError>) -> Result<(), DocumentError> {
     Err(DocumentError::References { errors })
 }
 
+// 头像经 asset protocol 直接交给 <img>，按扩展名接受 WebView 可渲染的图片。
+const IMAGE_EXTENSIONS: [&str; 8] = ["bmp", "gif", "ico", "jpeg", "jpg", "png", "svg", "webp"];
+
 fn is_image(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| {
             IMAGE_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
         })
-}
-
-fn serialize_entity<S: Serializer>(entity: &Entity, serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(&entity.id)
-}
-
-fn serialize_endpoints<S: Serializer>(
-    entities: &(Arc<Entity>, Arc<Entity>),
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    (&entities.0.id, &entities.1.id).serialize(serializer)
 }

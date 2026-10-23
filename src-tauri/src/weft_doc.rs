@@ -17,7 +17,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_log::log::{error, warn};
 
 use crate::weft::FromRaw;
-use crate::weft::entity::{EntityCollection, EntityCollectionContext, RawEntity, RawEntityLink};
+use crate::weft::entity::{
+    EntityBuildContext, EntityLinks, EntityMap, RawEntity, build as build_entities,
+};
 use crate::weft::errors::{DocumentError, ValidationError};
 use crate::weft::event::{
     self, EventItem, EventTiming, RawEvent, build_events, check as check_event,
@@ -29,8 +31,9 @@ use crate::weft::story::{RawStory, Story, StoryContext};
 #[derive(Debug, Serialize)]
 pub struct WeftDoc {
     pub story: Story,
-    #[serde(flatten)]
-    pub entity: EntityCollection,
+    // 实体段的两份构建结果：实体表与关系组；归属关系写在各实体的 belong_to 上。
+    pub entity: EntityMap,
+    pub entity_link: EntityLinks,
     // 事件字典：事件 ID → 事件定义
     #[serde(default)]
     pub event: BTreeMap<String, EventItem>,
@@ -49,7 +52,7 @@ struct RawWeftDoc {
     #[serde(default)]
     entity: HashMap<String, RawEntity>,
     #[serde(default)]
-    entity_link: HashMap<String, Vec<RawEntityLink>>,
+    entity_link: EntityLinks,
     #[serde(default)]
     event: HashMap<String, RawEvent>,
     #[serde(default)]
@@ -80,10 +83,10 @@ impl WeftDoc {
                 lang,
             },
         )?;
-        let entity = EntityCollection::build(
+        let (entity, entity_link) = build_entities(
             raw.entity,
             raw.entity_link,
-            EntityCollectionContext {
+            EntityBuildContext {
                 base,
                 calendar: &story.calendar,
                 calculable_props: &story.calculable_prop_runtime,
@@ -91,13 +94,14 @@ impl WeftDoc {
                 lang,
             },
         )?;
-        check_event(&raw.event, entity.as_map())?;
+        check_event(&raw.event, &entity)?;
         check_narrative(&raw.narrative, &raw.event)?;
         let narrative = raw.narrative.into_iter().collect();
-        let event = build_events(raw.event, entity.as_map())?;
+        let event = build_events(raw.event, &entity)?;
         let doc = WeftDoc {
             story,
             entity,
+            entity_link,
             event,
             event_times: BTreeMap::new(),
             narrative,
@@ -161,7 +165,7 @@ fn parse(app: &AppHandle, content: &str, base: &Path, lang: &str) -> Result<Valu
     let cal = &doc.story.calendar;
     doc.calendar_components = Some(cal.component_count());
     doc.event_times = event::apply_times(&doc.event, cal)?;
-    for entity in doc.entity.as_map().values() {
+    for entity in doc.entity.values() {
         if let Some(avatar) = &entity.avatar {
             app.asset_protocol_scope()
                 .allow_file(avatar)
