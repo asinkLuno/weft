@@ -5,20 +5,29 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { LazyStore } from "@tauri-apps/plugin-store";
 import {
   Background,
-  Controls,
   type Edge,
   Handle,
   type Node,
+  Panel,
   Position,
   ReactFlow,
   useNodesState,
+  useReactFlow,
 } from "@xyflow/react";
 import {
   BookOpen,
   CalendarDays,
   ChevronDown,
+  FileText,
+  FolderOpen,
+  GitBranch,
+  History,
+  Maximize,
+  Minus,
+  Plus,
   Tags,
   UserRound,
+  Waypoints,
   X as XIcon,
 } from "lucide-react";
 import "@xyflow/react/dist/style.css";
@@ -55,6 +64,7 @@ import {
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { WeftMark, WeftPrint } from "@/components/weft-art";
 import {
   asLang,
   type DocumentError,
@@ -73,7 +83,7 @@ type DocumentPayload = {
   error?: DocumentError;
 };
 
-// 后端已按 src-tauri/src/model.rs 校验并滤掉未声明键，这里只读序列化结果
+// 后端已按 src-tauri/src/weft_doc.rs 校验并滤掉未声明键，这里只读序列化结果
 type Phase = {
   components: number[];
   anchor: Phase | null;
@@ -95,11 +105,11 @@ type WeftDoc = {
       id: string;
       avatar?: string;
       description?: string;
-      belong_to?: string[];
       base_time?: Phase | null;
       base_time_humanizer?: string;
     }
   >;
+  entity_forest?: EntityForest;
   entity_link?: Record<
     string,
     Array<{ entities: [string, string]; relations: string }>
@@ -110,6 +120,13 @@ type WeftDoc = {
   // 叙事线名称 → 事件 ID 列表
   narrative?: Record<string, Narrative>;
 };
+
+type EntityBelongTo = {
+  entity: string;
+  children: EntityForest;
+};
+
+type EntityForest = EntityBelongTo[];
 
 type Narrative = string[];
 
@@ -283,29 +300,80 @@ function App() {
 
   if (!path) {
     return (
-      <main className="welcome">
-        <h1>weft</h1>
-        <Button size="lg" onClick={openFile}>
-          {strings[lang].open}
-        </Button>
-        {recents.length > 0 && (
-          <>
-            <h2>{strings[lang].recent}</h2>
-            <ul>
-              {recents.map((p) => (
-                <li key={p}>
-                  <Button
-                    variant="link"
-                    className="h-auto max-w-[560px] overflow-hidden px-1 text-ellipsis whitespace-nowrap"
-                    onClick={() => bind(p)}
-                  >
-                    {p}
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
+      <main className="welcome" lang={lang === "zh" ? "zh-CN" : "en"}>
+        <header className="welcome-masthead">
+          <div className="brand">
+            <WeftMark />
+            <span>weft</span>
+          </div>
+          <span className="welcome-workspace">{strings[lang].workspace}</span>
+        </header>
+        <div className="welcome-layout">
+          <section className="welcome-intro">
+            <h1>{strings[lang].welcomeTitle}</h1>
+            <p>{strings[lang].welcomeDescription}</p>
+            <Button size="lg" onClick={openFile}>
+              <FolderOpen />
+              {strings[lang].open}
+            </Button>
+          </section>
+          <div className="welcome-print" aria-hidden="true">
+            <span className="welcome-wordmark">weft</span>
+            <WeftPrint />
+            <div className="welcome-print-legend">
+              <span>
+                <BookOpen />
+                {strings[lang].tab1}
+              </span>
+              <span>
+                <Waypoints />
+                {strings[lang].tab2}
+              </span>
+              <span>
+                <GitBranch />
+                {strings[lang].tab4}
+              </span>
+            </div>
+          </div>
+          <Card className="recent-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <History className="size-4" />
+                {strings[lang].recent}
+              </CardTitle>
+              <CardDescription>
+                {strings[lang].recentDescription}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {recents.length > 0 ? (
+                <ul className="recent-list">
+                  {recents.map((p) => (
+                    <li key={p}>
+                      <Button
+                        variant="ghost"
+                        className="recent-file"
+                        onClick={() => bind(p)}
+                      >
+                        <FileText className="size-5 text-primary" />
+                        <span>
+                          <strong>{p.split(/[\\/]/).pop()}</strong>
+                          <small>{p}</small>
+                        </span>
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="recent-empty">
+                  <FileText className="size-5" aria-hidden="true" />
+                  <p>{strings[lang].recentEmpty}</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+        <p className="welcome-note">{strings[lang].fileHint}</p>
       </main>
     );
   }
@@ -328,16 +396,27 @@ function App() {
   }
 
   return (
-    <div className="app">
+    <div className="app" lang={lang === "zh" ? "zh-CN" : "en"}>
       <Tabs
         value={activeTab}
         onValueChange={(v) => switchTab(v as Tab)}
         className="tabbody"
       >
         <div className="tabbar">
+          <div className="brand app-brand">
+            <WeftMark />
+            <span>weft</span>
+          </div>
           <TabsList variant="line">
             {TABS.map((tab) => (
               <TabsTrigger key={tab} value={tab}>
+                {tab === "tab1" ? (
+                  <BookOpen />
+                ) : tab === "tab2" ? (
+                  <Waypoints />
+                ) : (
+                  <GitBranch />
+                )}
                 {strings[lang][tab]}
               </TabsTrigger>
             ))}
@@ -350,11 +429,17 @@ function App() {
         </main>
       </Tabs>
       <footer className={flash ? "statusbar flash" : "statusbar"}>
-        <span className="statusbar-path">{path}</span>
+        <FileText className="size-3.5 shrink-0" aria-hidden="true" />
+        <span className="statusbar-path" title={path}>
+          {path}
+        </span>
+        <span className={`statusbar-state${activeError ? " has-error" : ""}`}>
+          {activeError ? strings[lang].fileError : strings[lang].fileWatching}
+        </span>
         <Button
           variant="ghost"
           size="icon-xs"
-          className="text-white hover:bg-white/20 hover:text-white"
+          className="shrink-0 text-muted-foreground"
           aria-label={strings[lang].close}
           title={strings[lang].close}
           onClick={async () => {
@@ -379,8 +464,8 @@ function StoryView({ doc, lang }: { doc: WeftDoc; lang: Lang }) {
     ([a], [b]) => a.localeCompare(b),
   );
   return (
-    <div className="@container mx-auto w-full max-w-5xl py-4">
-      <header className="mb-10 space-y-5 border-b pb-8">
+    <div className="story-view @container mx-auto w-full max-w-5xl py-4">
+      <header className="story-header mb-10 space-y-5 border-b pb-8">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <BookOpen className="size-4" aria-hidden="true" />
           <span>{t.tab1}</span>
@@ -392,7 +477,7 @@ function StoryView({ doc, lang }: { doc: WeftDoc; lang: Lang }) {
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <UserRound className="size-4 shrink-0" aria-hidden="true" />
             <span className="break-words">
-              {t.author} · {story.author}
+              {t.author}：{story.author}
             </span>
           </div>
         )}
@@ -488,6 +573,24 @@ type EntityData = {
 };
 type EntityFlowNode = Node<EntityData, "entity">;
 
+// 从森林收集直接归属；多重归属的实体只遍历一次子树，所有入边均保留。
+function entityParents(forest: EntityForest): Map<string, Set<string>> {
+  const parents = new Map<string, Set<string>>();
+  const visited = new Set<string>();
+  function visit(node: EntityBelongTo) {
+    if (visited.has(node.entity)) return;
+    visited.add(node.entity);
+    for (const child of node.children) {
+      const ids = parents.get(child.entity) ?? new Set<string>();
+      ids.add(node.entity);
+      parents.set(child.entity, ids);
+      visit(child);
+    }
+  }
+  for (const root of forest) visit(root);
+  return parents;
+}
+
 // 入参只要 data：既当 React Flow 节点，也能当普通卡片用
 function EntityNode({ data }: { data: EntityData }) {
   return (
@@ -530,18 +633,18 @@ function entityInitials(id: string): string {
 
 function EntityCard({ data }: { data: EntityData }) {
   return (
-    <Card className="w-[280px] gap-0 overflow-hidden py-0 shadow-sm transition-shadow hover:shadow-md">
+    <Card className="entity-card w-[280px] gap-0 overflow-hidden py-0">
       <CardHeader className="gap-3 p-4">
         <div className="flex items-start gap-3">
-          <Avatar className="size-10 shrink-0 rounded-lg">
+          <Avatar className="size-10 shrink-0 overflow-hidden">
             {data.avatar && (
               <AvatarImage
                 src={data.avatar}
                 alt={data.name}
-                className="rounded-lg object-cover"
+                className="object-cover"
               />
             )}
-            <AvatarFallback className="rounded-lg text-xs font-medium">
+            <AvatarFallback className="text-xs font-medium">
               {entityInitials(data.name)}
             </AvatarFallback>
           </Avatar>
@@ -576,8 +679,9 @@ function EntityCard({ data }: { data: EntityData }) {
                   p.preview ? (
                     <HoverCard key={p.id} openDelay={250}>
                       <HoverCardTrigger asChild>
-                        <button
-                          type="button"
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           className="nodrag max-w-full rounded-full text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
                           <Badge
@@ -586,7 +690,7 @@ function EntityCard({ data }: { data: EntityData }) {
                           >
                             {p.name}
                           </Badge>
-                        </button>
+                        </Button>
                       </HoverCardTrigger>
                       <HoverCardContent
                         side="right"
@@ -646,9 +750,11 @@ function dagreLayout(
 function EntityCanvas({
   initialNodes,
   edges,
+  lang,
   onPersist,
 }: {
   initialNodes: EntityFlowNode[];
+  lang: Lang;
   edges: Edge[];
   // 不传则拖动不落盘（筛选视图的临时摆放）
   onPersist?: (id: string, pos: { x: number; y: number }) => void;
@@ -675,9 +781,42 @@ function EntityCanvas({
       fitView
       minZoom={0.1}
     >
-      <Background gap={16} />
-      <Controls showInteractive={false} />
+      <Background gap={24} color="var(--border)" />
+      <CanvasControls lang={lang} />
     </ReactFlow>
+  );
+}
+
+function CanvasControls({ lang }: { lang: Lang }) {
+  const { zoomIn, zoomOut, fitView } = useReactFlow();
+  const zh = lang === "zh";
+  return (
+    <Panel position="bottom-left" className="canvas-controls">
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={zh ? "放大" : "Zoom in"}
+        onClick={() => zoomIn()}
+      >
+        <Plus />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={zh ? "缩小" : "Zoom out"}
+        onClick={() => zoomOut()}
+      >
+        <Minus />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={zh ? "适应画布" : "Fit view"}
+        onClick={() => fitView()}
+      >
+        <Maximize />
+      </Button>
+    </Panel>
   );
 }
 
@@ -765,12 +904,26 @@ function EntityViewInner({
   const entities = Object.entries(doc?.entity ?? {}).sort(([a], [b]) =>
     a.localeCompare(b),
   );
-  if (entities.length === 0 || !saved) return null;
+  if (entities.length === 0)
+    return (
+      <div className="view-empty">
+        <Waypoints />
+        <p>{t.entityEmpty}</p>
+      </div>
+    );
+  if (!saved)
+    return (
+      <div className="view-empty">
+        <p>{t.loading}</p>
+      </div>
+    );
 
   const nameOf = (id: string) => doc?.entity?.[id]?.id ?? id;
 
   // entity_link 的引用按 id 对回实体；未知引用取 null 丢弃（后端已校验，防御手滑）
   const idOf = (r: string) => (doc?.entity && r in doc.entity ? r : null);
+
+  const parentsById = entityParents(doc?.entity_forest ?? []);
 
   // id 的全部上层归属（跨多级）；后端已保证无环，先占位只是防手滑自环
   const cache = new Map<string, Set<string>>();
@@ -779,7 +932,7 @@ function EntityViewInner({
     if (hit) return hit;
     const set = new Set<string>();
     cache.set(id, set);
-    for (const p of doc?.entity?.[id]?.belong_to ?? []) {
+    for (const p of parentsById.get(id) ?? []) {
       set.add(p);
       for (const a of ancestorsOf(p)) set.add(a);
     }
@@ -787,7 +940,9 @@ function EntityViewInner({
   };
 
   // 出现过的所有归属目标；已不存在的选中项视为无效，不参与过滤
-  const targets = [...new Set(entities.flatMap(([, e]) => e.belong_to ?? []))];
+  const targets = [
+    ...new Set([...parentsById.values()].flatMap((ids) => [...ids])),
+  ];
   const activePick =
     dim === "belong" && pick && targets.includes(pick) ? pick : null;
 
@@ -796,9 +951,8 @@ function EntityViewInner({
   const byRoot: Record<string, Array<{ v: string; label: string }>> = {};
   for (const tg of targets) {
     const root =
-      [...ancestorsOf(tg)].find(
-        (a) => (doc?.entity?.[a]?.belong_to ?? []).length === 0,
-      ) ?? tg;
+      [...ancestorsOf(tg)].find((a) => (parentsById.get(a)?.size ?? 0) === 0) ??
+      tg;
     if (!byRoot[root]) byRoot[root] = [];
     byRoot[root].push({ v: tg, label: nameOf(tg) });
   }
@@ -854,7 +1008,7 @@ function EntityViewInner({
       e.base_time_humanizer !== undefined
         ? `${t.baseTime}: ${e.base_time_humanizer}`
         : undefined,
-    parents: (e.belong_to ?? []).map((b) => ({
+    parents: [...(parentsById.get(id) ?? [])].map((b) => ({
       id: b,
       name: nameOf(b),
       preview:
@@ -866,10 +1020,10 @@ function EntityViewInner({
     belongLabel: t.belongTo,
   });
 
-  // 有归属筛选时按 belong_to 连边、dagre 分层；无筛选不连归属线、摆成网格平铺
+  // 有归属筛选时按森林中的归属连边、dagre 分层；无筛选不连归属线、摆成网格平铺
   const visibleSet = new Set(filtered.map(([id]) => id));
-  const edges: Edge[] = filtered.flatMap(([id, e]) =>
-    (e.belong_to ?? [])
+  const edges: Edge[] = filtered.flatMap(([id]) =>
+    [...(parentsById.get(id) ?? [])]
       .filter((p) => visibleSet.has(p))
       .map((p) => ({ id: `${p}->${id}`, source: p, target: id })),
   );
@@ -895,7 +1049,7 @@ function EntityViewInner({
   );
   const auto: Record<string, { x: number; y: number }> = {};
   if (activePick || activeLink) {
-    // 归属筛选按 belong_to 分层，关系筛选按关系线分层；两个维度互斥
+    // 归属筛选按森林分层，关系筛选按关系线分层；两个维度互斥
     Object.assign(auto, dagreLayout(filtered, activePick ? edges : linkEdges));
   } else {
     const cols = Math.ceil(Math.sqrt(filtered.length));
@@ -918,8 +1072,8 @@ function EntityViewInner({
   const canvasKey = `${activePick ?? ""}|${activeLink ?? ""}|${filtered.map(([id]) => id).join("|")}`;
 
   return (
-    <div className="flex h-full flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="entity-view flex h-full flex-col gap-3">
+      <div className="entity-toolbar flex flex-wrap items-center gap-2">
         <DimensionFilter
           label={t.belongTo}
           sections={belongSections}
@@ -935,10 +1089,11 @@ function EntityViewInner({
           onChoose={(v) => choose("link", v)}
         />
       </div>
-      <div className="min-h-0 flex-1">
+      <div className="entity-canvas min-h-0 flex-1">
         <EntityCanvas
           key={canvasKey}
           initialNodes={nodes}
+          lang={lang}
           // 归属筛选只连归属线，关系筛选只连关系线，无筛选不连线，两个维度互斥
           edges={activePick ? edges : activeLink ? linkEdges : []}
           onPersist={
@@ -1091,10 +1246,10 @@ function NarrativeGantt({
     </HoverCard>
   );
   return (
-    <section className="min-w-0">
+    <section className="narrative-track min-w-0">
       <h2 className="mb-2 text-lg font-medium">{name}</h2>
-      <div className="overflow-hidden rounded-lg border bg-card">
-        <div className="grid grid-cols-[220px_1fr] border-b bg-muted/50 text-xs text-muted-foreground">
+      <div className="narrative-sheet overflow-hidden border bg-card">
+        <div className="grid grid-cols-[minmax(100px,220px)_minmax(140px,1fr)] border-b bg-muted/50 text-xs text-muted-foreground">
           <div className="h-9 border-r px-3 leading-9">{t.ganttEvent}</div>
           <div className="relative flex h-9 items-end justify-between px-3 pb-1 font-mono">
             <span>{bounds.startDisplay}</span>
@@ -1118,17 +1273,17 @@ function NarrativeGantt({
           return (
             <div
               key={event.id}
-              className="grid min-h-14 grid-cols-[220px_1fr] border-b last:border-b-0"
+              className="grid min-h-14 grid-cols-[minmax(100px,220px)_minmax(140px,1fr)] border-b last:border-b-0"
             >
               <div className="min-w-0 border-r px-3 py-2">
                 {card(
                   event,
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
                     className="block w-full truncate text-left text-sm font-medium outline-none hover:underline"
                   >
                     {event.id}
-                  </button>,
+                  </Button>,
                 )}
                 <div className="mt-0.5 truncate text-xs text-muted-foreground">
                   {event.start_display}
@@ -1149,13 +1304,15 @@ function NarrativeGantt({
                 {card(
                   event,
                   event.end_tick === undefined ? (
-                    <span
-                      className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border border-primary bg-primary shadow-sm"
+                    <Button
+                      aria-label={event.id}
+                      className="narrative-point absolute top-1/2 min-w-3 p-0 size-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border border-primary bg-primary"
                       style={{ left: `clamp(6px, ${left}%, calc(100% - 6px))` }}
                     />
                   ) : (
-                    <span
-                      className="absolute top-1/2 h-6 -translate-y-1/2 rounded-[4px] border border-primary/25 bg-primary/85 shadow-sm"
+                    <Button
+                      aria-label={event.id}
+                      className="narrative-bar absolute top-1/2 min-w-3 p-0 h-6 -translate-y-1/2 border border-primary/25 bg-primary/85"
                       style={{ left: `${left}%`, width: `${width}%` }}
                     />
                   ),
@@ -1199,14 +1356,10 @@ function NarrativeViewInner({
     .filter(([, nar]) => nar.length > 0)
     .sort(([a], [b]) => a.localeCompare(b));
   if (entries.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
-        {t.narrativeEmpty}
-      </div>
-    );
+    return <div className="view-empty">{t.narrativeEmpty}</div>;
   }
   return (
-    <div className="flex h-full flex-col gap-5 overflow-auto p-4">
+    <div className="narrative-view flex h-full flex-col gap-8 overflow-auto">
       {entries.map(([name, nar]) => (
         <NarrativeGantt
           key={name}

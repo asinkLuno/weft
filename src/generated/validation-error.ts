@@ -15,6 +15,7 @@ export type ValidationError =
       params: { entity: string; target: string };
     }
   | { code: "entity_cycle"; params: { entity: string } }
+  | { code: "invalid_avatar_path"; params: { entity: string; path: string } }
   | { code: "time_nonempty_list" }
   | { code: "time_integer_component" }
   | { code: "event_end_before_start"; params: { event: string } }

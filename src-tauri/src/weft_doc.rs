@@ -16,13 +16,14 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_log::log::{error, warn};
 
-use crate::weft::entity::{EntityCollection, RawEntity, RawEntityLink};
+use crate::weft::FromRaw;
+use crate::weft::entity::{EntityCollection, EntityCollectionContext, RawEntity, RawEntityLink};
 use crate::weft::errors::{DocumentError, ValidationError};
 use crate::weft::event::{
     self, EventItem, EventTiming, RawEvent, build_events, check as check_event,
 };
 use crate::weft::narrative::{Narrative, check as check_narrative};
-use crate::weft::story::{RawStory, Story};
+use crate::weft::story::{RawStory, Story, StoryContext};
 
 // YAML 数据模型：顶层键逐个补齐，未知键在反序列化时滤掉。
 #[derive(Debug, Serialize)]
@@ -62,19 +63,7 @@ impl WeftDoc {
         gregorian: &Path,
         lang: &str,
     ) -> Result<Self, DocumentError> {
-        let mut raw = RawWeftDoc::deserialize(yaml).map_err(DocumentError::raw)?;
-        // 头像路径相对 YAML 文件；无效图片由前端回退为 ID 缩写。
-        for entity in raw.entity.values_mut() {
-            entity.avatar = entity.avatar.take().and_then(|source| {
-                if source.trim().is_empty() {
-                    return None;
-                }
-                fs::canonicalize(base.join(source))
-                    .ok()
-                    .filter(|path| path.is_file())
-                    .map(|path| path.to_string_lossy().into_owned())
-            });
-        }
+        let raw = RawWeftDoc::deserialize(yaml).map_err(DocumentError::raw)?;
         // 按段检查：story → entity → event → narrative；每段先引用后结构，
         // 前面的段不成立，后面段的问题没有报告价值
         // 历法路径仅在输入构建阶段用于标签上下文，不保存到运行时 Story。
@@ -83,14 +72,24 @@ impl WeftDoc {
             .date_mode
             .clone()
             .filter(|source| !source.trim().is_empty());
-        let story = Story::new(raw.story, base, gregorian, lang)?;
-        let entity = EntityCollection::new(
+        let story = Story::from_raw(
+            raw.story,
+            StoryContext {
+                base,
+                gregorian,
+                lang,
+            },
+        )?;
+        let entity = EntityCollection::build(
             raw.entity,
             raw.entity_link,
-            &story.calendar,
-            &story.calculable_tag_runtime,
-            date_mode.as_deref(),
-            lang,
+            EntityCollectionContext {
+                base,
+                calendar: &story.calendar,
+                calculable_tags: &story.calculable_tag_runtime,
+                date_mode: date_mode.as_deref(),
+                lang,
+            },
         )?;
         check_event(&raw.event, entity.as_map())?;
         check_narrative(&raw.narrative, &raw.event)?;

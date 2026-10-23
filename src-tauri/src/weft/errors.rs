@@ -22,6 +22,8 @@ pub enum ValidationError {
     EntityUnknownParent { entity: String, target: String },
     #[error("entity {entity} has a parent cycle")]
     EntityCycle { entity: String },
+    #[error("entity {entity} avatar must be an existing image file: {path}")]
+    InvalidAvatarPath { entity: String, path: String },
     #[error("time must be a nonempty list")]
     TimeNonemptyList,
     #[error("time component must be an integer")]

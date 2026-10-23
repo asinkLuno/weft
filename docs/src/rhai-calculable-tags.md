@@ -19,7 +19,7 @@ entity:
     calculable_tags: [age_group, constellation]
 ```
 
-所有标签都必须显式注册，包括 `constellation`。Story 先加载脚本，并将名称和描述保存到 `story.calculatable_tags`，集合使用已编译的运行时计算归属，再构建实体；运行时实体只保存 `belong_to` 引用。
+所有标签都必须显式注册，包括 `constellation`。Story 先加载脚本，并将名称和描述保存到 `story.calculatable_tags`，集合先构建实体，再执行已编译的脚本创建链上实体，最后构建归属森林。`belong_to` 仅保留在原始输入中；运行时实体保存自身数据，归属关系统一输出到 `entity_forest`。
 
 ## 必须实现的公开函数
 
@@ -28,10 +28,16 @@ entity:
 | 函数 | 输入 | 返回值 | 用途 |
 | --- | --- | --- | --- |
 | `serialize(language)` | 语言代码 | `{ name, description }` | 标签本地化名称和描述 |
-| `calculable_tag(ctx)` | 上下文 map | 字符串 ID 数组 | 计算归属链，不依赖显示语言 |
+| `calculable_tag(ctx)` | 上下文 map | 条目数组（字符串或 map） | 计算归属链，不依赖显示语言 |
 | `humanizer(kind, value, language)` | 种类、计算结果、语言 | 字符串数组 | 把归属链转成可显示的名称 |
 
-当前宿主调用 `humanizer("chain", calculable_tag(ctx) 的结果, ctx.language)`。返回的数组按顺序表示 `实体 → chain[0] → chain[1] → …`。空数组表示不添加归属。后端按返回的字符串 ID 查找实体，并为尚不存在的 ID 创建实体；链首并入实体的 `belong_to`，撞到已有实体就停止创建且不改动它自己的归属。计算结束后会检查归属关系是否成环。
+当前宿主取出条目的 `id` 调用 `humanizer("chain", ids, ctx.language)`。返回的数组按顺序表示 `实体 → chain[0] → chain[1] → …`。空数组表示不添加归属。后端按 humanizer 的名称查找实体，并为尚不存在的名称创建实体；链首并入实体的 `belong_to`，撞到已有实体就停止创建且不改动它自己的归属。计算结束后会检查归属关系是否成环。
+
+条目可以是纯 ID 字符串，也可以是 map：`id` 必填，`description` 与 `base_time` 可选，且只允许这三个键。`description` 直接作为链上实体的描述，需要本地化时用 `ctx.language`；`base_time` 是与实体输入相同的时间分量整数列表——缺尾补零，超出当前历法分量数报错，并按历法归一化出展示文案。
+
+```rhai
+[#{ id: "new_era", description: "新纪元", base_time: [2000, 1, 1] }, "era_group"]
+```
 
 `humanizer` 返回的每个元素都必须是字符串。归属链在内存中生成，不会写回 YAML；切换应用语言后会重新解析文档，用新的名称生成归属实体。
 

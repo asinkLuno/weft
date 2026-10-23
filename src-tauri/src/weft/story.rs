@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use crate::calculable_tag::CalculableTagRuntime;
 use crate::calendar::Calendar;
+use crate::weft::FromRaw;
 use crate::weft::errors::{DocumentError, ValidationError};
 
 // YAML 输入只包含元数据和脚本路径。
@@ -16,6 +17,13 @@ pub(crate) struct RawStory {
     pub date_mode: Option<String>,
     #[serde(default)]
     pub calculatable_tags: HashMap<String, String>,
+}
+
+/// 故事构建所需的路径和语言环境。
+pub(crate) struct StoryContext<'a> {
+    pub base: &'a Path,
+    pub gregorian: &'a Path,
+    pub lang: &'a str,
 }
 
 /// 已完成历法和可计算标签加载的故事。
@@ -32,13 +40,15 @@ pub struct Story {
     pub calculable_tag_runtime: CalculableTagRuntime,
 }
 
-impl Story {
-    pub(crate) fn new(
-        raw: RawStory,
-        base: &Path,
-        gregorian: &Path,
-        lang: &str,
-    ) -> Result<Self, DocumentError> {
+impl FromRaw<StoryContext<'_>> for Story {
+    type Raw = RawStory;
+
+    fn from_raw(raw: Self::Raw, context: StoryContext<'_>) -> Result<Self, DocumentError> {
+        let StoryContext {
+            base,
+            gregorian,
+            lang,
+        } = context;
         // 留空使用内置公历，自定义脚本路径相对于故事文件。
         let path = match raw
             .date_mode

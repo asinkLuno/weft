@@ -43,6 +43,33 @@ impl Phase {
         })
     }
 
+    /// 标量兼容：单个整数等价于单分量 Phase，其余结构交给 [`Phase::from_yaml`]。
+    /// 实体的 `base_time` 和事件的 `start_time` / `end_time` 共用。
+    pub(crate) fn from_yaml_scalar(value: &Yaml) -> Result<Self, DocumentError> {
+        match value {
+            Yaml::Number(_) => Self::from_yaml(&Yaml::Sequence(vec![value.clone()])),
+            value => Self::from_yaml(value),
+        }
+    }
+
+    /// 标量形式再兼容缺省：Null 或未提供都视为 None。
+    pub(crate) fn from_yaml_scalar_opt(
+        value: Option<&Yaml>,
+    ) -> Result<Option<Self>, DocumentError> {
+        match value {
+            None | Some(Yaml::Null) => Ok(None),
+            Some(value) => Self::from_yaml_scalar(value).map(Some),
+        }
+    }
+
+    /// 直接由整数分量构成，无锚点；可计算标签链上实体的 base_time 使用。
+    pub(crate) fn from_components(components: TimeUnit) -> Self {
+        Self {
+            components,
+            anchor: None,
+        }
+    }
+
     // 从最内层锚点开始递归展平，每层偏移都从第一个分量开始相加。
     // 六分量历法下，[[[2025, 4, 2, 10], 0, 0, 0, 2], 1, 2, 3]
     // 得到 [2026, 6, 5, 12, 0, 0]；进位由 Rhai normalize 处理。

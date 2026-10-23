@@ -21,6 +21,8 @@ const validationMessages = {
     entity_unknown_parent:
       "entity `{entity}` belong_to 引用了不存在的实体 `{target}`",
     entity_cycle: "entity `{entity}` 的 belong_to 形成了循环",
+    invalid_avatar_path:
+      "entity `{entity}` 的 avatar `{path}` 必须指向已存在的图片文件",
     time_nonempty_list: "时间必须是非空列表",
     time_integer_component: "时间分量必须是整数",
     event_end_before_start: "事件 `{event}` 的结束时间早于开始时间",
@@ -59,6 +61,8 @@ const validationMessages = {
     entity_unknown_parent:
       "entity `{entity}` belongs to unknown entity `{target}`",
     entity_cycle: "belong_to for entity `{entity}` forms a cycle",
+    invalid_avatar_path:
+      "Avatar `{path}` for entity `{entity}` must point to an existing image file",
     time_nonempty_list: "Time must be a nonempty list",
     time_integer_component: "Time components must be integers",
     event_end_before_start: "End time is before start time for event `{event}`",
@@ -127,6 +131,17 @@ export function formatDocumentError(error: unknown, lang: Lang): string {
 // 文案多到难维护时再换 i18next，字典结构可以原样搬过去
 export const strings = {
   zh: {
+    workspace: "故事工作台",
+    welcomeTitle: "让故事的脉络\n清晰可见。",
+    welcomeDescription:
+      "打开故事文件，梳理人物与实体的关系，沿着时间线阅读每一条叙事。",
+    recentDescription: "继续阅读你的故事。",
+    recentEmpty: "从第一个故事开始。打开的文件会留在这里。",
+    fileHint: "支持 .yaml 和 .yml 文件，保存修改后视图自动更新。",
+    fileWatching: "正在跟随文件更新",
+    fileError: "文件需要检查",
+    entityEmpty: "暂无实体，请在故事文件中添加实体。",
+    loading: "正在载入实体…",
     tab1: "故事",
     tab2: "实体",
     tab4: "叙事",
@@ -143,6 +158,18 @@ export const strings = {
     close: "关闭文件",
   },
   en: {
+    workspace: "Story workspace",
+    welcomeTitle: "Find the threads\nof your story.",
+    welcomeDescription:
+      "Open a story file to explore its people, trace their connections, and follow each narrative through time.",
+    recentDescription: "Pick up where you left off.",
+    recentEmpty: "Start with your first story. Opened files will appear here.",
+    fileHint:
+      "Supports .yaml and .yml files. Views update when you save changes.",
+    fileWatching: "Following file changes",
+    fileError: "File needs attention",
+    entityEmpty: "No entities yet. Add entities to your story file.",
+    loading: "Loading entities…",
     tab1: "Story",
     tab2: "Entities",
     tab4: "Narratives",

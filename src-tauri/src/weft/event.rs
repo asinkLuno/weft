@@ -66,8 +66,8 @@ pub(crate) fn build_events(
         .into_iter()
         .map(|(id, raw)| {
             let event = EventItem {
-                start_time: Phase::from_yaml(&raw.start_time)?,
-                end_time: raw.end_time.as_ref().map(Phase::from_yaml).transpose()?,
+                start_time: Phase::from_yaml_scalar(&raw.start_time)?,
+                end_time: Phase::from_yaml_scalar_opt(raw.end_time.as_ref())?,
                 description: raw.description,
                 // check 已校验所有实体引用。
                 entities: raw
