@@ -1,0 +1,39 @@
+.story-view {
+  padding: 24px 16px 48px;
+}
+
+.story-header {
+  position: relative;
+  padding-top: 8px;
+  border-bottom: 1px solid var(--riso-blue);
+}
+
+.story-header h1 {
+  color: var(--riso-blue);
+  font-family: var(--font-display);
+  font-size: clamp(32px, 4.4vw, 56px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.3;
+}
+
+.story-header > p {
+  max-width: 65ch;
+}
+
+.story-view [data-slot="card"] {
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--riso-blue);
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+
+.story-view [data-slot="card-title"] {
+  color: var(--riso-blue);
+}
+
+@media (max-width: 760px) {
+  .story-view {
+    padding: 12px 0 32px;
+  }
+}

@@ -1,0 +1,61 @@
+.entity-toolbar {
+  min-height: 34px;
+}
+
+.entity-toolbar [data-slot="button"] {
+  min-height: 30px;
+  border-style: solid;
+  background: var(--card);
+}
+
+.entity-canvas {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+}
+
+.entity-canvas .react-flow {
+  --xy-edge-label-background-color-default: var(--riso-paper);
+  --xy-edge-label-color-default: var(--riso-blue);
+  --xy-selection-background-color-default: #2325d612;
+  --xy-selection-border-default: 1px solid var(--riso-blue);
+  --xy-attribution-background-color-default: var(--riso-paper);
+}
+
+.entity-canvas .react-flow__edge-path {
+  stroke: var(--riso-blue);
+  stroke-width: 1.25;
+}
+
+.entity-canvas .react-flow__edge-text {
+  fill: var(--riso-blue);
+}
+
+.entity-card {
+  border: 1px solid var(--riso-blue);
+  border-top-width: 3px;
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+
+.entity-card [data-slot="card-title"] {
+  color: var(--riso-blue);
+}
+
+.entity-card [data-slot="avatar-fallback"] {
+  color: var(--riso-blue);
+  background-color: var(--secondary);
+  background-image: radial-gradient(var(--riso-dot) 0.65px, transparent 0.9px);
+  background-size: 3px 3px;
+}
+
+.canvas-controls {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--riso-blue);
+}

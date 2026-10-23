@@ -1,0 +1,36 @@
+.narrative-view {
+  padding: 12px 0 24px;
+}
+
+.narrative-track {
+  --track-ink: var(--riso-blue);
+  --primary: var(--track-ink);
+}
+
+.narrative-track:nth-child(even) {
+  --track-ink: #b6352a;
+}
+
+.narrative-track h2 {
+  margin-bottom: 14px;
+  color: var(--track-ink);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.narrative-sheet {
+  border-top: 2px solid var(--track-ink);
+  border-radius: var(--radius);
+}
+
+.narrative-sheet > div:first-child {
+  background: color-mix(in srgb, var(--track-ink) 5%, var(--card));
+}
+
+.narrative-bar,
+.narrative-point {
+  background-color: var(--track-ink);
+  background-image: var(--ink-grain);
+  background-size: 180px 180px;
+  border-color: var(--track-ink);
+}
