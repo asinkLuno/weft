@@ -32,40 +32,40 @@ pub enum ValidationError {
     EventEndBeforeStart { event: String },
     #[error("calendar path must point to an existing .rhai file: {path}")]
     InvalidCalendarPath { path: String },
-    #[error("calculable tag {tag} path must point to a .rhai file: {path}")]
-    InvalidCalculableTagPath { tag: String, path: String },
-    #[error("failed to read calculable tag {tag}: {details}")]
-    CalculableTagFileRead {
-        tag: String,
+    #[error("calculable prop {prop} path must point to a .rhai file: {path}")]
+    InvalidCalculablePropPath { prop: String, path: String },
+    #[error("failed to read calculable prop {prop}: {details}")]
+    CalculablePropFileRead {
+        prop: String,
         #[serde(rename = "source")]
         details: String,
     },
-    #[error("failed to compile calculable tag {tag}: {details}")]
-    CalculableTagCompile {
-        tag: String,
+    #[error("failed to compile calculable prop {prop}: {details}")]
+    CalculablePropCompile {
+        prop: String,
         #[serde(rename = "source")]
         details: String,
     },
-    #[error("calculable tag {tag} is missing public interfaces: {functions}")]
-    CalculableTagMissingInterface { tag: String, functions: String },
-    #[error("unknown calculable tag: {tag}")]
-    UnknownCalculableTag { tag: String },
-    #[error("failed to convert arguments for calculable tag {tag}: {details}")]
-    CalculableTagArgument {
-        tag: String,
+    #[error("calculable prop {prop} is missing public interfaces: {functions}")]
+    CalculablePropMissingInterface { prop: String, functions: String },
+    #[error("unknown calculable prop: {prop}")]
+    UnknownCalculableProp { prop: String },
+    #[error("failed to convert arguments for calculable prop {prop}: {details}")]
+    CalculablePropArgument {
+        prop: String,
         #[serde(rename = "source")]
         details: String,
     },
-    #[error("failed to call {entry} in calculable tag {tag}: {details}")]
-    CalculableTagCall {
-        tag: String,
+    #[error("failed to call {entry} in calculable prop {prop}: {details}")]
+    CalculablePropCall {
+        prop: String,
         entry: String,
         #[serde(rename = "source")]
         details: String,
     },
-    #[error("invalid return value from {entry} in calculable tag {tag}; expected {expected}")]
-    CalculableTagInvalidReturn {
-        tag: String,
+    #[error("invalid return value from {entry} in calculable prop {prop}; expected {expected}")]
+    CalculablePropInvalidReturn {
+        prop: String,
         entry: String,
         expected: String,
     },

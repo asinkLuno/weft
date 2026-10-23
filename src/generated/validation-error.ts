@@ -21,27 +21,33 @@ export type ValidationError =
   | { code: "event_end_before_start"; params: { event: string } }
   | { code: "invalid_calendar_path"; params: { path: string } }
   | {
-      code: "invalid_calculable_tag_path";
-      params: { tag: string; path: string };
+      code: "invalid_calculable_prop_path";
+      params: { prop: string; path: string };
     }
   | {
-      code: "calculable_tag_file_read";
-      params: { tag: string; source: string };
-    }
-  | { code: "calculable_tag_compile"; params: { tag: string; source: string } }
-  | {
-      code: "calculable_tag_missing_interface";
-      params: { tag: string; functions: string };
-    }
-  | { code: "unknown_calculable_tag"; params: { tag: string } }
-  | { code: "calculable_tag_argument"; params: { tag: string; source: string } }
-  | {
-      code: "calculable_tag_call";
-      params: { tag: string; entry: string; source: string };
+      code: "calculable_prop_file_read";
+      params: { prop: string; source: string };
     }
   | {
-      code: "calculable_tag_invalid_return";
-      params: { tag: string; entry: string; expected: string };
+      code: "calculable_prop_compile";
+      params: { prop: string; source: string };
+    }
+  | {
+      code: "calculable_prop_missing_interface";
+      params: { prop: string; functions: string };
+    }
+  | { code: "unknown_calculable_prop"; params: { prop: string } }
+  | {
+      code: "calculable_prop_argument";
+      params: { prop: string; source: string };
+    }
+  | {
+      code: "calculable_prop_call";
+      params: { prop: string; entry: string; source: string };
+    }
+  | {
+      code: "calculable_prop_invalid_return";
+      params: { prop: string; entry: string; expected: string };
     }
   | { code: "calendar_components_out_of_range"; params: { calendar: string } }
   | { code: "calendar_file_read"; params: { calendar: string; source: string } }

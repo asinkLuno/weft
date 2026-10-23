@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::Path};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::calculable_tag::CalculableTagRuntime;
+use crate::calculable_prop::CalculablePropRuntime;
 use crate::calendar::Calendar;
 use crate::weft::FromRaw;
 use crate::weft::errors::{DocumentError, ValidationError};
@@ -16,7 +16,7 @@ pub(crate) struct RawStory {
     pub author: Option<String>,
     pub date_mode: Option<String>,
     #[serde(default)]
-    pub calculatable_tags: HashMap<String, String>,
+    pub calculatable_props: HashMap<String, String>,
 }
 
 /// 故事构建所需的路径和语言环境。
@@ -26,18 +26,17 @@ pub(crate) struct StoryContext<'a> {
     pub lang: &'a str,
 }
 
-/// 已完成历法和可计算标签加载的故事。
+/// 已完成历法加载并持有可计算属性运行时的故事。
 #[derive(Debug, Serialize)]
 pub struct Story {
     pub title: String,
     pub description: Option<String>,
     pub author: Option<String>,
     pub date: Value,
-    pub calculatable_tags: HashMap<String, Value>,
     #[serde(skip)]
     pub calendar: Calendar,
     #[serde(skip)]
-    pub calculable_tag_runtime: CalculableTagRuntime,
+    pub calculable_prop_runtime: CalculablePropRuntime,
 }
 
 impl FromRaw<StoryContext<'_>> for Story {
@@ -66,16 +65,14 @@ impl FromRaw<StoryContext<'_>> for Story {
         }
         let calendar = Calendar::new(&path, lang)?;
         let date = calendar.serialize(lang)?;
-        let calculable_tag_runtime = CalculableTagRuntime::load(&raw.calculatable_tags, base)?;
-        let calculatable_tags = calculable_tag_runtime.serialize(lang)?;
+        let calculable_prop_runtime = CalculablePropRuntime::load(&raw.calculatable_props, base)?;
         Ok(Self {
             title: raw.title,
             description: raw.description,
             author: raw.author,
             date,
-            calculatable_tags,
             calendar,
-            calculable_tag_runtime,
+            calculable_prop_runtime,
         })
     }
 }

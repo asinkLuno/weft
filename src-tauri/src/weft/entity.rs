@@ -1,19 +1,19 @@
 //! 实体、归属森林与关系模型：YAML 输入结构、构建上下文与运行时结构，
-//! 以及校验、可计算标签展开和图构建的完整流程。
+//! 以及校验、可计算属性执行和图构建的完整流程。
 
 use std::{collections::HashMap, fs, path::Path, sync::Arc};
 
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
-use serde_json::json;
+use serde_json::{Value as JsonValue, json};
 use serde_yaml_ng::Value;
 
-use crate::calculable_tag::{CalculableTagRuntime, ChainEntry};
+use crate::calculable_prop::CalculablePropRuntime;
 use crate::calendar::Calendar;
 use crate::weft::FromRaw;
 use crate::weft::errors::{DocumentError, ValidationError};
 use crate::weft::phase::Phase;
 
-// 归属与可计算标签仅用于输入阶段，构建后统一保存到 EntityForest。
+// 归属与可计算属性声明仅用于输入阶段，归属构建后统一保存到 EntityForest。
 // base_time 保留原始 YAML 值，构建时经 Phase::from_yaml_scalar_opt 解析。
 #[derive(Debug, Deserialize)]
 pub(crate) struct RawEntity {
@@ -24,7 +24,10 @@ pub(crate) struct RawEntity {
     #[serde(default)]
     pub belong_to: Vec<String>,
     #[serde(default)]
-    pub calculable_tags: Vec<String>,
+    pub calculable_props: Vec<String>,
+    // 内置 key 之外的一切输入字段原样收进 extra_props。
+    #[serde(flatten)]
+    pub extra_props: HashMap<String, Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,6 +54,9 @@ pub struct Entity {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_time_humanizer: Option<String>,
     pub description: Option<String>,
+    // 非内置输入字段转成 JSON 后透传，为空时序列化中省略。
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub extra_props: HashMap<String, JsonValue>,
 }
 
 impl FromRaw<EntityContext<'_>> for Entity {
@@ -76,33 +82,47 @@ impl FromRaw<EntityContext<'_>> for Entity {
             base_time,
             base_time_humanizer,
             description: raw.description,
+            extra_props: raw
+                .extra_props
+                .iter()
+                .map(|(key, value)| (key.clone(), yaml_to_json(value)))
+                .collect(),
         })
     }
 }
 
-impl Entity {
-    // 可计算标签的链上实体：名称即 ID，description 与 base_time 来自条目；
-    // base_time 的时间分量与实体输入走同一条历法限制并归一化出展示。
-    fn from_chain(entry: &ChainEntry, calendar: &Calendar) -> Result<Self, DocumentError> {
-        let base_time = entry.base_time.clone().map(Phase::from_components);
-        let base_time_humanizer = base_time
-            .as_ref()
-            .map(|phase| base_time_humanizer(phase, calendar))
-            .transpose()?;
-        Ok(Self {
-            id: entry.name.clone(),
-            avatar: None,
-            base_time,
-            base_time_humanizer,
-            description: entry.description.clone(),
-        })
-    }
-}
-
-// 基准时间的展示：按历法归一化分量后 humanize；实体输入与链上实体共用。
+// 基准时间的展示：按历法归一化分量后 humanize。
 fn base_time_humanizer(phase: &Phase, calendar: &Calendar) -> Result<String, DocumentError> {
     let normalized = calendar.normalize(&phase.flatten(calendar.component_count())?)?;
     calendar.humanize(&normalized)
+}
+
+// extra_props 原样透传给前端：YAML 值转成 JSON，非字符串的映射键转成字符串，
+// 标签值（!tag）只保留内容，非有限浮点按 JSON 惯例落为 null。
+fn yaml_to_json(value: &Value) -> JsonValue {
+    match value {
+        Value::Null => JsonValue::Null,
+        Value::Bool(boolean) => (*boolean).into(),
+        Value::Number(number) => number
+            .as_i64()
+            .map(|i| i.into())
+            .or_else(|| number.as_u64().map(|u| u.into()))
+            .unwrap_or_else(|| number.as_f64().into()),
+        Value::String(string) => string.clone().into(),
+        Value::Sequence(sequence) => sequence.iter().map(yaml_to_json).collect(),
+        Value::Mapping(mapping) => mapping
+            .iter()
+            .map(|(key, value)| (yaml_key_to_string(key), yaml_to_json(value)))
+            .collect(),
+        Value::Tagged(tagged) => yaml_to_json(&tagged.value),
+    }
+}
+
+fn yaml_key_to_string(key: &Value) -> String {
+    match key {
+        Value::String(string) => string.clone(),
+        key => yaml_to_json(key).to_string(),
+    }
 }
 
 /// 归属树节点：父实体包含直接归属于它的子节点。
@@ -153,11 +173,11 @@ impl FromRaw<EntityLinkContext<'_>> for EntityLink {
     }
 }
 
-/// 实体集合构建所需的路径、历法和可计算标签环境。
+/// 实体集合构建所需的路径、历法和可计算属性环境。
 pub(crate) struct EntityCollectionContext<'a> {
     pub base: &'a Path,
     pub calendar: &'a Calendar,
-    pub calculable_tags: &'a CalculableTagRuntime,
+    pub calculable_props: &'a CalculablePropRuntime,
     pub date_mode: Option<&'a str>,
     pub lang: &'a str,
 }
@@ -190,8 +210,8 @@ impl EntityCollection {
         &self.entities
     }
 
-    /// 构建管线：校验输入，RawEntity 转成 Entity，可计算标签展开出链上实体，
-    /// 再计算归属森林，最后把 RawEntityLink 转成 EntityLink。
+    /// 构建管线：校验输入，RawEntity 转成 Entity 并执行可计算属性，
+    /// 结果写进 extra_props，最后计算归属森林并构建关系。
     pub fn build(
         mut raw_entities: HashMap<String, RawEntity>,
         raw_links: HashMap<String, Vec<RawEntityLink>>,
@@ -200,22 +220,22 @@ impl EntityCollection {
         let EntityCollectionContext {
             base,
             calendar,
-            calculable_tags,
+            calculable_props,
             date_mode,
             lang,
         } = context;
-        // 归属边与标签声明属于输入侧，先拆出单独保存。
+        // 归属边与属性声明属于输入侧，先拆出单独保存。
         let mut belong_to = HashMap::new();
-        let mut tags = HashMap::new();
+        let mut props = HashMap::new();
         for (id, input) in &mut raw_entities {
             belong_to.insert(id.clone(), std::mem::take(&mut input.belong_to));
-            tags.insert(id.clone(), std::mem::take(&mut input.calculable_tags));
+            props.insert(id.clone(), std::mem::take(&mut input.calculable_props));
         }
         validate(&belong_to, &raw_links)?;
         validate_avatars(&raw_entities, base)?;
         let mut entities = HashMap::new();
         for (id, input) in raw_entities {
-            let entity = Entity::from_raw(
+            let mut entity = Entity::from_raw(
                 input,
                 EntityContext {
                     id: id.clone(),
@@ -223,19 +243,17 @@ impl EntityCollection {
                     base,
                 },
             )?;
+            apply_calculable_props(
+                &mut entity,
+                &belong_to[&id],
+                &props[&id],
+                calculable_props,
+                date_mode,
+                lang,
+                calendar,
+            )?;
             entities.insert(id, Arc::new(entity));
         }
-        // 先根据可计算标签创建链上实体并并入归属边，链首撞到已有归属可能成环，复检后再建树。
-        apply_calculable_tags(
-            &mut entities,
-            &mut belong_to,
-            &tags,
-            calculable_tags,
-            date_mode,
-            lang,
-            calendar,
-        )?;
-        check_cycles(&belong_to)?;
         let entity_forest = build_forest(&belong_to, &entities);
         let mut entity_link = HashMap::new();
         for (group, links) in raw_links {
@@ -304,69 +322,30 @@ fn build_tree(
     }
 }
 
-// 执行可计算标签，为链上尚不存在的 ID 直接创建实体并并入归属边。
-fn apply_calculable_tags(
-    entities: &mut HashMap<String, Arc<Entity>>,
-    belong_to: &mut HashMap<String, Vec<String>>,
-    tags: &HashMap<String, Vec<String>>,
-    runtime: &CalculableTagRuntime,
+// 执行实体的可计算属性：脚本返回值写进 extra_props 的属性注册 ID 下，
+// 与输入字段同名时以计算结果为准；返回 () 则不写入。
+fn apply_calculable_props(
+    entity: &mut Entity,
+    parents: &[String],
+    props: &[String],
+    runtime: &CalculablePropRuntime,
     mode: Option<&str>,
     lang: &str,
     cal: &Calendar,
 ) -> Result<(), DocumentError> {
-    let mut ids: Vec<_> = tags.keys().cloned().collect();
-    ids.sort();
-    for id in ids {
-        for name in &tags[&id] {
-            let entity = &entities[&id];
-            let base_time = entity
-                .base_time
-                .as_ref()
-                .map(|phase| cal.normalize(&phase.flatten(cal.component_count())?))
-                .transpose()?;
-            let parents = &belong_to[&id];
-            let context = json!({
-                "api": 1, "date_mode": mode, "language": lang,
-                "entity": { "id": id, "base_time": base_time, "description": entity.description, "belong_to": parents },
-            });
-            let chain = runtime.calculable_tag(name, &context, lang)?;
-            apply_chain(entities, belong_to, &id, &chain, cal)?;
+    for name in props {
+        let base_time = entity
+            .base_time
+            .as_ref()
+            .map(|phase| cal.normalize(&phase.flatten(cal.component_count())?))
+            .transpose()?;
+        let context = json!({
+            "api": 1, "date_mode": mode, "language": lang,
+            "entity": { "id": entity.id, "base_time": base_time, "description": entity.description, "belong_to": parents },
+        });
+        if let Some(value) = runtime.calculable_prop(name, &context)? {
+            entity.extra_props.insert(name.clone(), value);
         }
-    }
-    Ok(())
-}
-
-// 链首并入源实体的归属；链上撞到已有实体就停止创建，也不改动它的归属。
-fn apply_chain(
-    entities: &mut HashMap<String, Arc<Entity>>,
-    belong_to: &mut HashMap<String, Vec<String>>,
-    id: &str,
-    chain: &[ChainEntry],
-    cal: &Calendar,
-) -> Result<(), DocumentError> {
-    let Some(first) = chain.first() else {
-        return Ok(());
-    };
-    let existing: Vec<_> = chain
-        .iter()
-        .map(|entry| entities.contains_key(&entry.name))
-        .collect();
-    for (i, entry) in chain.iter().enumerate() {
-        if existing[i] {
-            break;
-        }
-        let entity = Entity::from_chain(entry, cal)?;
-        let next = chain
-            .get(i + 1)
-            .map(|entry| entry.name.clone())
-            .into_iter()
-            .collect();
-        entities.insert(entry.name.clone(), Arc::new(entity));
-        belong_to.insert(entry.name.clone(), next);
-    }
-    let owner = belong_to.get_mut(id).expect("可计算标签的源实体存在");
-    if !owner.contains(&first.name) {
-        owner.push(first.name.clone());
     }
     Ok(())
 }
@@ -406,7 +385,7 @@ fn validate(
     check_cycles(belong_to)
 }
 
-// 归属边成环检查；输入校验与可计算标签展开后各跑一次。
+// 归属边成环检查；构建前对输入归属跑一次。
 fn check_cycles(belong_to: &HashMap<String, Vec<String>>) -> Result<(), DocumentError> {
     let mut state = HashMap::new();
     for id in belong_to.keys() {

@@ -10,4 +10,4 @@
 # Rhai 插件
 
 - [Rhai 历法脚本](rhai-calendar.md)
-- [Rhai calculable tags 脚本](rhai-calculable-tags.md)
+- [Rhai calculable props 脚本](rhai-calculable-props.md)

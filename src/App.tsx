@@ -25,7 +25,6 @@ import {
   Maximize,
   Minus,
   Plus,
-  Tags,
   UserRound,
   Waypoints,
   X as XIcon,
@@ -95,7 +94,6 @@ type WeftDoc = {
     description?: string;
     author?: string;
     date: { name: string; description?: string };
-    calculatable_tags: Record<string, { name: string; description?: string }>;
   };
   // 所选历法的时间分量数（后端解析时填充）
   calendar_components?: number;
@@ -107,6 +105,8 @@ type WeftDoc = {
       description?: string;
       base_time?: Phase | null;
       base_time_humanizer?: string;
+      // 内置 key 之外的输入字段原样透传（后端 extra_props）
+      extra_props?: Record<string, unknown>;
     }
   >;
   entity_forest?: EntityForest;
@@ -460,9 +460,6 @@ function StoryView({ doc, lang }: { doc: WeftDoc; lang: Lang }) {
   const t = strings[lang];
   const story = doc.story;
   if (!story) return null;
-  const calculableTags = Object.entries(story.calculatable_tags ?? {}).sort(
-    ([a], [b]) => a.localeCompare(b),
-  );
   return (
     <div className="story-view @container mx-auto w-full max-w-5xl py-4">
       <header className="story-header mb-10 space-y-5 border-b pb-8">
@@ -513,49 +510,6 @@ function StoryView({ doc, lang }: { doc: WeftDoc; lang: Lang }) {
             </CardContent>
           </Card>
         )}
-        {calculableTags.length > 0 && (
-          <Card
-            className={`min-w-0 gap-0 ${!story.date?.name && !story.date?.description ? "col-span-full" : ""}`}
-          >
-            <CardHeader className="border-b">
-              <CardTitle>
-                <h2 className="flex items-center gap-2 text-sm">
-                  <Tags
-                    className="size-4 text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                  {t.calculableTags}
-                  <Badge variant="secondary" className="ml-auto tabular-nums">
-                    {calculableTags.length}
-                  </Badge>
-                </h2>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ul className="divide-y">
-                {calculableTags.map(([id, tag]) => (
-                  <li key={id} className="space-y-2 py-4 last:pb-0">
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                      <h3 className="break-all font-medium">
-                        {tag.name || id}
-                      </h3>
-                      {tag.name && tag.name !== id && (
-                        <span className="break-all font-mono text-xs text-muted-foreground">
-                          {id}
-                        </span>
-                      )}
-                    </div>
-                    {tag.description && (
-                      <p className="whitespace-pre-wrap break-words text-sm leading-6 text-muted-foreground">
-                        {tag.description}
-                      </p>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        )}
       </div>
     </div>
   );
@@ -568,6 +522,8 @@ type EntityData = {
   avatar?: string;
   baseTime?: string;
   parents: Array<{ id: string; name: string; preview?: EntityData }>;
+  // extra_props 展开成排好序的键值对；值已转成展示文本
+  extraProps: Array<[string, string]>;
   description?: string;
   belongLabel: string;
 };
@@ -658,7 +614,9 @@ function EntityCard({ data }: { data: EntityData }) {
           </CardDescription>
         )}
       </CardHeader>
-      {(data.baseTime || data.parents.length > 0) && (
+      {(data.baseTime ||
+        data.extraProps.length > 0 ||
+        data.parents.length > 0) && (
         <CardContent className="space-y-3 border-t bg-muted/30 p-4">
           {data.baseTime && (
             <div className="flex items-start gap-2 text-xs text-muted-foreground">
@@ -669,6 +627,12 @@ function EntityCard({ data }: { data: EntityData }) {
               <span className="break-words leading-5">{data.baseTime}</span>
             </div>
           )}
+          {data.extraProps.map(([key, value]) => (
+            <div key={key} className="flex items-baseline gap-2 text-xs">
+              <span className="shrink-0 text-muted-foreground">{key}</span>
+              <span className="min-w-0 break-words leading-5">{value}</span>
+            </div>
+          ))}
           {data.parents.length > 0 && (
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground">
@@ -997,6 +961,13 @@ function EntityViewInner({
     return true;
   });
 
+  // extra_props 的展示：标量直接转字符串，复合值落成 JSON 文本
+  function formatExtraValue(value: unknown): string {
+    return typeof value === "object" && value !== null
+      ? JSON.stringify(value)
+      : String(value);
+  }
+
   const entityData = (
     id: string,
     e: EntityT,
@@ -1016,6 +987,9 @@ function EntityViewInner({
           ? entityData(b, doc.entity[b], false)
           : undefined,
     })),
+    extraProps: Object.entries(e.extra_props ?? {})
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, value]) => [key, formatExtraValue(value)]),
     description: e.description,
     belongLabel: t.belongTo,
   });

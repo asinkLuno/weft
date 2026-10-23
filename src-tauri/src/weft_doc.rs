@@ -86,7 +86,7 @@ impl WeftDoc {
             EntityCollectionContext {
                 base,
                 calendar: &story.calendar,
-                calculable_tags: &story.calculable_tag_runtime,
+                calculable_props: &story.calculable_prop_runtime,
                 date_mode: date_mode.as_deref(),
                 lang,
             },
@@ -157,7 +157,7 @@ fn parse(app: &AppHandle, content: &str, base: &Path, lang: &str) -> Result<Valu
         )
         .map_err(DocumentError::raw)?;
     let mut doc = WeftDoc::from_yaml(&yaml, base, &gregorian, lang)?;
-    // 实体及可计算归属已构建完毕，计算事件时间。
+    // 实体（含可计算属性）已构建完毕，计算事件时间。
     let cal = &doc.story.calendar;
     doc.calendar_components = Some(cal.component_count());
     doc.event_times = event::apply_times(&doc.event, cal)?;
@@ -225,7 +225,7 @@ fn push_changed(app: &AppHandle, path: &Path) {
     let _ = app.emit(EVENT, payload);
 }
 
-// 切换应用语言后，立即用同一份文件重新生成日期和可计算标签的展示值。
+// 切换应用语言后，立即用同一份文件重新生成日期和可计算属性的展示值。
 pub fn refresh_language(app: &AppHandle) {
     let path = {
         let state = app.state::<Mutex<DocumentState>>();
