@@ -1,6 +1,6 @@
 # WeftDoc 总览
 
-WeftDoc 是 Weft 的故事文档格式：一个 YAML 文件（习惯命名 `story.yaml`）描述一个故事的元信息、实体、实体关系、事件与叙事线，并注册 Rhai 插件。仓库中的 `examples/story.yaml` 是一份完整示例。
+WeftDoc 是 Weft 的故事文档格式：一个 YAML 文件（习惯命名 `story.yaml`）描述一个故事的元信息、实体、实体关系、事件与叙事线，并注册 Rune 插件。仓库中的 `examples/story.yaml` 是一份完整示例。
 
 ## 顶层键
 
@@ -39,7 +39,7 @@ entity:
     wand: 冬青木魔杖，凤凰羽毛杖芯
 ```
 
-构建后的 `Entity.extra_props` 为 `{ "gender": "男", "wand": "冬青木魔杖，凤凰羽毛杖芯" }`；值为空时序列化中省略该字段。可计算属性（`calculable_props`）的计算结果也写进 `extra_props`，键为属性注册 ID，与输入字段同名时以计算结果为准，见 [Rhai calculable props 脚本](rhai-calculable-props.md)。
+构建后的 `Entity.extra_props` 为 `{ "gender": "男", "wand": "冬青木魔杖，凤凰羽毛杖芯" }`；值为空时序列化中省略该字段。可计算属性（`calculable_props`）的计算结果也写进 `extra_props`，键为属性注册 ID，与输入字段同名时以计算结果为准，见 [Rune calculable props 脚本](rune-calculable-props.md)。
 
 文档内部靠 id 互相引用，引用不存在的 id 会解析报错：
 

@@ -30,9 +30,9 @@ pub enum ValidationError {
     TimeIntegerComponent,
     #[error("event {event} ends before it starts")]
     EventEndBeforeStart { event: String },
-    #[error("calendar path must point to an existing .rhai file: {path}")]
+    #[error("calendar path must point to an existing .rn file: {path}")]
     InvalidCalendarPath { path: String },
-    #[error("calculable prop {prop} path must point to a .rhai file: {path}")]
+    #[error("calculable prop {prop} path must point to a .rn file: {path}")]
     InvalidCalculablePropPath { prop: String, path: String },
     #[error("failed to read calculable prop {prop}: {details}")]
     CalculablePropFileRead {

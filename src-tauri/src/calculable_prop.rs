@@ -1,25 +1,29 @@
-use rhai::serde::to_dynamic;
-use rhai::{AST, Dynamic, Engine, Scope};
-use serde_json::{Value, json};
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, fs, path::Path, sync::Arc};
 
-use crate::plugin_loader::{limited_engine, missing_rhai_functions};
+use rune::{
+    Unit, Vm,
+    runtime::{RuntimeContext, Value as RuneValue},
+};
+use serde::Deserialize as _;
+use serde_json::{Value, json};
+
+use crate::plugin_loader;
 use crate::weft::errors::{DocumentError, ValidationError};
 
 // 可计算属性运行时：脚本接收实体上下文，calculable_prop 的返回值直接作为
 // 实体 extra_props 中该属性注册 ID 下的值，不生成实体，也不改归属。
 #[derive(Debug)]
 pub struct CalculablePropRuntime {
-    engine: Engine,
+    runtime: Arc<RuntimeContext>,
     // 注册 ID → 编译好的脚本，加载时即完成读取、编译与接口检查。
-    scripts: HashMap<String, AST>,
+    scripts: HashMap<String, Arc<Unit>>,
     // 脚本上下文中的文档级常量，加载时确定，实体段只提供 entity。
     date_mode: Option<String>,
     lang: String,
 }
 
 impl CalculablePropRuntime {
-    // 注册表来自 story.calculatable_props，脚本路径相对故事文件；
+    // 注册表来自 story.calculable_props，脚本路径相对故事文件；
     // date_mode 与 lang 随运行时一起固定，切换语言时整个文档会重新解析。
     pub fn load(
         specs: &HashMap<String, String>,
@@ -27,12 +31,12 @@ impl CalculablePropRuntime {
         date_mode: Option<&str>,
         lang: &str,
     ) -> Result<Self, DocumentError> {
-        let engine = limited_engine();
+        let runtime = plugin_loader::host_runtime();
         let mut scripts = HashMap::new();
         for (name, source) in specs {
             if Path::new(source)
                 .extension()
-                .is_none_or(|extension| extension != "rhai")
+                .is_none_or(|extension| extension != "rn")
             {
                 return Err(ValidationError::InvalidCalculablePropPath {
                     prop: name.clone(),
@@ -46,18 +50,26 @@ impl CalculablePropRuntime {
                     details: error.to_string(),
                 }
             })?;
-            let ast =
-                engine
-                    .compile(&script)
-                    .map_err(|error| ValidationError::CalculablePropCompile {
+            let unit = Arc::new(
+                plugin_loader::compile(&script, source).map_err(|details| {
+                    ValidationError::CalculablePropCompile {
                         prop: name.clone(),
-                        details: error.to_string(),
-                    })?;
-            validate_interface(name, &ast)?;
-            scripts.insert(name.clone(), ast);
+                        details,
+                    }
+                })?,
+            );
+            let missing = plugin_loader::missing_functions(&unit, &runtime, &["calculable_prop"]);
+            if !missing.is_empty() {
+                return Err(ValidationError::CalculablePropMissingInterface {
+                    prop: name.clone(),
+                    functions: missing.join(", "),
+                }
+                .into());
+            }
+            scripts.insert(name.clone(), unit);
         }
         Ok(Self {
-            engine,
+            runtime,
             scripts,
             date_mode: date_mode.map(ToOwned::to_owned),
             lang: lang.to_owned(),
@@ -65,13 +77,9 @@ impl CalculablePropRuntime {
     }
 
     // 计算一个属性：脚本上下文由文档级常量与实体段提供的 entity 拼成；
-    // 顶层 () 表示不写入，其余返回值转成 JSON 交给实体。
-    pub fn calculable_prop(
-        &self,
-        name: &str,
-        entity: Value,
-    ) -> Result<Option<Value>, DocumentError> {
-        let ast = self
+    // 顶层 () 表示不写入，其余返回值经 serde 转成 JSON 交给实体。
+    pub fn calculable_prop(&self, name: &str, entity: Value) -> Result<Option<Value>, DocumentError> {
+        let unit = self
             .scripts
             .get(name)
             .ok_or_else(|| ValidationError::UnknownCalculableProp {
@@ -83,73 +91,33 @@ impl CalculablePropRuntime {
             "language": self.lang,
             "entity": entity,
         });
-        let argument =
-            to_dynamic(&context).map_err(|error| ValidationError::CalculablePropArgument {
+        // JSON 与脚本值都过 serde：null ↔ ()，数组/对象直接对应。
+        let argument = RuneValue::deserialize(&context).map_err(|error| {
+            ValidationError::CalculablePropArgument {
                 prop: name.to_owned(),
                 details: error.to_string(),
+            }
+        })?;
+        let mut vm = Vm::new(self.runtime.clone(), unit.clone());
+        let output =
+            plugin_loader::call(&mut vm, "calculable_prop", (argument,)).map_err(|error| {
+                ValidationError::CalculablePropCall {
+                    prop: name.to_owned(),
+                    entry: "calculable_prop".to_owned(),
+                    details: error.to_string(),
+                }
             })?;
-        let output: Dynamic = self
-            .engine
-            .call_fn(&mut Scope::new(), ast, "calculable_prop", (argument,))
-            .map_err(|error| ValidationError::CalculablePropCall {
-                prop: name.to_owned(),
-                entry: "calculable_prop".to_owned(),
-                details: error.to_string(),
-            })?;
-        if output.is_unit() {
+        if output.into_unit().is_ok() {
             return Ok(None);
         }
-        Ok(Some(prop_value(name, output)?))
-    }
-}
-
-// 返回值支持字符串、整数、浮点、布尔与数组/map 的组合；复合结构里的 () 落为 null。
-fn prop_value(prop: &str, value: Dynamic) -> Result<Value, ValidationError> {
-    let invalid = || ValidationError::CalculablePropInvalidReturn {
-        prop: prop.to_owned(),
-        entry: "calculable_prop".to_owned(),
-        expected: "a string, int, float, bool, array or map of them".to_owned(),
-    };
-    if value.is_unit() {
-        return Ok(Value::Null);
-    }
-    if let Some(array) = value.clone().try_cast::<rhai::Array>() {
-        return array
-            .into_iter()
-            .map(|item| prop_value(prop, item))
-            .collect();
-    }
-    if let Some(map) = value.clone().try_cast::<rhai::Map>() {
-        let mut object = serde_json::Map::new();
-        for (key, item) in map {
-            object.insert(key.to_string(), prop_value(prop, item)?);
+        match serde_json::to_value(&output) {
+            Ok(value) => Ok(Some(value)),
+            Err(_) => Err(ValidationError::CalculablePropInvalidReturn {
+                prop: name.to_owned(),
+                entry: "calculable_prop".to_owned(),
+                expected: "a string, int, float, bool, array or object of them".to_owned(),
+            }
+            .into()),
         }
-        return Ok(Value::Object(object));
-    }
-    if let Some(value) = value.clone().try_cast::<bool>() {
-        return Ok(value.into());
-    }
-    if let Some(value) = value.clone().try_cast::<rhai::INT>() {
-        return Ok(value.into());
-    }
-    if let Some(value) = value.clone().try_cast::<f64>() {
-        return Ok(value.into());
-    }
-    value
-        .try_cast::<String>()
-        .map(|value| value.into())
-        .ok_or_else(invalid)
-}
-
-fn validate_interface(name: &str, ast: &AST) -> Result<(), DocumentError> {
-    let missing = missing_rhai_functions(ast, &[("calculable_prop", 1)]);
-    if missing.is_empty() {
-        Ok(())
-    } else {
-        Err(ValidationError::CalculablePropMissingInterface {
-            prop: name.to_owned(),
-            functions: missing.join(", "),
-        }
-        .into())
     }
 }

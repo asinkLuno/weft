@@ -32,30 +32,18 @@ export type WeftDoc = {
     Array<{ entities: [string, string]; relations: string }>
   >;
   // 事件 ID → 事件定义
-  event?: Record<string, EventDefinition>;
-  event_times?: Record<string, EventTiming>;
+  event?: Record<string, Event>;
   // 叙事线名称 → 事件 ID 列表
   narrative?: Record<string, Narrative>;
 };
 
 export type Narrative = string[];
 
-export type EventDefinition = {
+export type Event = {
   start_time: Phase;
   end_time?: Phase | null;
   description?: string;
   entities?: string[];
-};
-
-export type EventTiming = {
-  // tick 偏移用于甘特图定位和长度，start/end 用于文本展示
-  offsets?: Array<{
-    entity: string;
-    start_tick?: number;
-    end_tick?: number;
-    start?: string;
-    end?: string;
-  }>;
   start_tick?: number;
   end_tick?: number;
   start_display?: string;

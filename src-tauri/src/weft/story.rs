@@ -57,7 +57,7 @@ impl FromRaw<StoryContext<'_>> for Story {
             Some(source) => base.join(source),
             None => gregorian.to_path_buf(),
         };
-        if path.extension().is_none_or(|extension| extension != "rhai") || !path.is_file() {
+        if path.extension().is_none_or(|extension| extension != "rn") || !path.is_file() {
             return Err(ValidationError::InvalidCalendarPath {
                 path: path.display().to_string(),
             }

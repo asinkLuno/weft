@@ -21,9 +21,7 @@ use crate::weft::entity::{
     BelongNode, Entity, EntityBuildContext, EntityLink, RawEntity, build_entities,
 };
 use crate::weft::errors::{DocumentError, ValidationError};
-use crate::weft::event::{
-    self, EventItem, EventTiming, RawEvent, build_events, check as check_event,
-};
+use crate::weft::event::{self, Event, RawEvent, build_events, check as check_event};
 use crate::weft::narrative::{Narrative, check as check_narrative};
 use crate::weft::story::{RawStory, Story, StoryContext};
 
@@ -38,8 +36,7 @@ pub struct WeftDoc {
     pub entity_link: HashMap<String, Vec<EntityLink>>,
     // 事件字典：事件 ID → 事件定义
     #[serde(default)]
-    pub event: BTreeMap<String, EventItem>,
-    pub event_times: BTreeMap<String, EventTiming>,
+    pub event: BTreeMap<String, Event>,
     // 叙事线名称 → 事件 ID 列表
     #[serde(default)]
     pub narrative: BTreeMap<String, Narrative>,
@@ -98,7 +95,6 @@ impl WeftDoc {
             belong_dag,
             entity_link: raw.entity_link,
             event,
-            event_times: BTreeMap::new(),
             narrative,
             calendar_components: None,
         };
@@ -159,7 +155,7 @@ fn parse(app: &AppHandle, content: &str, base: &Path, lang: &str) -> Result<Valu
     // 实体（含可计算属性）已构建完毕，计算事件时间。
     let cal = &doc.story.calendar;
     doc.calendar_components = Some(cal.component_count());
-    doc.event_times = event::apply_times(&doc.event, &doc.entity, cal)?;
+    event::apply_times(&mut doc.event, cal)?;
     for entity in doc.entity.values() {
         if let Some(avatar) = &entity.avatar {
             app.asset_protocol_scope()

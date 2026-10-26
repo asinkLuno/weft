@@ -1,0 +1,129 @@
+// 月面殖民地民用历法示例。
+// 日采用 24 小时标准时；月份跟随月面昼夜循环，按 29/30 日交替。
+// 19 年含 235 个月（7 个闰月），平均月长约 29.53 个标准日。
+// 月球没有地球式季节年，这里的“年”是殖民地编年单位。
+// 日期分量：[年, 月, 日, 时, 分, 秒]；第 1 年月 1 日为刻度原点。
+pub fn components() { 6 }
+
+const DAY_SECONDS = 86400;
+const MONTHS_PER_CYCLE = 235;
+const DAYS_PER_CYCLE = 6940;
+const SECONDS_PER_CYCLE = 599616000; // 6940 日 × 86400 秒
+
+fn floor_div(value, divisor) {
+    let quotient = value / divisor;
+    if value % divisor < 0 { quotient - 1 } else { quotient }
+}
+
+fn positive_mod(value, divisor) {
+    let remainder = value % divisor;
+    if remainder < 0 { remainder + divisor } else { remainder }
+}
+
+fn leap_year(year) {
+    let position = positive_mod(year - 1, 19) + 1;
+    position == 3 || position == 6 || position == 8 || position == 11 ||
+        position == 14 || position == 17 || position == 19
+}
+
+fn months_in_year(year) {
+    if leap_year(year) { 13 } else { 12 }
+}
+
+// 235 个月中安排 125 个 30 日月、110 个 29 日月，均匀分布在 19 年周期内。
+fn month_length(month_index) {
+    let before = month_index * 125 / 235;
+    let after = (month_index + 1) * 125 / 235;
+    if after > before { 30 } else { 29 }
+}
+
+fn months_before_year(year) {
+    let cycle = floor_div(year - 1, 19);
+    let first_year = cycle * 19 + 1;
+    let count = cycle * 235;
+    let current = first_year;
+    while current < year {
+        count += months_in_year(current);
+        current += 1;
+    }
+    count
+}
+
+fn days_before_month(month_index) {
+    let cycle = floor_div(month_index, MONTHS_PER_CYCLE);
+    let within_cycle = positive_mod(month_index, MONTHS_PER_CYCLE);
+    let days = cycle * DAYS_PER_CYCLE;
+    let month = 0;
+    while month < within_cycle {
+        days += month_length(month);
+        month += 1;
+    }
+    days
+}
+
+pub fn from_tick(tick) {
+    let cycle = floor_div(tick, SECONDS_PER_CYCLE);
+    let cycle_start_month = cycle * MONTHS_PER_CYCLE;
+    let remainder = positive_mod(tick, SECONDS_PER_CYCLE);
+    let month_in_cycle = 0;
+    while month_in_cycle < MONTHS_PER_CYCLE {
+        let length = month_length(cycle_start_month + month_in_cycle) * DAY_SECONDS;
+        if remainder < length { break; }
+        remainder -= length;
+        month_in_cycle += 1;
+    }
+
+    let year = cycle * 19 + 1;
+    let months_left = month_in_cycle;
+    while months_left >= months_in_year(year) {
+        months_left -= months_in_year(year);
+        year += 1;
+    }
+    let month = months_left + 1;
+
+    let day_seconds = remainder % DAY_SECONDS;
+    [year, month, remainder / DAY_SECONDS + 1,
+        day_seconds / 3600, day_seconds % 3600 / 60, day_seconds % 60]
+}
+
+pub fn to_tick(values) {
+    let year = values[0];
+    let month = if values[1] == 0 { 1 } else { values[1] };
+    let day = if values[2] == 0 { 1 } else { values[2] };
+    let hour = values[3];
+    let minute = values[4];
+    let second = values[5];
+
+    let month_index = months_before_year(year) + month - 1;
+    let tick = days_before_month(month_index) * DAY_SECONDS;
+    tick += (day - 1) * DAY_SECONDS + hour * 3600 + minute * 60 + second;
+    tick
+}
+
+pub fn serialize(language) {
+    let zh = language == "zh";
+    #{
+        name: if zh { "月面殖民历" } else { "Lunar Settlement Calendar" },
+        description: if zh {
+            "以 24 小时标准日计时，月份对应月面昼夜循环；每 19 年设 7 个闰月。年份是殖民地编年单位，不对应地球季节年。"
+        } else {
+            "Uses 24-hour standard days and months aligned with the lunar day-night cycle, with seven intercalary months every 19 years. Years are a settlement count, not Earth seasonal years."
+        },
+    }
+}
+
+pub fn humanizer(value, language) {
+    let year = value[0];
+    let month = value[1];
+    let day = value[2];
+    let hour = value[3];
+    let minute = value[4];
+    let second = value[5];
+    if language == "zh" {
+        let month_name = if month == 13 { "闰月" } else { `${month}月` };
+        let stamp = `殖民历${year}年${month_name}${day}日 ${hour}:${minute}:${second}`;
+        return stamp;
+    }
+    let month_name = if month == 13 { "intercalary month" } else { `month ${month}` };
+    `Settlement year ${year}, ${month_name}, day ${day} ${hour}:${minute}:${second}`
+}

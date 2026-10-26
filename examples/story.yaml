@@ -4,7 +4,7 @@ story:
   title: 哈利·波特与魔法石
   author: J.K. 罗琳
   calculatable_props:
-    constellation: constellation.rhai
+    constellation: constellation.rn
   description: >-
     十一岁的哈利·波特进入霍格沃茨魔法学校，
     与同伴一起揭开魔法石的秘密。
@@ -32,6 +32,26 @@ entity:
     base_time: 1881
     # 多父归属示例：既是格兰芬多出身，也直属霍格沃茨
     belong_to: [格兰芬多, 霍格沃茨魔法学校]
+
+  # 霍格沃茨教师（人物表：麦格教授 / 斯内普教授 / 奇洛教授 / 海格）
+  米勒娃·麦格:
+    description: 霍格沃茨副校长，格兰芬多学院院长，开学宴上主持分院。
+    base_time: [1935, 10, 4]
+    belong_to: [霍格沃茨魔法学校, 格兰芬多]
+    calculable_props: [constellation]
+  西弗勒斯·斯内普:
+    description: 魔药课教师，讲话阴阳怪气，上课处处刁难哈利。
+    base_time: [1960, 1, 9]
+    belong_to: [霍格沃茨魔法学校, 斯莱特林]
+    calculable_props: [constellation]
+  奇洛:
+    description: 黑魔法防御术课教师，说话结巴，缠着头巾的头颅下另有乾坤。
+    belong_to: [霍格沃茨魔法学校]
+  鲁伯·海格:
+    description: 钥匙保管员兼狩猎场看守，骑着摩托车把襁褓中的哈利送到女贞路。
+    base_time: [1928, 12, 6]
+    belong_to: [霍格沃茨魔法学校]
+    calculable_props: [constellation]
 
   詹姆·波特:
     description: 哈利的父亲，格兰芬多击球手，掠夺者之首。
@@ -95,6 +115,29 @@ entity:
   贾斯廷·芬列里:
     description: 放弃麻瓜私立名校来读霍格沃茨的赫奇帕奇学生。
     belong_to: [赫奇帕奇]
+
+  # 麻瓜世界（人物表：佩妮 / 弗农·德思礼 / 达力）；德思礼一家是独立归属树根
+  德思礼一家:
+    description: 住在萨里郡女贞路四号的麻瓜家庭，哈利寒暑假的落脚处。
+  佩妮·德思礼:
+    description: 哈利的姨妈，莉莉的姐姐，绝口不提自家有女巫亲戚。
+    belong_to: [德思礼一家]
+  弗农·德思礼:
+    description: 哈利的姨父，一家之主，视一切不寻常之事为灾祸。
+    belong_to: [德思礼一家]
+  达力·德思礼:
+    description: 德思礼夫妇的儿子，哈利的表哥，从小被惯得无法无天。
+    base_time: [1980, 6, 23]
+    belong_to: [德思礼一家]
+    calculable_props: [constellation]
+
+  # 反派（人物表：伏地魔）；不写 belong_to，自成一根
+  伏地魔:
+    description: 杀死哈利父母的黑魔王，人称「神秘人」，附在奇洛身上潜回霍格沃茨。
+    base_time: [1926, 12, 31]
+    # 内置 key 之外的任意字段收进 extra_props 原样透传
+    real_name: 汤姆·里德尔
+    calculable_props: [constellation]
 
 # 实体关系：按组组织，每组是一批关系对；引用写实体 id
 entity_link:

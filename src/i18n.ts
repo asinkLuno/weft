@@ -26,9 +26,9 @@ const validationMessages = {
     time_nonempty_list: "时间必须是非空列表",
     time_integer_component: "时间分量必须是整数",
     event_end_before_start: "事件 `{event}` 的结束时间早于开始时间",
-    invalid_calendar_path: "历法路径 `{path}` 必须指向现有的 .rhai 文件",
+    invalid_calendar_path: "历法路径 `{path}` 必须指向现有的 .rn 文件",
     invalid_calculable_prop_path:
-      "可计算属性 `{prop}` 的路径 `{path}` 必须指向 .rhai 文件",
+      "可计算属性 `{prop}` 的路径 `{path}` 必须指向 .rn 文件",
     calculable_prop_file_read: "读取可计算属性 `{prop}` 的脚本失败：{source}",
     calculable_prop_compile: "可计算属性 `{prop}` 编译失败：{source}",
     calculable_prop_missing_interface:
@@ -67,9 +67,9 @@ const validationMessages = {
     time_integer_component: "Time components must be integers",
     event_end_before_start: "End time is before start time for event `{event}`",
     invalid_calendar_path:
-      "Calendar path `{path}` must point to an existing .rhai file",
+      "Calendar path `{path}` must point to an existing .rn file",
     invalid_calculable_prop_path:
-      "Path `{path}` for calculable prop `{prop}` must point to a .rhai file",
+      "Path `{path}` for calculable prop `{prop}` must point to a .rn file",
     calculable_prop_file_read:
       "Failed to read calculable prop `{prop}`: {source}",
     calculable_prop_compile:

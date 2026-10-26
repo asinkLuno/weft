@@ -3,7 +3,7 @@ use serde_yaml_ng::Value as Yaml;
 
 use crate::weft::errors::{DocumentError, ValidationError};
 
-// 时间分量按历法从大到小排列；展平后的长度严格取自 Rhai metadata().components。
+// 时间分量按历法从大到小排列；展平后的长度严格取自历法脚本 components() 的返回值。
 // 输入可省略末尾分量，展平时补零；进位交给历法处理。
 pub type TimeUnit = Vec<i64>;
 
@@ -64,7 +64,7 @@ impl Phase {
 
     // 从最内层锚点开始递归展平，每层偏移都从第一个分量开始相加。
     // 六分量历法下，[[[2025, 4, 2, 10], 0, 0, 0, 2], 1, 2, 3]
-    // 得到 [2026, 6, 5, 12, 0, 0]；进位由 Rhai normalize 处理。
+    // 得到 [2026, 6, 5, 12, 0, 0]；进位由历法 normalize 处理。
     pub(crate) fn flatten(&self, component_count: usize) -> Result<TimeUnit, DocumentError> {
         let mut result = vec![0; component_count];
         self.accumulate(&mut result)?;

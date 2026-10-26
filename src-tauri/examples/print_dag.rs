@@ -33,7 +33,7 @@ struct RawDoc {
 fn main() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let base = manifest.join("../examples");
-    let gregorian = manifest.join("rhai/gregorian.rhai");
+    let gregorian = manifest.join("rune/gregorian.rn");
     let content = fs::read_to_string(base.join("story.yaml")).expect("read story.yaml");
     let raw: RawDoc =
         serde_yaml_ng::from_str(&content).expect("deserialize story.yaml");

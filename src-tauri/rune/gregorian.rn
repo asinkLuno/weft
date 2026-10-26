@@ -1,10 +1,10 @@
 // 公历日期分量：[年, 月, 日, 时, 分, 秒]。历算与本地化展示分开。
-const COMPONENTS = 6;
+pub fn components() { 6 }
 
 // 反算 tick；用整段日期换算处理跨月、跨年及负的时分秒。
-fn from_tick(tick) {
+pub fn from_tick(tick) {
     // 历算以三月为年首；将零年一月一日原点移回三月基准。
-    tick -= 60 * 86400;
+    let tick = tick - 60 * 86400;
     let days = tick / 86400;
     let seconds = tick % 86400;
     if seconds < 0 {
@@ -25,7 +25,7 @@ fn from_tick(tick) {
 
 // 日期相对原点的秒数。全零数组和 [0, 1, 1, 0, 0, 0] 对应 0。
 // 两个日期的刻度相减得到间隔秒数；除以 86400 得到相差天数。
-fn to_tick(values) {
+pub fn to_tick(values) {
     let year = values[0];
     // 缺省月、日按一月一日计算。
     let month = if values[1] == 0 { 1 } else { values[1] };
@@ -38,7 +38,7 @@ fn to_tick(values) {
     let month_idx = if raw_month_idx < 0 { raw_month_idx + 12 } else { raw_month_idx };
     let year_carry = ((month - 1) - month_idx) / 12;
     year += year_carry;
-    month = month_idx + 1;
+    let month = month_idx + 1;
 
     let total_seconds = hour * 3600 + minute * 60 + second;
     let day_carry = total_seconds / 86400;
@@ -57,34 +57,34 @@ fn to_tick(values) {
     (era * 146097 + doe + 60) * 86400 + seconds
 }
 
-fn serialize(lang) {
+pub fn serialize(lang) {
     let zh = lang == "zh";
-    let result = #{};
-    result.name = if zh { "格里高利历" } else { "Gregorian Calendar" };
-    result.description = if zh {
-        "采用年、月、日和时分秒表示时间，并包含公历闰年规则。"
-    } else {
-        "Represents time with years, months, days, hours, minutes, and seconds."
-    };
-    return result;
+    #{
+        name: if zh { "格里高利历" } else { "Gregorian Calendar" },
+        description: if zh {
+            "采用年、月、日和时分秒表示时间，并包含公历闰年规则。"
+        } else {
+            "Represents time with years, months, days, hours, minutes, and seconds."
+        },
+    }
 }
 
 // 只格式化 normalize 后的日期，不参与历算。
-fn humanizer(value, lang) {
+pub fn humanizer(value, lang) {
     let year = value[0];
     let month = value[1];
     let day = value[2];
     let hour = value[3];
     let minute = value[4];
     let second = value[5];
-    let date = "";
     if lang == "zh" {
-        date = `${year}年${month}月${day}日`;
+        let date = `${year}年${month}月${day}日`;
         if hour == 0 && minute == 0 && second == 0 { return date; }
-        return `${date}${hour}时${minute}分${second}秒`;
+        let stamp = `${date}${hour}时${minute}分${second}秒`;
+        return stamp;
     }
     let months = ["Jan.", "Feb.", "Mar.", "Apr.", "May", "Jun.", "Jul.", "Aug.", "Sep.", "Oct.", "Nov.", "Dec."];
-    date = `${months[month - 1]} ${day}, ${year}`;
+    let date = `${months[month - 1]} ${day}, ${year}`;
     if hour == 0 && minute == 0 && second == 0 { return date; }
     let hh = if hour < 10 { `0${hour}` } else { `${hour}` };
     let mm = if minute < 10 { `0${minute}` } else { `${minute}` };

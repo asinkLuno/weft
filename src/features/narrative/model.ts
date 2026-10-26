@@ -1,12 +1,10 @@
-import type { EventDefinition, EventTiming, WeftDoc } from "@/lib/document";
-export type EventItem = EventDefinition &
-  EventTiming & { id: string; title: string };
+import type { Event, WeftDoc } from "@/lib/document";
+export type EventItem = Event & { id: string; title: string };
 
 export function eventItems(doc: WeftDoc | null): EventItem[] {
   return Object.entries(doc?.event ?? {})
     .map(([id, event]) => ({
       ...event,
-      ...doc?.event_times?.[id],
       id,
       title: id,
     }))
