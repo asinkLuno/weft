@@ -10,21 +10,18 @@ pub(crate) fn check(
     narratives: &HashMap<String, Narrative>,
     events: &HashMap<String, RawEvent>,
 ) -> Result<(), DocumentError> {
-    let mut errors = Vec::new();
-    for (name, ids) in narratives {
-        for id in ids {
+    let mut names: Vec<_> = narratives.keys().collect();
+    names.sort_unstable();
+    for name in names {
+        for id in &narratives[name] {
             if !events.contains_key(id) {
-                errors.push(ValidationError::UnknownNarrativeEvent {
+                return Err(ValidationError::UnknownNarrativeEvent {
                     narrative: name.clone(),
                     event: id.clone(),
-                });
+                }
+                .into());
             }
         }
     }
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        errors.sort_by_cached_key(ToString::to_string);
-        Err(DocumentError::References { errors })
-    }
+    Ok(())
 }

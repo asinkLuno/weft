@@ -40,12 +40,9 @@ export function useDocument() {
           return;
         }
         if (!boundPath.current) return;
-        if (payload.error) {
-          setActiveError(payload.error);
-          return;
-        }
-        setActiveError(null);
         setDoc(payload.doc);
+        setActiveError(payload.error);
+        if (payload.error) return;
         setFlash(true);
         clearTimeout(flashTimer.current);
         flashTimer.current = setTimeout(() => setFlash(false), 400);
@@ -86,7 +83,7 @@ export function useDocument() {
       setPath(nextPath);
       // 绑定期间也可能收到文件变更，优先采用较新的有效快照。
       const changed = takePendingChange();
-      setDoc(changed && !changed.error ? changed.doc : payload.doc);
+      setDoc(changed ? changed.doc : payload.doc);
       setActiveError(changed ? changed.error : payload.error);
       clearTimeout(flashTimer.current);
       setFlash(false);

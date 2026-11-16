@@ -173,30 +173,34 @@ fn build_belong_graph(
     entities: &HashMap<String, RawEntity>,
     links: &HashMap<String, Vec<EntityLink>>,
 ) -> Result<Dag<String, ()>, DocumentError> {
-    let mut errors = Vec::new();
-    for (id, input) in entities {
-        for parent in &input.belong_to {
+    let mut entity_ids: Vec<_> = entities.keys().collect();
+    entity_ids.sort_unstable();
+    for id in entity_ids {
+        for parent in &entities[id].belong_to {
             if !entities.contains_key(parent) {
-                errors.push(ValidationError::EntityUnknownParent {
+                return Err(ValidationError::EntityUnknownParent {
                     entity: id.clone(),
                     target: parent.clone(),
-                });
+                }
+                .into());
             }
         }
     }
-    for (group, pairs) in links {
-        for link in pairs {
+    let mut groups: Vec<_> = links.keys().collect();
+    groups.sort_unstable();
+    for group in groups {
+        for link in &links[group] {
             for id in [&link.entities.0, &link.entities.1] {
                 if !entities.contains_key(id) {
-                    errors.push(ValidationError::UnknownLinkEntity {
+                    return Err(ValidationError::UnknownLinkEntity {
                         group: group.clone(),
                         entity: id.clone(),
-                    });
+                    }
+                    .into());
                 }
             }
         }
     }
-    report(errors)?;
     let mut graph = Dag::new();
     let mut ids: Vec<_> = entities.keys().collect();
     ids.sort_unstable();
@@ -216,8 +220,10 @@ fn build_belong_graph(
 
 // 头像路径相对 YAML 文件；必须解析到已存在的图片文件，否则逐条报错。
 fn validate_avatars(entity: &HashMap<String, RawEntity>, base: &Path) -> Result<(), DocumentError> {
-    let mut errors = Vec::new();
-    for (id, input) in entity {
+    let mut ids: Vec<_> = entity.keys().collect();
+    ids.sort_unstable();
+    for id in ids {
+        let input = &entity[id];
         let Some(source) = input
             .avatar
             .as_deref()
@@ -229,13 +235,14 @@ fn validate_avatars(entity: &HashMap<String, RawEntity>, base: &Path) -> Result<
             .map(|path| path.is_file() && is_image(&path))
             .unwrap_or(false);
         if !valid {
-            errors.push(ValidationError::InvalidAvatarPath {
+            return Err(ValidationError::InvalidAvatarPath {
                 entity: id.clone(),
                 path: source.to_owned(),
-            });
+            }
+            .into());
         }
     }
-    report(errors)
+    Ok(())
 }
 
 // 执行实体的可计算属性：脚本返回值写进 extra_props 的属性注册 ID 下，
@@ -271,15 +278,6 @@ fn apply_calculable_props(
 }
 
 // ---- 校验工具 ----
-
-// 有错误时排序汇总为一条 References，一次暴露全部问题。
-fn report(mut errors: Vec<ValidationError>) -> Result<(), DocumentError> {
-    if errors.is_empty() {
-        return Ok(());
-    }
-    errors.sort_by_cached_key(ToString::to_string);
-    Err(DocumentError::References { errors })
-}
 
 // 头像经 asset protocol 直接交给 <img>，按扩展名接受 WebView 可渲染的图片。
 const IMAGE_EXTENSIONS: [&str; 8] = ["bmp", "gif", "ico", "jpeg", "jpg", "png", "svg", "webp"];

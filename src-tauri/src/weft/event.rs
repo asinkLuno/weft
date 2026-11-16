@@ -59,23 +59,20 @@ pub(crate) fn check(
     events: &HashMap<String, RawEvent>,
     entities: &HashMap<String, Entity>,
 ) -> Result<(), DocumentError> {
-    let mut errors = Vec::new();
-    for (id, event) in events {
-        for entity in &event.entities {
+    let mut ids: Vec<_> = events.keys().collect();
+    ids.sort_unstable();
+    for id in ids {
+        for entity in &events[id].entities {
             if !entities.contains_key(entity) {
-                errors.push(ValidationError::UnknownEventEntity {
+                return Err(ValidationError::UnknownEventEntity {
                     event: id.clone(),
                     entity: entity.clone(),
-                });
+                }
+                .into());
             }
         }
     }
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        errors.sort_by_cached_key(ToString::to_string);
-        Err(DocumentError::References { errors })
-    }
+    Ok(())
 }
 
 pub(crate) fn apply_times(

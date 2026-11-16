@@ -65,7 +65,12 @@ impl WeftDoc {
         gregorian: &Path,
         lang: &str,
     ) -> Result<Self, DocumentError> {
-        let raw = RawWeftDoc::deserialize(yaml).map_err(DocumentError::raw)?;
+        let raw: RawWeftDoc = serde_path_to_error::deserialize(yaml).map_err(|error| {
+            ValidationError::InvalidStructure {
+                path: error.path().to_string(),
+                reason: error.inner().to_string(),
+            }
+        })?;
         // 按段检查：story → entity → event → narrative；每段先引用后结构，
         // 前面的段不成立，后面段的问题没有报告价值
         let story = Story::from_raw(

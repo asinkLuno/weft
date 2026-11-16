@@ -4,7 +4,6 @@ export type Lang = "zh" | "en";
 
 export type DocumentError =
   | { type: "validation"; error: ValidationError }
-  | { type: "references"; errors: ValidationError[] }
   | { type: "raw"; message: string };
 
 type ValidationCode = ValidationError["code"];
@@ -48,6 +47,7 @@ const validationMessages = {
       "时间分量过多：{actual} 个，该历法最多 {maximum} 个",
     normalize_wrong_component_count: "normalize 必须返回 {expected} 个时间分量",
     time_offset_out_of_range: "时间偏移超出整数范围",
+    invalid_structure: "Weft YAML 结构无效（{path}）：{reason}",
   },
   en: {
     file_deleted: "File deleted or moved",
@@ -96,6 +96,7 @@ const validationMessages = {
     normalize_wrong_component_count:
       "normalize must return {expected} time components",
     time_offset_out_of_range: "Time offset is outside the integer range",
+    invalid_structure: "Invalid Weft YAML structure at {path}: {reason}",
   },
 } satisfies Record<Lang, Record<ValidationCode, string>>;
 
@@ -117,11 +118,6 @@ export function formatDocumentError(error: unknown, lang: Lang): string {
   if (error && typeof error === "object" && "type" in error) {
     const e = error as Partial<DocumentError>;
     if (e.type === "raw" && typeof e.message === "string") return e.message;
-    if (e.type === "references" && Array.isArray(e.errors)) {
-      return e.errors
-        .map((item) => `• ${formatValidationError(item, lang)}`)
-        .join("\n");
-    }
     if (e.type === "validation" && e.error) {
       return formatValidationError(e.error, lang);
     }

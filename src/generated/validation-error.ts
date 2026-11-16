@@ -65,4 +65,5 @@ export type ValidationError =
       params: { actual: string; maximum: string };
     }
   | { code: "normalize_wrong_component_count"; params: { expected: string } }
-  | { code: "time_offset_out_of_range" };
+  | { code: "time_offset_out_of_range" }
+  | { code: "invalid_structure"; params: { path: string; reason: string } };

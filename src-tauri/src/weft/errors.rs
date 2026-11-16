@@ -98,6 +98,8 @@ pub enum ValidationError {
     NormalizeWrongComponentCount { expected: String },
     #[error("time offset is out of range")]
     TimeOffsetOutOfRange,
+    #[error("invalid document structure at {path}: {reason}")]
+    InvalidStructure { path: String, reason: String },
 }
 
 #[derive(Clone, Debug, Error, Serialize)]
@@ -108,8 +110,6 @@ pub enum DocumentError {
         #[source]
         error: ValidationError,
     },
-    #[error("invalid references: {errors:?}")]
-    References { errors: Vec<ValidationError> },
     #[error("{message}")]
     Raw { message: String },
 }
@@ -132,14 +132,3 @@ impl From<ValidationError> for DocumentError {
     }
 }
 
-impl From<String> for DocumentError {
-    fn from(message: String) -> Self {
-        Self::raw(message)
-    }
-}
-
-impl From<&str> for DocumentError {
-    fn from(message: &str) -> Self {
-        Self::raw(message)
-    }
-}

@@ -103,11 +103,7 @@ function EntityViewInner({
     };
   }, [layoutKey]);
 
-  // HashMap 无序，按 id 排序保证两次渲染顺序一致
-  const entities = Object.entries(doc?.entity ?? {}).sort(([a], [b]) =>
-    a.localeCompare(b),
-  );
-  if (entities.length === 0)
+  if (Object.keys(doc?.entity ?? {}).length === 0)
     return (
       <div className="view-empty">
         <Waypoints />
