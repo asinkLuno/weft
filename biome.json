@@ -7,7 +7,14 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!src-tauri", "!public", "!!**/dist"]
+    "includes": [
+      "**",
+      "!src-tauri",
+      "!public",
+      "!!**/dist",
+      "!.agents/skills/impeccable",
+      "!.agents/skills/logo-generator"
+    ]
   },
   "formatter": {
     "enabled": true,
