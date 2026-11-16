@@ -16,7 +16,6 @@ use serde_json::Value;
 
 use crate::plugin_loader;
 use crate::weft::errors::{DocumentError, ValidationError};
-use crate::weft::phase::Phase;
 
 pub(crate) const GREGORIAN: &str = "rune/gregorian.rn";
 
@@ -192,11 +191,5 @@ impl Calendar {
             calendar: self.source.display().to_string(),
             entry: entry.to_owned(),
         }
-    }
-
-    // 原始 Phase 相减后再归一化，所有历法使用同一条展示流程。
-    pub fn offset_display(&self, time: &Phase, base: &Phase) -> Result<String, DocumentError> {
-        let difference = time.subtract(base, self.component_count())?;
-        self.humanize(&self.normalize(&difference)?)
     }
 }

@@ -19,7 +19,6 @@ classDiagram
         +normalize(values) Vec~i64~
         +to_tick(values) i64
         +humanize(values) String
-        +offset_display(time, base) String
     }
     class Phase {
         +flatten(component_count) Vec~i64~
@@ -33,7 +32,7 @@ classDiagram
     }
     Story *-- Calendar : owns at runtime
     Calendar --> RuneScript : compiled Unit
-    Calendar ..> Phase : offset_display
+    Calendar ..> Phase : flatten
 ```
 
 ## 统一时间流程
@@ -58,7 +57,7 @@ sequenceDiagram
 
 `normalize(values)` 固定实现为 `from_tick(to_tick(values))`。因此脚本的 `to_tick` 必须接收未归一化分量，并将进位、借位映射到可比较的 64 位整数；`from_tick` 必须返回准确的分量数。分量不足时宿主补零，超长则拒绝。`humanize` 只负责格式化，宿主把当前 `zh` / `en` 语言传入脚本。
 
-事件时间使用同一个 tick 域进行排序、起止先后校验和叙事线偏移；实体的基准时间则保留原始 Phase，另行生成归一化日期及展示文案。`offset_display` 先对两个原始 Phase 做分量差，再用同一 Calendar 归一化并展示。
+事件时间使用同一个 tick 域进行排序、起止先后校验和叙事线偏移；实体的基准时间则保留原始 Phase，另行生成归一化日期及展示文案。
 
 ## 插件隔离
 

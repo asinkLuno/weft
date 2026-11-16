@@ -82,7 +82,7 @@ entity:
 
 ## 责任边界
 
-Phase 只负责结构、整数校验和溢出安全；Calendar 负责日历语义——进位借位（`normalize`）、时间先后（`to_tick`）、展示文案（`humanize`）。同一套时间表达结构因此既能跑公历也能跑自定义历法。实体基准时间之间的差值展示用 `Phase::subtract`（两边各自展平后逐分量 checked 相减，同样不归一化）。
+Phase 只负责结构、整数校验和溢出安全；Calendar 负责日历语义——进位借位（`normalize`）、时间先后（`to_tick`）、展示文案（`humanize`）。同一套时间表达结构因此既能跑公历也能跑自定义历法。
 
 ## 参考
 

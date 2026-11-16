@@ -10,7 +10,6 @@ classDiagram
         +from_yaml(value) Phase
         +from_yaml_scalar(value) Phase
         +flatten(component_count) Vec~i64~
-        +subtract(other, component_count) Vec~i64~
     }
     class Calendar {
         +component_count() usize
@@ -49,8 +48,6 @@ classDiagram
 ```
 
 上例只是分量加法。小时超过 23 时仍保留在小时槽位，具体如何进位由历法的 `normalize` 决定。负偏移同样只是分量上的减法。
-
-`subtract` 分别展平两棵 Phase，再对分量做 checked subtraction；不会先将两者归一化。这用于计算实体基准时间之间的差值展示。若历法有非线性分量规则，最终解释仍由 Calendar 处理。
 
 ## 责任边界
 

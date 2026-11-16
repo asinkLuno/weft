@@ -71,22 +71,6 @@ impl Phase {
         Ok(result)
     }
 
-    /// 两个 Phase 按相同位数展平后，计算 self - other；不处理历法进位或借位。
-    pub fn subtract(
-        &self,
-        other: &Self,
-        component_count: usize,
-    ) -> Result<TimeUnit, DocumentError> {
-        let mut difference = self.flatten(component_count)?;
-        let other = other.flatten(component_count)?;
-        for (target, value) in difference.iter_mut().zip(other) {
-            *target = target
-                .checked_sub(value)
-                .ok_or(ValidationError::TimeOffsetOutOfRange)?;
-        }
-        Ok(difference)
-    }
-
     // 各层共用同一个结果缓冲区，先累加锚点，再累加当前层的分量。
     fn accumulate(&self, result: &mut [i64]) -> Result<(), DocumentError> {
         if self.components.len() > result.len() {
@@ -106,18 +90,4 @@ impl Phase {
         }
         Ok(())
     }
-}
-
-// 两个 tick 相减；任一端没有时间就得到 None
-pub(crate) fn offset_tick(
-    base: Option<i64>,
-    time: Option<i64>,
-) -> Result<Option<i64>, DocumentError> {
-    base.zip(time)
-        .map(|(base, time)| {
-            time.checked_sub(base)
-                .ok_or(ValidationError::TimeOffsetOutOfRange)
-        })
-        .transpose()
-        .map_err(DocumentError::from)
 }

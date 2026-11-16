@@ -8,13 +8,11 @@ classDiagram
         +TimeUnit components
         +Option~Phase~ anchor
         +flatten(component_count) TimeUnit
-        +subtract(other, component_count) TimeUnit
     }
     class Calendar {
         +normalize(values) TimeUnit
         +to_tick(values) i64
         +humanize(values) String
-        +offset_display(time, base) String
     }
     class Story {
         +metadata
