@@ -106,10 +106,12 @@ entity:
 
 - 所有属性（包括现成的 `constellation`）都必须先注册才能引用；路径相对 YAML 所在目录。
 - 脚本须公开 `pub fn calculable_prop(ctx)`：返回字符串/数/布尔/数组/对象写进 `extra_props[注册ID]`，返回 `()` 不写入；与实体输入字段同名时以计算结果为准；本地化报错用 `panic(消息)`。
+- 数据不齐（没写 `base_time`）返回 `()` 不写入，别 panic——否则属性只能一个个手工挂，没法整批应用；只有脚本前提真的被破坏（如自定义历法下月日不再指公历月份）才 `panic`。
+- 两个 Rune 陷阱：`if` 分支里调 `panic` 会被推断成 unit，实际报 `Expected type String but found Tuple` 而不是你的消息——把 panic 放进 `match` 分支；归一化会把缺失分量补零（`base_time: 1980` → `[1980, 1, 1, 0, 0, 0]`），所以 `bt.len()` 和月日范围校验都恒成立，脚本无法分辨「只写了年份」。
 - `ctx` 含 `language`（zh/en）、`date_mode`、`entity.id / base_time（按当前历法归一化后的整数数组）/ description / belong_to`。
 - 只有被实体 `calculable_props` 引用的脚本才执行；切换应用语言会重新计算。
 
-接口细节：`docs/src/rune-calculable-props.md`；星座示例：`examples/constellation.rn`（注意它要求公历历法、且 `base_time` 写全 年 月 日，否则 panic）。
+接口细节：`docs/src/rune-calculable-props.md`；星座示例：`examples/constellation.rn`（要求公历历法否则 panic；没有 `base_time` 返回 `()` 不写入，但只写到年份的会被补成一月一日，照样给出星座）。
 
 ## 常见报错
 
@@ -118,4 +120,4 @@ entity:
 | story 段路径检查失败 | `date_mode` / 脚本路径不指向已存在的 `.rn` 文件 |
 | 脚本接口检查失败 | 缺五个 `pub` 历法函数之一、缺 `pub fn calculable_prop(ctx)`，或函数未声明 `pub` |
 | 编译诊断 | Rune 脚本语法错误，带源码行列定位 |
-| 属性计算 panic | 脚本主动报错，如星座脚本遇到自定义历法或 base_time 不全 |
+| 属性计算 panic | 脚本主动报错，如星座脚本遇到自定义历法 |

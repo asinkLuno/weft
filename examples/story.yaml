@@ -56,10 +56,12 @@ entity:
   詹姆·波特:
     description: 哈利的父亲，格兰芬多击球手，掠夺者之首。
     base_time: [1960, 3, 27]
+    calculable_props: [constellation]
     belong_to: [格兰芬多]
   莉莉·波特:
     description: 哈利的母亲，麻瓜出身却天资出众的女巫。
     base_time: [1960, 1, 30]
+    calculable_props: [constellation]
     belong_to: [格兰芬多]
 
   哈利·波特:
@@ -84,10 +86,12 @@ entity:
   纳威·隆巴顿:
     description: 健忘胆小的同院同学，蟾蜍莱夫总在跑丢。
     base_time: [1980, 7, 30]
+    calculable_props: [constellation]
     belong_to: [格兰芬多]
   金妮·韦斯莱:
     description: 韦斯莱家的小女儿，在国王十字车站送哥哥上学。
     base_time: [1981, 8, 11]
+    calculable_props: [constellation]
     belong_to: [格兰芬多]
 
   德拉科·马尔福:
