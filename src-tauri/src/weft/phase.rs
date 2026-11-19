@@ -3,13 +3,15 @@ use serde_yaml_ng::Value as Yaml;
 
 use crate::weft::errors::{DocumentError, ValidationError};
 
-// 时间分量按历法从大到小排列；展平后的长度严格取自历法脚本 components() 的返回值。
-// 输入可省略末尾分量，展平时补零；进位交给历法处理。
-pub type TimeUnit = Vec<i64>;
 
-// phase 可以是 time_unit，也可以是 [phase, 偏移分量…]，递归锚点位于首项。
-// [[2025, 4, 2, 10], 0, 0, 0, 2] 展平为 [2025, 4, 2, 12]。
-// 负数分量表示减法；flatten 只逐分量求和，不处理进位或历法规则。
+// YAML 里 phase 可以是 time_unit，也可以是 [phase, 偏移分量…]，递归锚点位于首项。
+// 解析时就把递归摊平：最内层是绝对时间，外面每套一层多一段偏移。
+// [[[2025, 4, 2, 10], 0, 0, 0, 2], 1] 得到 base = [2025, 4, 2, 10]，
+// offsets = [[0, 0, 0, 2], [1]]。
+
+pub type TimeUnit = Vec<i64>;
+const MAX_PHASE_DEPTH: usize = 64;
+// phase 可以是 time_unit，也可以是 [phase, 偏移分量…]；锚点递归深度最多 64 层。
 #[derive(Debug, Clone, Serialize)]
 pub struct Phase {
     pub components: TimeUnit,
@@ -18,30 +20,32 @@ pub struct Phase {
 
 impl Phase {
     pub(crate) fn from_yaml(value: &Yaml) -> Result<Self, DocumentError> {
+        Self::from_yaml_at_depth(value, 1)
+    }
+
+    fn from_yaml_at_depth(value: &Yaml, depth: usize) -> Result<Self, DocumentError> {
+        if depth > MAX_PHASE_DEPTH {
+            return Err(ValidationError::TimeNestingTooDeep {
+                maximum: MAX_PHASE_DEPTH.to_string(),
+            }
+            .into());
+        }
         let sequence = value
             .as_sequence()
             .ok_or_else(|| DocumentError::validation(ValidationError::TimeNonemptyList))?;
-        if sequence.is_empty() {
-            return Err(ValidationError::TimeNonemptyList.into());
+        match sequence.first() {
+            None => Err(ValidationError::TimeNonemptyList.into()),
+            Some(anchor @ Yaml::Sequence(_)) => Ok(Self {
+                components: integers(&sequence[1..])?,
+                anchor: Some(Box::new(Self::from_yaml_at_depth(anchor, depth + 1)?)),
+            }),
+            Some(_) => Ok(Self {
+                components: integers(sequence)?,
+                anchor: None,
+            }),
         }
-        let (components, anchor) = match sequence.first() {
-            Some(Yaml::Sequence(_)) => (&sequence[1..], sequence.first()),
-            _ => (&sequence[..], None),
-        };
-        let mut base = Vec::with_capacity(components.len());
-        for component in components {
-            base.push(
-                component.as_i64().ok_or_else(|| {
-                    DocumentError::validation(ValidationError::TimeIntegerComponent)
-                })?,
-            );
-        }
-        let anchor = anchor.map(Self::from_yaml).transpose()?.map(Box::new);
-        Ok(Self {
-            components: base,
-            anchor,
-        })
     }
+
 
     /// 标量兼容：单个整数等价于单分量 Phase，其余结构交给 [`Phase::from_yaml`]。
     /// 实体的 `base_time` 和事件的 `start_time` / `end_time` 共用。
@@ -61,33 +65,15 @@ impl Phase {
             Some(value) => Self::from_yaml_scalar(value).map(Some),
         }
     }
+}
 
-    // 从最内层锚点开始递归展平，每层偏移都从第一个分量开始相加。
-    // 六分量历法下，[[[2025, 4, 2, 10], 0, 0, 0, 2], 1, 2, 3]
-    // 得到 [2026, 6, 5, 12, 0, 0]；进位由历法 normalize 处理。
-    pub(crate) fn flatten(&self, component_count: usize) -> Result<TimeUnit, DocumentError> {
-        let mut result = vec![0; component_count];
-        self.accumulate(&mut result)?;
-        Ok(result)
-    }
-
-    // 各层共用同一个结果缓冲区，先累加锚点，再累加当前层的分量。
-    fn accumulate(&self, result: &mut [i64]) -> Result<(), DocumentError> {
-        if self.components.len() > result.len() {
-            return Err(ValidationError::TooManyTimeComponents {
-                actual: self.components.len().to_string(),
-                maximum: result.len().to_string(),
-            }
-            .into());
-        }
-        if let Some(anchor) = &self.anchor {
-            anchor.accumulate(result)?;
-        }
-        for (target, value) in result.iter_mut().zip(&self.components) {
-            *target = target
-                .checked_add(*value)
-                .ok_or(ValidationError::TimeOffsetOutOfRange)?;
-        }
-        Ok(())
-    }
+fn integers(values: &[Yaml]) -> Result<TimeUnit, DocumentError> {
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_i64()
+                .ok_or_else(|| DocumentError::validation(ValidationError::TimeIntegerComponent))
+        })
+        .collect()
 }

@@ -80,23 +80,19 @@ pub(crate) fn apply_times(
     cal: &Calendar,
 ) -> Result<(), DocumentError> {
     for (id, ev) in event {
-        let start = cal.normalize(&ev.start_time.flatten(cal.component_count())?)?;
-        let start_tick = cal.to_tick(&start)?;
+        let start = cal.resolve(&ev.start_time)?;
         let end = ev
             .end_time
             .as_ref()
-            .map(|phase| cal.normalize(&phase.flatten(cal.component_count())?))
+            .map(|phase| cal.resolve(phase))
             .transpose()?;
-        let end_tick = end.as_ref().map(|end| cal.to_tick(end)).transpose()?;
-        if end_tick.is_some_and(|end| end < start_tick) {
+        if end.as_ref().is_some_and(|end| end.tick < start.tick) {
             return Err(ValidationError::EventEndBeforeStart { event: id.clone() }.into());
         }
-        let start_display = cal.humanize(&start)?;
-        let end_display = end.as_ref().map(|end| cal.humanize(end)).transpose()?;
-        ev.start_tick = Some(start_tick);
-        ev.end_tick = end_tick;
-        ev.start_display = Some(start_display);
-        ev.end_display = end_display;
+        ev.start_display = Some(cal.humanize(&start)?);
+        ev.end_display = end.as_ref().map(|end| cal.humanize(end)).transpose()?;
+        ev.start_tick = Some(start.tick);
+        ev.end_tick = end.map(|end| end.tick);
     }
     Ok(())
 }

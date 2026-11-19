@@ -1,6 +1,8 @@
 // 公历日期分量：[年, 月, 日, 时, 分, 秒]。历算与本地化展示分开。
 pub fn components() { 6 }
 
+pub fn minimums() { [0, 1, 1, 0, 0, 0] }
+
 // 反算 tick；用整段日期换算处理跨月、跨年及负的时分秒。
 pub fn from_tick(tick) {
     // 历算以三月为年首；将零年一月一日原点移回三月基准。
@@ -28,8 +30,8 @@ pub fn from_tick(tick) {
 pub fn to_tick(values) {
     let year = values[0];
     // 缺省月、日按一月一日计算。
-    let month = if values[1] == 0 { 1 } else { values[1] };
-    let day = if values[2] == 0 { 1 } else { values[2] };
+    let month = values[1];
+    let day = values[2];
     let hour = values[3];
     let minute = values[4];
     let second = values[5];
@@ -69,8 +71,8 @@ pub fn serialize(lang) {
     }
 }
 
-// 只格式化 normalize 后的日期，不参与历算。
-pub fn humanizer(value, lang) {
+// 只格式化归一化日期；precision 保留作者输入的模糊程度。
+pub fn humanizer(value, precision, lang) {
     let year = value[0];
     let month = value[1];
     let day = value[2];
@@ -78,13 +80,13 @@ pub fn humanizer(value, lang) {
     let minute = value[4];
     let second = value[5];
     if lang == "zh" {
-        let date = `${year}年${month}月${day}日`;
+        let date = if precision <= 1 { `${year}年` } else if precision == 2 { `${year}年${month}月` } else { `${year}年${month}月${day}日` };
         if hour == 0 && minute == 0 && second == 0 { return date; }
         let stamp = `${date}${hour}时${minute}分${second}秒`;
         return stamp;
     }
     let months = ["Jan.", "Feb.", "Mar.", "Apr.", "May", "Jun.", "Jul.", "Aug.", "Sep.", "Oct.", "Nov.", "Dec."];
-    let date = `${months[month - 1]} ${day}, ${year}`;
+    let date = if precision <= 1 { `${year}` } else if precision == 2 { `${months[month - 1]} ${year}` } else { `${months[month - 1]} ${day}, ${year}` };
     if hour == 0 && minute == 0 && second == 0 { return date; }
     let hh = if hour < 10 { `0${hour}` } else { `${hour}` };
     let mm = if minute < 10 { `0${minute}` } else { `${minute}` };

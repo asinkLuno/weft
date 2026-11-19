@@ -1,4 +1,3 @@
-// 后端已按 src-tauri/src/weft_doc.rs 校验并滤掉未声明键，这里只读序列化结果
 export type Phase = {
   components: number[];
   anchor: Phase | null;

@@ -5,6 +5,8 @@
 // 日期分量：[年, 月, 日, 时, 分, 秒]；第 1 年月 1 日为刻度原点。
 pub fn components() { 6 }
 
+pub fn minimums() { [1, 1, 1, 0, 0, 0] }
+
 const DAY_SECONDS = 86400;
 const MONTHS_PER_CYCLE = 235;
 const DAYS_PER_CYCLE = 6940;
@@ -88,8 +90,8 @@ pub fn from_tick(tick) {
 
 pub fn to_tick(values) {
     let year = values[0];
-    let month = if values[1] == 0 { 1 } else { values[1] };
-    let day = if values[2] == 0 { 1 } else { values[2] };
+    let month = values[1];
+    let day = values[2];
     let hour = values[3];
     let minute = values[4];
     let second = values[5];
@@ -112,7 +114,7 @@ pub fn serialize(language) {
     }
 }
 
-pub fn humanizer(value, language) {
+pub fn humanizer(value, precision, language) {
     let year = value[0];
     let month = value[1];
     let day = value[2];

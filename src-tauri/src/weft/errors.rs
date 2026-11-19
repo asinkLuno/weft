@@ -28,6 +28,8 @@ pub enum ValidationError {
     TimeNonemptyList,
     #[error("time component must be an integer")]
     TimeIntegerComponent,
+    #[error("time nesting exceeds maximum depth {maximum}")]
+    TimeNestingTooDeep { maximum: String },
     #[error("event {event} ends before it starts")]
     EventEndBeforeStart { event: String },
     #[error("calendar path must point to an existing .rn file: {path}")]
@@ -98,6 +100,14 @@ pub enum ValidationError {
     NormalizeWrongComponentCount { expected: String },
     #[error("time offset is out of range")]
     TimeOffsetOutOfRange,
+    #[error("time component {position} is {value}, below the calendar minimum {minimum}")]
+    TimeComponentBelowMinimum {
+        position: String,
+        value: String,
+        minimum: String,
+    },
+    #[error("calendar {calendar}: to_tick(from_tick(tick)) does not return the same tick")]
+    CalendarRoundTripMismatch { calendar: String },
     #[error("invalid document structure at {path}: {reason}")]
     InvalidStructure { path: String, reason: String },
 }

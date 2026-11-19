@@ -75,10 +75,7 @@ impl FromRaw<EntityContext<'_>> for Entity {
         let base_time = Phase::from_yaml_scalar_opt(raw.base_time.as_ref())?;
         let base_time_humanizer = base_time
             .as_ref()
-            .map(|phase| {
-                let normalized = calendar.normalize(&phase.flatten(calendar.component_count())?)?;
-                calendar.humanize(&normalized)
-            })
+            .map(|phase| calendar.humanize(&calendar.resolve(phase)?))
             .transpose()?;
         // 头像路径相对 YAML 文件，是否为存在的图片已在输入校验确认，此处仅解析绝对路径。
         let avatar = raw
@@ -257,11 +254,7 @@ fn apply_calculable_props(
     let base_time = entity
         .base_time
         .as_ref()
-        .map(|phase| {
-            context
-                .calendar
-                .normalize(&phase.flatten(context.calendar.component_count())?)
-        })
+        .map(|phase| context.calendar.resolve(phase).map(|moment| moment.values))
         .transpose()?;
     for name in props {
         let input = json!({
