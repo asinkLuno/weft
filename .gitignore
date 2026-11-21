@@ -26,4 +26,3 @@ docs/book
 
 # 第三方 skill 资产：平台二进制与嵌套仓库元数据不入库
 .agents/skills/impeccable/scripts/bin/
-.agents/skills/ub-mode/.git/
