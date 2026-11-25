@@ -224,6 +224,7 @@ export function Workspace({
           <WorkspaceEditorContext.Provider value={editorContextValue}>
             <DockviewReact
               theme={themeLight}
+              disableDnd={false}
               dndStrategy="pointer"
               disableFloatingGroups
               components={WORKSPACE_COMPONENTS}
