@@ -82,6 +82,7 @@ pub fn run() {
         .manage(Mutex::new(weft_doc::DocumentState::default()))
         .invoke_handler(tauri::generate_handler![
             weft_doc::bind_document,
+            weft_doc::check_document,
             weft_doc::save_document,
             weft_doc::unbind_document,
             get_language,

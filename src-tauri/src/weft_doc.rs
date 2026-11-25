@@ -1,5 +1,5 @@
-//! `.weft` 文档边界：编译校验、文件监听及变更推送。
-//! 保存前通过同一编译流程校验，错误通过 DocumentPayload 返回前端。
+//! `.weft` 文档边界：编译、文件监听、变更推送及编辑器诊断接口。
+//! 编译错误由编辑器通过 `check_document` 独立接管，不经由 DocumentPayload 弹窗推送。
 
 use std::{
     collections::HashSet,
@@ -21,7 +21,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_log::log::{error, warn};
 
 use crate::weft::compiler::{self, StoryScriptRefs};
-use crate::weft::errors::{DocumentError, ValidationError};
+use crate::weft::errors::{CompileDiagnostic, DocumentError};
 
 const EVENT: &str = "document-changed";
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(300);
@@ -72,7 +72,7 @@ impl DocumentTarget {
         let raw_path = PathBuf::from(raw);
         let file_name = raw_path
             .file_name()
-            .ok_or_else(|| DocumentError::validation(ValidationError::InvalidPath))?;
+            .ok_or_else(|| DocumentError::raw("invalid path"))?;
         let raw_parent = non_empty_parent(&raw_path);
         let parent = fs::canonicalize(raw_parent).map_err(DocumentError::raw)?;
         let path = parent.join(file_name);
@@ -182,7 +182,7 @@ struct ActiveDocument {
     // 每次状态提交递增：防止耗时解析（旧事件/旧语言刷新）覆盖更新后的结果。
     seq: u64,
     target: DocumentTarget,
-    // 最近一次与前端一致且校验通过的 .weft 文本；用于幂等抑制回声与重复事件。
+    // 最近一次已同步给前端的 .weft 文本；用于幂等抑制自保存回声与重复事件。
     last_synced: Option<String>,
     watch_filter: Arc<Mutex<WatchFilter>>,
     watched_dirs: HashSet<PathBuf>,
@@ -237,7 +237,6 @@ pub struct DocumentPayload {
     generation: u64,
     doc: Option<Value>,
     content: Option<String>,
-    error: Option<DocumentError>,
 }
 
 impl DocumentPayload {
@@ -246,17 +245,15 @@ impl DocumentPayload {
             generation,
             doc: Some(doc),
             content: Some(content),
-            error: None,
         }
     }
 
-    // 解析失败时保留原文：绑定的文件即使有语法错误，编辑器仍可显示它
-    fn failed(generation: u64, error: DocumentError, content: Option<String>) -> Self {
+    // 编译失败或文件缺失时保留原文（若有）：编译错误由编辑器诊断通道单独接管，不再推送到文档状态。
+    fn uncompiled(generation: u64, content: Option<String>) -> Self {
         Self {
             generation,
             doc: None,
             content,
-            error: Some(error),
         }
     }
 }
@@ -395,20 +392,22 @@ fn read_document_text(
     None
 }
 
+fn resolve_gregorian(app: &AppHandle) -> Result<PathBuf, DocumentError> {
+    app.path()
+        .resolve(
+            crate::calendar::GREGORIAN,
+            tauri::path::BaseDirectory::Resource,
+        )
+        .map_err(DocumentError::raw)
+}
+
 fn parse(
     app: &AppHandle,
     content: &str,
     base: &Path,
     lang: &str,
 ) -> (Option<HashSet<PathBuf>>, Result<Value, DocumentError>) {
-    let gregorian = match app
-        .path()
-        .resolve(
-            crate::calendar::GREGORIAN,
-            tauri::path::BaseDirectory::Resource,
-        )
-        .map_err(DocumentError::raw)
-    {
+    let gregorian = match resolve_gregorian(app) {
         Ok(path) => path,
         Err(err) => return (None, Err(err)),
     };
@@ -474,7 +473,7 @@ fn push_changed(app: &AppHandle, generation: u64, trigger: ChangeTrigger) {
                     app,
                     active,
                     None,
-                    DocumentPayload::failed(generation, ValidationError::FileDeleted.into(), None),
+                    DocumentPayload::uncompiled(generation, None),
                 );
             }
             return;
@@ -491,7 +490,7 @@ fn push_changed(app: &AppHandle, generation: u64, trigger: ChangeTrigger) {
                     app,
                     active,
                     None,
-                    DocumentPayload::failed(generation, DocumentError::raw(err), None),
+                    DocumentPayload::uncompiled(generation, None),
                 );
             }
             return;
@@ -539,7 +538,7 @@ fn push_changed(app: &AppHandle, generation: u64, trigger: ChangeTrigger) {
                 app,
                 active,
                 None,
-                DocumentPayload::failed(generation, err, Some(content)),
+                DocumentPayload::uncompiled(generation, Some(content)),
             );
         }
     }
@@ -587,17 +586,16 @@ pub fn refresh_language(app: &AppHandle) {
                     let _ = app.emit(EVENT, DocumentPayload::ready(generation, doc, content));
                 }
                 Err(err) => {
+                    error!("failed to refresh document {}: {err}", path.display());
                     active.last_synced = None;
-                    let _ = app.emit(
-                        EVENT,
-                        DocumentPayload::failed(generation, err, Some(content)),
-                    );
+                    let _ = app.emit(EVENT, DocumentPayload::uncompiled(generation, Some(content)));
                 }
             }
         }
         Err(err) => {
+            error!("failed to read document on language refresh: {err}");
             active.last_synced = None;
-            let _ = app.emit(EVENT, DocumentPayload::failed(generation, err, None));
+            let _ = app.emit(EVENT, DocumentPayload::uncompiled(generation, None));
         }
     }
 }
@@ -681,7 +679,7 @@ pub fn bind_document(
         error!("failed to read document {}: {err}", target.path.display());
         DocumentError::raw(err)
     })?;
-    // 语法/脚本错误不算绑定失败：正常进入展示页，错误原样带给前端
+    // 语法/脚本错误不算绑定失败：仍进入工作台，编译诊断由编辑器通道单独获取
     let (scripts, parsed) = parse(&app, &content, &target.parent, &crate::current_lang(&app));
     let initial_scripts = scripts.unwrap_or_default();
     for dir in desired_watch_dirs(&target, &initial_scripts) {
@@ -728,9 +726,39 @@ pub fn bind_document(
         Ok(doc) => DocumentPayload::ready(generation, doc, content),
         Err(err) => {
             error!("failed to parse document {path}: {err}");
-            DocumentPayload::failed(generation, err, Some(content))
+            DocumentPayload::uncompiled(generation, Some(content))
         }
     })
+}
+
+/// 编辑器实时编译诊断入口：仅在内存中编译并返回单条诊断，不写盘、不改变文档状态。
+#[tauri::command]
+pub fn check_document(
+    app: AppHandle,
+    state: State<'_, Mutex<DocumentState>>,
+    content: String,
+) -> Option<CompileDiagnostic> {
+    let parent = {
+        let st = state.lock().unwrap_or_else(|p| p.into_inner());
+        st.active.as_ref()?.target.parent.clone()
+    };
+    let gregorian = match resolve_gregorian(&app) {
+        Ok(path) => path,
+        Err(err) => {
+            error!("failed to resolve gregorian script: {err}");
+            return None;
+        }
+    };
+    match compiler::compile_with_scripts(&content, &parent, &gregorian, &crate::current_lang(&app))
+        .1
+    {
+        Ok(_) => None,
+        Err(DocumentError::Validation { error, span }) => Some(CompileDiagnostic { error, span }),
+        Err(DocumentError::Raw { message }) => {
+            error!("check_document failed: {message}");
+            None
+        }
+    }
 }
 
 #[tauri::command]
@@ -739,23 +767,18 @@ pub fn save_document(
     state: State<'_, Mutex<DocumentState>>,
     content: String,
 ) -> Result<DocumentPayload, DocumentError> {
-    // 全程持锁：绑定路径在保存期间不能变，watcher 线程最多等这次校验和写盘
+    // 全程持锁：绑定路径在保存期间不能变，watcher 线程最多等这次写盘和编译
     let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
     let active = st
         .active
         .as_mut()
-        .ok_or(DocumentError::validation(ValidationError::DocumentNotBound))?;
+        .ok_or_else(|| DocumentError::raw("no document is bound"))?;
     let path = active.target.path.clone();
     let parent = active.target.parent.clone();
-    // 非法 .weft / 历法错误不落盘；目录取自当前绑定，保存不改路径
-    let (scripts, parsed) = parse(&app, &content, &parent, &crate::current_lang(&app));
-    let doc = parsed.inspect_err(|err| {
-        error!("failed to validate document before saving: {err}");
-    })?;
-    // 原子写：先写临时文件再 rename，外部 watcher 不会读到半截内容
+    // 原子写：允许带编译错误落盘（与常规代码编辑器一致），外部 watcher 不会读到半截内容
     let name = path
         .file_name()
-        .ok_or(DocumentError::validation(ValidationError::InvalidPath))?;
+        .ok_or_else(|| DocumentError::raw("invalid path"))?;
     let tmp = path.with_file_name(format!(".{}.weft-tmp", name.to_string_lossy()));
     fs::write(&tmp, &content).map_err(|err| {
         error!(
@@ -769,13 +792,19 @@ pub fn save_document(
         let _ = fs::remove_file(&tmp);
         return Err(DocumentError::raw(err));
     }
-    // 写成功后更新已同步快照与序号，同时同步新的脚本依赖监听目录，并将新解析结果直接返回前端
+    let (scripts, parsed) = parse(&app, &content, &parent, &crate::current_lang(&app));
     active.seq += 1;
     active.last_synced = Some(content.clone());
     if let Some(scripts) = scripts {
         active.sync_scripts(scripts);
     }
-    Ok(DocumentPayload::ready(active.generation, doc, content))
+    Ok(match parsed {
+        Ok(doc) => DocumentPayload::ready(active.generation, doc, content),
+        Err(err) => {
+            error!("saved document has compile errors {}: {err}", path.display());
+            DocumentPayload::uncompiled(active.generation, Some(content))
+        }
+    })
 }
 
 #[tauri::command]

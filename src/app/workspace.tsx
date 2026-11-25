@@ -39,7 +39,6 @@ export function Workspace({
   hasExternalChange,
   lang,
   flash,
-  activeError,
   onDraftChange,
   onSave,
   onReloadFromDisk,
@@ -53,7 +52,6 @@ export function Workspace({
   hasExternalChange: boolean;
   lang: Lang;
   flash: boolean;
-  activeError: unknown;
   onDraftChange: (next: string) => void;
   onSave: () => Promise<boolean>;
   onReloadFromDisk: () => void;
@@ -217,10 +215,8 @@ export function Workspace({
         <span className="statusbar-path" title={path}>
           {path}
         </span>
-        <span
-          className={`statusbar-state${activeError ? " has-error" : dirty ? " is-dirty" : ""}`}
-        >
-          {activeError ? t.fileError : dirty ? t.unsaved : t.fileWatching}
+        <span className={`statusbar-state${dirty ? " is-dirty" : ""}`}>
+          {dirty ? t.unsaved : t.fileWatching}
         </span>
         <Button
           variant="ghost"

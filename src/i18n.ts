@@ -1,19 +1,15 @@
-import type { SourceSpan, ValidationError } from "./generated/validation-error";
+import type {
+  CompileDiagnostic,
+  ValidationError,
+} from "./generated/validation-error";
 
-export type { SourceSpan };
+export type { CompileDiagnostic };
 export type Lang = "zh" | "en";
-
-export type DocumentError =
-  | { type: "validation"; error: ValidationError; span?: SourceSpan }
-  | { type: "raw"; message: string };
 
 type ValidationCode = ValidationError["code"];
 
 const validationMessages = {
   zh: {
-    file_deleted: "文件已删除或被移走",
-    document_not_bound: "尚未绑定文档",
-    invalid_path: "无效路径",
     syntax_error: "语法错误：{source}",
     missing_story: "缺少必填的 story 块",
     duplicate_story: "重复声明了 story 块",
@@ -68,9 +64,6 @@ const validationMessages = {
       "历法 `{calendar}` 的 to_tick(from_tick(tick)) 未能还原同一刻度",
   },
   en: {
-    file_deleted: "File deleted or moved",
-    document_not_bound: "No document is bound",
-    invalid_path: "Invalid path",
     syntax_error: "Syntax error: {source}",
     missing_story: "Missing required story block",
     duplicate_story: "Duplicate story block",
@@ -137,10 +130,9 @@ const validationMessages = {
   },
 } satisfies Record<Lang, Record<ValidationCode, string>>;
 
-function formatValidationError(
+export function formatValidationError(
   error: ValidationError,
   lang: Lang,
-  span?: SourceSpan,
 ): string {
   const code = error.code;
   const messages: Record<string, string> = validationMessages[lang];
@@ -149,27 +141,10 @@ function formatValidationError(
     string,
     string
   >;
-  const message = template.replace(
+  return template.replace(
     /\{(\w+)\}/g,
     (_, key: string) => params[key] ?? `{${key}}`,
   );
-  if (span) {
-    return lang === "zh"
-      ? `第 ${span.line} 行第 ${span.column} 列：${message}`
-      : `Line ${span.line}, col ${span.column}: ${message}`;
-  }
-  return message;
-}
-
-export function formatDocumentError(error: unknown, lang: Lang): string {
-  if (error && typeof error === "object" && "type" in error) {
-    const e = error as Partial<DocumentError>;
-    if (e.type === "raw" && typeof e.message === "string") return e.message;
-    if (e.type === "validation" && e.error) {
-      return formatValidationError(e.error, lang, e.span);
-    }
-  }
-  return String(error);
 }
 
 // 文案多到难维护时再换 i18next，字典结构可以原样搬过去
@@ -183,7 +158,6 @@ export const strings = {
     recentEmpty: "从第一个故事开始。打开的文件会留在这里。",
     fileHint: "支持 .weft 文件，保存修改后视图自动更新。",
     fileWatching: "正在跟随文件更新",
-    fileError: "文件需要检查",
     entityEmpty: "暂无实体，请在故事文件中添加实体。",
     storyEmpty: "暂无故事信息，请在编辑器中检查并修复错误。",
     loading: "正在载入实体…",
@@ -223,7 +197,6 @@ export const strings = {
     recentEmpty: "Start with your first story. Opened files will appear here.",
     fileHint: "Supports .weft files. Views update when you save changes.",
     fileWatching: "Following file changes",
-    fileError: "File needs attention",
     entityEmpty: "No entities yet. Add entities to your story file.",
     storyEmpty: "No story data yet. Check the editor for errors.",
     loading: "Loading entities…",

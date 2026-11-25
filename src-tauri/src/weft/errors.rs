@@ -4,25 +4,30 @@ use serde::Serialize;
 use thiserror::Error;
 use ts_rs::TS;
 
-/// 源码定位信息（字节偏移与 1-based 行列号），用于编辑器高亮与报错提示。
+/// 源码定位信息（UTF-16 偏移对齐 CodeMirror；1-based 行列号仅用于后端日志）。
 #[derive(Clone, Debug, Serialize, TS)]
 pub struct SourceSpan {
     pub start: usize,
     pub end: usize,
+    #[serde(skip)]
     pub line: usize,
+    #[serde(skip)]
     pub column: usize,
+}
+
+/// 交付给编辑器的单条编译诊断。
+#[derive(Clone, Debug, Serialize, TS)]
+pub struct CompileDiagnostic {
+    pub error: ValidationError,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub span: Option<SourceSpan>,
 }
 
 // 校验错误的唯一代码定义。Serde 和 ts-rs 共用这些变体名与参数字段。
 #[derive(Clone, Debug, Error, Serialize, TS)]
 #[serde(tag = "code", content = "params", rename_all = "snake_case")]
 pub enum ValidationError {
-    #[error("file deleted or moved")]
-    FileDeleted,
-    #[error("no document is bound")]
-    DocumentNotBound,
-    #[error("invalid path")]
-    InvalidPath,
     #[error("syntax error: {details}")]
     SyntaxError {
         #[serde(rename = "source")]
@@ -176,10 +181,6 @@ fn format_validation(error: &ValidationError, span: Option<&SourceSpan>) -> Stri
 }
 
 impl DocumentError {
-    pub(crate) fn validation(error: ValidationError) -> Self {
-        Self::Validation { error, span: None }
-    }
-
     pub(crate) fn validation_at(error: ValidationError, span: SourceSpan) -> Self {
         Self::Validation {
             error,
@@ -206,6 +207,6 @@ impl DocumentError {
 
 impl From<ValidationError> for DocumentError {
     fn from(error: ValidationError) -> Self {
-        Self::validation(error)
+        Self::Validation { error, span: None }
     }
 }

@@ -16,26 +16,29 @@ use crate::weft::errors::{DocumentError, SourceSpan, ValidationError};
 pub type Span = SimpleSpan;
 pub type Spanned<T> = (T, Span);
 
-/// 把字节偏移转成 1-based `(line, column)`，column 按 Unicode 标量值计数。
-pub(crate) fn line_col(src: &str, offset: usize) -> (usize, usize) {
+fn clamp_char_boundary(src: &str, offset: usize) -> usize {
     let mut safe = offset.min(src.len());
     while safe > 0 && !src.is_char_boundary(safe) {
         safe -= 1;
     }
-    let prefix = &src[..safe];
+    safe
+}
+
+/// 把 chumsky 字节区间转成 UTF-16 偏移（对齐 CodeMirror）与 1-based `(line, column)`。
+pub(crate) fn source_span(src: &str, span: Span) -> SourceSpan {
+    let start_byte = clamp_char_boundary(src, span.start);
+    let end_byte = clamp_char_boundary(src, span.end.max(start_byte));
+    let prefix = &src[..start_byte];
+    let start = prefix.encode_utf16().count();
+    let end = start + src[start_byte..end_byte].encode_utf16().count();
     let line = prefix.bytes().filter(|&b| b == b'\n').count() + 1;
-    let col = match prefix.rfind('\n') {
+    let column = match prefix.rfind('\n') {
         Some(pos) => prefix[pos + 1..].chars().count() + 1,
         None => prefix.chars().count() + 1,
     };
-    (line, col)
-}
-
-pub(crate) fn source_span(src: &str, span: Span) -> SourceSpan {
-    let (line, column) = line_col(src, span.start);
     SourceSpan {
-        start: span.start,
-        end: span.end,
+        start,
+        end,
         line,
         column,
     }

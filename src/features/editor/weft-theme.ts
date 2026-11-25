@@ -140,6 +140,24 @@ export const weftEditorTheme = EditorView.theme({
     lineHeight: "1.5",
     maxWidth: "280px",
   },
+  ".cm-lintRange-error": {
+    backgroundImage: "none",
+    textDecoration: "underline wavy var(--destructive)",
+    textUnderlineOffset: "2px",
+  },
+  ".cm-tooltip-lint": {
+    backgroundColor: "var(--popover)",
+    color: "var(--popover-foreground)",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius)",
+    fontSize: "12px",
+    lineHeight: "1.5",
+    maxWidth: "360px",
+  },
+  ".cm-diagnostic-error": {
+    borderLeft: "3px solid var(--destructive)",
+    padding: "6px 10px",
+  },
 });
 
 const weftHighlight = HighlightStyle.define([

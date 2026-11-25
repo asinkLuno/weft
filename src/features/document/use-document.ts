@@ -2,14 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { DocumentError } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 
 type DocumentPayload = {
   generation: number;
   doc: WeftDoc | null;
   content: string | null;
-  error: DocumentError | null;
 };
 
 export type DraftStore = {
@@ -40,15 +38,13 @@ function createDraftStore() {
 const WEFT_FILTER = { name: "Weft", extensions: ["weft"] };
 
 // 所有文档命令与事件集中在这里；绑定、保存和解绑按边界校验会话代数。
-// 高频编辑文本存放在外部 DraftStore 中，仅由编辑器通过 useSyncExternalStore 订阅，
-// 避免每次敲键触发 App / Workspace / 非编辑面板重渲染。
+// 编译错误不经由这里弹窗，改由编辑器内的 lint 通道直接向后端查询并标红。
 export function useDocument() {
   const [path, setPath] = useState<string | null>(null);
   const [doc, setDoc] = useState<WeftDoc | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [hasExternalChange, setHasExternalChange] = useState(false);
-  const [activeError, setActiveError] = useState<unknown>(null);
   const [flash, setFlash] = useState(false);
   const draftStoreRef = useRef<ReturnType<typeof createDraftStore> | null>(
     null,
@@ -131,9 +127,7 @@ export function useDocument() {
             }
             setDoc(payload.doc);
             syncExternalContent(payload.content);
-            setActiveError(payload.error);
-            if (payload.error) return;
-            triggerFlash();
+            if (payload.doc) triggerFlash();
           },
         );
         if (token !== sessionToken.current) {
@@ -147,7 +141,7 @@ export function useDocument() {
       void setup.catch((error: unknown) => {
         if (token === sessionToken.current) {
           listenerReady.current = null;
-          setActiveError(error);
+          console.error("document listener failed:", error);
         }
       });
       return setup;
@@ -210,12 +204,11 @@ export function useDocument() {
       setDoc(effective.doc);
       setDirty(false);
       setHasExternalChange(false);
-      setActiveError(effective.error);
       clearTimeout(flashTimer.current);
       setFlash(false);
       return "bound";
     } catch (error) {
-      if (mounted.current) setActiveError(error);
+      console.error("bind_document failed:", error);
       return "failed";
     } finally {
       pendingChange.current = null;
@@ -259,14 +252,11 @@ export function useDocument() {
       setDoc(payload.doc);
       savedContentRef.current = payload.content;
       syncDirty();
-      setActiveError(null);
       setHasExternalChange(false);
-      triggerFlash();
+      if (payload.doc) triggerFlash();
       return true;
     } catch (error) {
-      if (mounted.current && boundGeneration.current === generation) {
-        setActiveError(error);
-      }
+      console.error("save_document failed:", error);
       return false;
     } finally {
       savingRef.current = false;
@@ -286,7 +276,7 @@ export function useDocument() {
       const selected = await open({ multiple: false, filters: [WEFT_FILTER] });
       return typeof selected === "string" ? selected : null;
     } catch (error) {
-      if (mounted.current) setActiveError(error);
+      console.error("openFile failed:", error);
       return null;
     }
   }
@@ -307,11 +297,10 @@ export function useDocument() {
       setDirty(false);
       setSaving(false);
       setHasExternalChange(false);
-      setActiveError(null);
       clearTimeout(flashTimer.current);
       setFlash(false);
     } catch (error) {
-      if (mounted.current) setActiveError(error);
+      console.error("unbind_document failed:", error);
     } finally {
       busy.current = false;
     }
@@ -324,7 +313,6 @@ export function useDocument() {
     dirty,
     saving,
     hasExternalChange,
-    activeError,
     flash,
     bind,
     updateDraft,

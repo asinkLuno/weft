@@ -297,7 +297,9 @@ fn lower_story(
                 author = expect_opt_string(src, section, &key, attr.value)?;
             }
             "date_mode" => {
-                date_mode = expect_opt_string(src, section, &key, attr.value)?;
+                let val_span = attr.value.1;
+                date_mode = expect_opt_string(src, section, &key, attr.value)?
+                    .map(|path| (path, source_span(src, val_span)));
             }
             "calculable_props" => {
                 calculable_props = expect_string_map(src, section, &key, attr.value)?;
@@ -314,13 +316,14 @@ fn lower_story(
         }
     }
 
+    let block_span = source_span(src, block_span);
     let title = title.ok_or_else(|| {
         DocumentError::validation_at(
             ValidationError::MissingField {
                 section: section.to_owned(),
                 field: "title".to_owned(),
             },
-            source_span(src, block_span),
+            block_span.clone(),
         )
     })?;
 
@@ -330,6 +333,7 @@ fn lower_story(
         author,
         date_mode,
         calculable_props,
+        block_span,
     })
 }
 
@@ -493,7 +497,7 @@ fn expect_string_map(
     section: &str,
     field: &str,
     expr: Spanned<Expr>,
-) -> Result<HashMap<String, String>, DocumentError> {
+) -> Result<HashMap<String, (String, SourceSpan)>, DocumentError> {
     let Expr::Object(entries) = expr.0 else {
         return Err(DocumentError::validation_at(
             ValidationError::InvalidField {
@@ -506,8 +510,9 @@ fn expect_string_map(
     };
     let mut map = HashMap::with_capacity(entries.len());
     for (entry, _) in entries {
+        let val_span = source_span(src, entry.value.1);
         let value = expect_string(src, section, &entry.key.0, entry.value)?;
-        map.insert(entry.key.0, value);
+        map.insert(entry.key.0, (value, val_span));
     }
     Ok(map)
 }

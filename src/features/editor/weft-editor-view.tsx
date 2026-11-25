@@ -1,12 +1,32 @@
 import { autocompletion } from "@codemirror/autocomplete";
+import {
+  type Diagnostic,
+  linter,
+  lintGutter,
+  setDiagnostics,
+} from "@codemirror/lint";
 import { EditorView } from "@codemirror/view";
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import CodeMirror from "@uiw/react-codemirror";
 import { RefreshCw, RotateCcw, Save } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { DraftStore } from "@/features/document/use-document";
-import { type Lang, strings } from "@/i18n";
+import {
+  type CompileDiagnostic,
+  formatValidationError,
+  type Lang,
+  strings,
+} from "@/i18n";
 import { createWeftCompletionSource } from "./weft-completion";
 import { weftLanguage } from "./weft-language";
 import { weftThemeExtension } from "./weft-theme";
@@ -29,6 +49,42 @@ const BASIC_SETUP = {
 function fileNameOf(filePath: string): string {
   const parts = filePath.split(PATH_SEP_RE);
   return parts[parts.length - 1] || filePath;
+}
+
+function toCodeMirrorDiagnostic(
+  diag: CompileDiagnostic,
+  view: EditorView,
+  lang: Lang,
+): Diagnostic {
+  const docLen = view.state.doc.length;
+  const message = formatValidationError(diag.error, lang);
+  if (diag.span) {
+    const from = Math.min(diag.span.start, docLen);
+    let to = Math.min(docLen, Math.max(from, diag.span.end));
+    if (from === to && from < docLen) to = from + 1;
+    return { from, to, severity: "error", message };
+  }
+  return {
+    from: 0,
+    to: docLen > 0 ? view.state.doc.line(1).to : 0,
+    severity: "error",
+    message,
+  };
+}
+
+async function checkDocument(
+  view: EditorView,
+  lang: Lang,
+): Promise<Diagnostic[]> {
+  try {
+    const raw = await invoke<CompileDiagnostic | null>("check_document", {
+      content: view.state.doc.toString(),
+    });
+    return raw ? [toCodeMirrorDiagnostic(raw, view, lang)] : [];
+  } catch (error) {
+    console.error("check_document failed:", error);
+    return [];
+  }
 }
 
 function WeftEditorViewInner({
@@ -58,10 +114,51 @@ function WeftEditorViewInner({
   );
   const t = strings[lang];
   const langRef = useRef(lang);
+  const viewRef = useRef<EditorView | null>(null);
+  const refreshSeqRef = useRef(0);
+
+  const refreshDiagnostics = useCallback(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const doc = view.state.doc;
+    const seq = ++refreshSeqRef.current;
+    void checkDocument(view, langRef.current).then((diagnostics) => {
+      if (
+        viewRef.current === view &&
+        refreshSeqRef.current === seq &&
+        view.state.doc === doc
+      ) {
+        view.dispatch(setDiagnostics(view.state, diagnostics));
+      }
+    });
+  }, []);
 
   useEffect(() => {
+    if (langRef.current === lang) return;
     langRef.current = lang;
-  }, [lang]);
+    refreshDiagnostics();
+  }, [lang, refreshDiagnostics]);
+
+  // 外部文件或依赖脚本变更时刷新诊断（.weft 文本未变时 CodeMirror linter 不会自动重跑）
+  useEffect(() => {
+    let active = true;
+    let unlisten: UnlistenFn | undefined;
+    void listen("document-changed", () => {
+      if (active) refreshDiagnostics();
+    })
+      .then((fn) => {
+        if (active) unlisten = fn;
+        else fn();
+      })
+      .catch((error: unknown) => {
+        console.error("editor lint listener failed:", error);
+      });
+    return () => {
+      active = false;
+      viewRef.current = null;
+      unlisten?.();
+    };
+  }, [refreshDiagnostics]);
 
   const extensions = useMemo(
     () => [
@@ -72,6 +169,8 @@ function WeftEditorViewInner({
         closeOnBlur: true,
         maxRenderedOptions: 30,
       }),
+      lintGutter(),
+      linter((view) => checkDocument(view, langRef.current), { delay: 250 }),
       EditorView.lineWrapping,
       ...weftThemeExtension,
     ],
@@ -134,6 +233,9 @@ function WeftEditorViewInner({
           basicSetup={BASIC_SETUP}
           extensions={extensions}
           onChange={onChange}
+          onCreateEditor={(view) => {
+            viewRef.current = view;
+          }}
         />
       </div>
     </div>

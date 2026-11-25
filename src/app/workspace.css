@@ -57,14 +57,6 @@
   background: var(--riso-red);
 }
 
-.statusbar-state.has-error {
-  color: var(--destructive);
-}
-
-.statusbar-state.has-error::before {
-  background: currentColor;
-}
-
 @media (max-width: 760px) {
   .statusbar-state {
     display: none;
