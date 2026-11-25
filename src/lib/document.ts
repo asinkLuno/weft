@@ -8,7 +8,7 @@ export type WeftDoc = {
     title?: string;
     description?: string;
     author?: string;
-    date: { name: string; description?: string };
+    date: { id: string; name: string; description?: string };
   };
   // 所选历法的时间分量数（后端解析时填充）
   calendar_components?: number;

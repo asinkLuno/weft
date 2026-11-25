@@ -1,10 +1,10 @@
 use std::{collections::HashMap, path::Path};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::calculable_prop::CalculablePropRuntime;
-use crate::calendar::Calendar;
+use crate::calendar::{Calendar, CalendarMeta};
+use crate::plugin_loader;
 use crate::weft::FromRaw;
 use crate::weft::errors::{DocumentError, ValidationError};
 
@@ -16,7 +16,7 @@ pub(crate) struct RawStory {
     pub author: Option<String>,
     pub date_mode: Option<String>,
     #[serde(default)]
-    pub calculatable_props: HashMap<String, String>,
+    pub calculable_props: HashMap<String, String>,
 }
 
 /// 故事构建所需的路径和语言环境。
@@ -32,7 +32,7 @@ pub struct Story {
     pub title: String,
     pub description: Option<String>,
     pub author: Option<String>,
-    pub date: Value,
+    pub date: CalendarMeta,
     #[serde(skip)]
     pub calendar: Calendar,
     #[serde(skip)]
@@ -57,16 +57,16 @@ impl FromRaw<StoryContext<'_>> for Story {
             Some(source) => base.join(source),
             None => gregorian.to_path_buf(),
         };
-        if path.extension().is_none_or(|extension| extension != "rn") || !path.is_file() {
+        if !plugin_loader::is_rune_script(&path) {
             return Err(ValidationError::InvalidCalendarPath {
                 path: path.display().to_string(),
             }
             .into());
         }
         let calendar = Calendar::new(&path, lang)?;
-        let date = calendar.serialize(lang)?;
+        let date = calendar.meta().clone();
         let calculable_prop_runtime =
-            CalculablePropRuntime::load(&raw.calculatable_props, base, date_mode, lang)?;
+            CalculablePropRuntime::load(&raw.calculable_props, base, &calendar, lang)?;
         Ok(Self {
             title: raw.title,
             description: raw.description,

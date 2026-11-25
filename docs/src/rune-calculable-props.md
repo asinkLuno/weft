@@ -4,12 +4,12 @@ Calculable prop 用一段 Rune 脚本从实体数据算出一个属性值：`cal
 
 ## 注册与使用
 
-在 `story.calculatable_props` 中用 `ID: 路径` 注册脚本。路径相对于故事 YAML 所在目录，实体通过 `calculable_props` 引用注册 ID：
+在 `story.calculable_props` 中用 `ID: 路径` 注册脚本。路径相对于故事 YAML 所在目录，实体通过 `calculable_props` 引用注册 ID：
 
 ```yaml
 story:
   title: 示例
-  calculatable_props:
+  calculable_props:
     age_group: age_group.rn
     constellation: constellation.rn
 
@@ -19,7 +19,7 @@ entity:
     calculable_props: [age_group, constellation]
 ```
 
-所有属性都必须显式注册，包括 `constellation`。加载时读取、编译并检查接口；构建实体时逐个执行被引用的脚本，把返回值写进 `extra_props`。例如上面的 Alice 最终得到 `extra_props: { constellation: "摩羯座" }`。
+所有属性都必须显式注册，包括 `constellation`。加载时按注册 ID 排序依次校验（必须是已存在的 `.rn` 文件）、读取、编译并检查接口；构建实体时按实体 ID 排序逐个执行被引用的脚本，把返回值写进 `extra_props`。例如上面的 Alice 最终得到 `extra_props: { constellation: "摩羯座" }`。
 
 ## 必须实现的公开函数
 
@@ -34,9 +34,11 @@ Rune 中未被引用的私有函数不会进入编译产物，因此接口函数
 ```rune
 pub fn calculable_prop(ctx) {
     let zh = ctx.language == "zh";
-    let time = ctx.entity.base_time;
-    if time == () { return (); }
-    if time[0] >= 2000 {
+    let bt = match ctx.entity.base_time {
+        () => return (),
+        bt => bt,
+    };
+    if bt.values[0] >= 2000 {
         if zh { "新纪元" } else { "New Era" }
     } else {
         if zh { "旧纪元" } else { "Old Era" }
@@ -51,27 +53,33 @@ pub fn calculable_prop(ctx) {
 | 字段 | 内容 |
 | --- | --- |
 | `api` | 数字 `1` |
-| `date_mode` | 自定义历法脚本路径；使用内置公历时为空值 |
 | `language` | 应用设置语言，`zh` 或 `en` |
+| `calendar.id` | 当前历法 `meta(ctx)` 声明的稳定标识（内置公历为 `"gregorian"`） |
+| `calendar.components` | 当前历法的时间分量数 |
+| `calendar.minimums` | 当前历法各分量的起始值数组 |
 | `entity.id` | 实体 ID |
-| `entity.base_time` | 按当前历法归一化后的整数数组；未填写时为空值 |
-| `entity.description` | 实体描述；未填写时为空值 |
-| `entity.belong_to` | 实体输入的归属 ID 数组 |
+| `entity.base_time` | 已解析基准时间对象 `#{ values, precision, tick }`；未填写时为空值 `()` |
+| `entity.base_time.values` | 按当前历法补齐并归一化后的整数数组 |
+| `entity.base_time.precision` | 基准时间的有效分量数（如只写年份 `1881` 时为 `1`，写全年月日为 `3`） |
+| `entity.base_time.tick` | 基准时间对应的 64 位整数刻度 |
+| `entity.description` | 实体描述；未填写时为空值 `()` |
+| `entity.belong_to` | 实体直接上级归属 ID 数组（已排序去重） |
+| `entity.extra_props` | 实体原始自定义输入字段的只读快照（不受同实体其他计算属性执行顺序影响） |
 
 计算可以读取 `ctx.language` 生成本地化的错误信息并调用 `panic(message)` 报错，消息会出现在文档错误里。结果只在内存中生成，不会写回 YAML；切换应用语言后会重新解析文档，用新语言重新计算。只有被实体引用的脚本才会执行计算。脚本执行受指令预算限制，超限中断并报错。
 
-数据不齐是常态，别把「算不出来」做成报错。没写 `base_time` 的实体没有星座，脚本应返回 `()` 让属性不写入，而不是 `panic`——否则同一个属性就没法挂到整批实体上，只能逐个筛查谁写了日期。反过来，历法语义变了（自定义历法下 `bt[1]` 不再是公历月份）属于脚本前提被破坏，此时必须报错：返回一个错的值比报错更糟。
+数据不齐是常态，别把「算不出来」做成报错。没写 `base_time` 或精度不足（例如只写了出生年份 `bt.precision < 3`）的实体没有星座，脚本应返回 `()` 让属性不写入，而不是 `panic`——否则同一个属性就没法挂到整批实体上，只能逐个筛查谁写了日期。反过来，历法语义变了（如 `ctx.calendar.id != "gregorian"`）属于脚本前提被破坏，此时必须报错：返回一个错的值比报错更糟。
 
-两个容易踩的坑：
+注意两点 Rune 语法细节：
 
-- **归一化会补齐缺失分量**。`base_time: 1980` 经归一化后是 `[1980, 1, 1, 0, 0, 0]`，与「真的一月一日出生」无法区分。所以脚本里写 `bt.len() < 3` 或校验 `bt[1]` / `bt[2]` 的范围都没用：长度恒等于历法分量数，月日恒合法。要算星座就必须在 YAML 里写全 年 月 日。
-- **`if` 里调 `panic` 会丢掉消息**。`panic(message)` 返回 unit，写在 `if` 分支里会被推断成该分支的值，于是整个函数变成「有时返回 unit、有时返回 String」，实际报的是 `Expected type String but found Tuple`，本地化消息根本看不到。把 panic 放进 `match` 的分支才正常：
+- 判断可能为空的对象字段（如 `ctx.entity.base_time`）请用 `match ... { () => return (), v => v }`，不要写 `bt == ()`（Rune 中 `Object` 与 `()` 做 `==` 比较会报类型不匹配）。
+- 把 `panic(message)` 写在 `if` 分支里会被推断成 unit 类型从而丢失消息，放在 `match` 分支中才会把消息完整抛给宿主：
 
 ```rune
-fn require_gregorian(date_mode) {
-    match date_mode {
-        () => (),
-        path => panic(path),
+fn require_gregorian(calendar_id) {
+    match calendar_id {
+        "gregorian" => (),
+        other => panic(`requires gregorian, got ${other}`),
     }
 }
 ```

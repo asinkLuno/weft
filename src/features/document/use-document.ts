@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { DocumentError } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 
 type DocumentPayload = {
+  generation: number;
   doc: WeftDoc | null;
   content: string | null;
   error: DocumentError | null;
@@ -19,46 +20,85 @@ export function useDocument() {
   const [doc, setDoc] = useState<WeftDoc | null>(null);
   const [activeError, setActiveError] = useState<unknown>(null);
   const [flash, setFlash] = useState(false);
-  const boundPath = useRef<string | null>(null);
+  const boundGeneration = useRef<number | null>(null);
   const busy = useRef(false);
   const pendingChange = useRef<DocumentPayload | null>(null);
   const mounted = useRef(false);
-  const listener = useRef<Promise<UnlistenFn> | null>(null);
+  const sessionToken = useRef(0);
+  const unlistenRef = useRef<UnlistenFn | null>(null);
+  const listenerReady = useRef<Promise<void> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
 
+  const startListener = useCallback((resetBackend: boolean): Promise<void> => {
+    const token = ++sessionToken.current;
+    const prevUnlisten = unlistenRef.current;
+    unlistenRef.current = null;
+    prevUnlisten?.();
+
+    const setup = (async () => {
+      if (resetBackend) {
+        // 清理页面刷新/HMR 前后端可能残留的旧 watcher
+        await invoke("unbind_document").catch(() => {});
+      }
+      if (token !== sessionToken.current) return;
+      const unlisten = await listen<DocumentPayload>(
+        "document-changed",
+        ({ payload }) => {
+          if (token !== sessionToken.current) return;
+          if (busy.current) {
+            pendingChange.current = payload;
+            return;
+          }
+          if (
+            boundGeneration.current === null ||
+            payload.generation !== boundGeneration.current
+          ) {
+            return;
+          }
+          setDoc(payload.doc);
+          setActiveError(payload.error);
+          if (payload.error) return;
+          setFlash(true);
+          clearTimeout(flashTimer.current);
+          flashTimer.current = setTimeout(() => setFlash(false), 400);
+        },
+      );
+      if (token !== sessionToken.current) {
+        unlisten();
+        return;
+      }
+      unlistenRef.current = unlisten;
+    })();
+
+    listenerReady.current = setup;
+    void setup.catch((error: unknown) => {
+      if (token === sessionToken.current) {
+        listenerReady.current = null;
+        setActiveError(error);
+      }
+    });
+    return setup;
+  }, []);
+
   useEffect(() => {
     mounted.current = true;
-    let cancelled = false;
-    const subscription = listen<DocumentPayload>(
-      "document-changed",
-      ({ payload }) => {
-        if (cancelled) return;
-        if (busy.current) {
-          pendingChange.current = payload;
-          return;
-        }
-        if (!boundPath.current) return;
-        setDoc(payload.doc);
-        setActiveError(payload.error);
-        if (payload.error) return;
-        setFlash(true);
-        clearTimeout(flashTimer.current);
-        flashTimer.current = setTimeout(() => setFlash(false), 400);
-      },
-    );
-    listener.current = subscription;
-    void subscription.catch((error: unknown) => {
-      if (!cancelled) setActiveError(error);
-    });
+    void startListener(true);
     return () => {
-      cancelled = true;
       mounted.current = false;
+      sessionToken.current += 1;
+      listenerReady.current = null;
       clearTimeout(flashTimer.current);
-      void subscription.then((unlisten) => unlisten()).catch(console.error);
+      const unlisten = unlistenRef.current;
+      unlistenRef.current = null;
+      unlisten?.();
+      if (boundGeneration.current !== null || busy.current) {
+        boundGeneration.current = null;
+        void invoke("unbind_document").catch(() => {});
+      }
     };
-  }, []);
+  }, [startListener]);
 
   function takePendingChange(): DocumentPayload | null {
     const payload = pendingChange.current;
@@ -73,18 +113,26 @@ export function useDocument() {
     busy.current = true;
     pendingChange.current = null;
     try {
-      // 先完成订阅，再绑定文件，避免初次打开时漏掉 watcher 更新。
-      await listener.current;
+      // 先完成订阅（若首次订阅失败则自动重试），再绑定文件，避免初次打开时漏掉 watcher 更新。
+      const ready = listenerReady.current ?? startListener(false);
+      await ready;
       const payload = await invoke<DocumentPayload>("bind_document", {
         path: nextPath,
       });
-      if (!mounted.current) return "ignored";
-      boundPath.current = nextPath;
-      setPath(nextPath);
-      // 绑定期间也可能收到文件变更，优先采用较新的有效快照。
+      if (!mounted.current) {
+        void invoke("unbind_document").catch(() => {});
+        return "ignored";
+      }
+      // 绑定期间若收到同一会话代数的新变更，优先采用较新快照；旧文档迟到事件按代数丢弃。
       const changed = takePendingChange();
-      setDoc(changed ? changed.doc : payload.doc);
-      setActiveError(changed ? changed.error : payload.error);
+      const effective =
+        changed && changed.generation === payload.generation
+          ? changed
+          : payload;
+      boundGeneration.current = payload.generation;
+      setPath(nextPath);
+      setDoc(effective.doc);
+      setActiveError(effective.error);
       clearTimeout(flashTimer.current);
       setFlash(false);
       return "bound";
@@ -110,10 +158,11 @@ export function useDocument() {
   async function close() {
     if (busy.current) return;
     busy.current = true;
+    pendingChange.current = null;
     try {
       await invoke("unbind_document");
       if (!mounted.current) return;
-      boundPath.current = null;
+      boundGeneration.current = null;
       setPath(null);
       setDoc(null);
       setActiveError(null);

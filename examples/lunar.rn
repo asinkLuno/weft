@@ -3,9 +3,20 @@
 // 19 年含 235 个月（7 个闰月），平均月长约 29.53 个标准日。
 // 月球没有地球式季节年，这里的“年”是殖民地编年单位。
 // 日期分量：[年, 月, 日, 时, 分, 秒]；第 1 年月 1 日为刻度原点。
-pub fn components() { 6 }
-
-pub fn minimums() { [1, 1, 1, 0, 0, 0] }
+pub fn meta(ctx) {
+    let zh = ctx.language == "zh";
+    #{
+        id: "lunar-settlement",
+        name: if zh { "月面殖民历" } else { "Lunar Settlement Calendar" },
+        description: if zh {
+            "以 24 小时标准日计时，月份对应月面昼夜循环；每 19 年设 7 个闰月。年份是殖民地编年单位，不对应地球季节年。"
+        } else {
+            "Uses 24-hour standard days and months aligned with the lunar day-night cycle, with seven intercalary months every 19 years. Years are a settlement count, not Earth seasonal years."
+        },
+        components: 6,
+        minimums: [1, 1, 1, 0, 0, 0],
+    }
+}
 
 const DAY_SECONDS = 86400;
 const MONTHS_PER_CYCLE = 235;
@@ -102,30 +113,44 @@ pub fn to_tick(values) {
     tick
 }
 
-pub fn serialize(language) {
-    let zh = language == "zh";
-    #{
-        name: if zh { "月面殖民历" } else { "Lunar Settlement Calendar" },
-        description: if zh {
-            "以 24 小时标准日计时，月份对应月面昼夜循环；每 19 年设 7 个闰月。年份是殖民地编年单位，不对应地球季节年。"
-        } else {
-            "Uses 24-hour standard days and months aligned with the lunar day-night cycle, with seven intercalary months every 19 years. Years are a settlement count, not Earth seasonal years."
-        },
-    }
-}
-
-pub fn humanizer(value, precision, language) {
+pub fn humanizer(ctx) {
+    let value = ctx.values;
+    let precision = ctx.precision;
+    let language = ctx.language;
     let year = value[0];
     let month = value[1];
     let day = value[2];
     let hour = value[3];
     let minute = value[4];
     let second = value[5];
+    let hh = if hour < 10 { `0${hour}` } else { `${hour}` };
+    let mm = if minute < 10 { `0${minute}` } else { `${minute}` };
+    let ss = if second < 10 { `0${second}` } else { `${second}` };
     if language == "zh" {
         let month_name = if month == 13 { "闰月" } else { `${month}月` };
-        let stamp = `殖民历${year}年${month_name}${day}日 ${hour}:${minute}:${second}`;
+        let date = if precision <= 1 {
+            `殖民历${year}年`
+        } else if precision == 2 {
+            `殖民历${year}年${month_name}`
+        } else {
+            `殖民历${year}年${month_name}${day}日`
+        };
+        if precision <= 3 && hour == 0 && minute == 0 && second == 0 {
+            return date;
+        }
+        let stamp = `${date} ${hh}:${mm}:${ss}`;
         return stamp;
     }
     let month_name = if month == 13 { "intercalary month" } else { `month ${month}` };
-    `Settlement year ${year}, ${month_name}, day ${day} ${hour}:${minute}:${second}`
+    let date = if precision <= 1 {
+        `Settlement year ${year}`
+    } else if precision == 2 {
+        `Settlement year ${year}, ${month_name}`
+    } else {
+        `Settlement year ${year}, ${month_name}, day ${day}`
+    };
+    if precision <= 3 && hour == 0 && minute == 0 && second == 0 {
+        return date;
+    }
+    `${date} ${hh}:${mm}:${ss}`
 }

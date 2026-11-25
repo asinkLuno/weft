@@ -5,7 +5,7 @@
 story:
   title: 哈利·波特与魔法石
   author: J.K. 罗琳
-  calculatable_props:
+  calculable_props:
     constellation: constellation.rn
   description: >-
     十一岁的哈利·波特进入霍格沃茨魔法学校，

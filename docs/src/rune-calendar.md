@@ -2,7 +2,7 @@
 
 ## 注册与选用
 
-在 `story.date_mode` 中直接填写 Rune 脚本路径，路径相对于故事 YAML 所在目录，无需注册名或顶层 `calendar` 注册表。
+在 `story.date_mode` 中直接填写 Rune 脚本路径，路径相对于故事 YAML 所在目录，无需顶层注册表。
 
 ```yaml
 story:
@@ -14,23 +14,28 @@ story:
 
 ## 必须实现的公开函数
 
-以下是脚本接口；Rune 中未被引用的私有函数不会进入编译产物，因此接口函数必须声明 `pub`。加载时检查 `from_tick`、`to_tick`、`serialize`、`humanizer` 和 `components` 是否以 `pub` 函数定义；参数个数在运行期确定，不匹配会在调用时报错。返回值仍在实际调用时校验。
+Rune 中未被引用的私有函数不会进入编译产物，因此接口函数必须声明 `pub`。加载时检查 `meta`、`from_tick`、`to_tick` 和 `humanizer` 是否以 `pub` 函数定义；参数个数在运行期确定，不匹配会在调用时报错。
 
 | 函数 | 输入 | 返回值 | 用途 |
 | --- | --- | --- | --- |
-| `components()` | 无 | 整数 | 时间分量数，取值 **1 到 64** |
-| `serialize(language)` | 语言代码 | 对象 | Story 页展示信息，如本地化的 `name`、`description` |
-| `from_tick(tick)` | 64 位整数刻度 | 归一化的日期数组 | 将刻度转换为合法日期 |
-| `to_tick(values)` | 整数数组 | 64 位整数 | 把时间转成可比较、可相减的刻度 |
-| `humanizer(values, language)` | 已归一化的日期数组、语言 | 字符串 | 仅格式化日期 |
+| `meta(ctx)` | `#{ api: 1, language }` | 对象 | 返回历法稳定 `id`、本地化 `name` / `description`、分量数 `components`（1..=64）与各分量起始值 `minimums` |
+| `from_tick(tick)` | 64 位整数刻度 | 长度为 `components` 的整数数组 | 将刻度转换为合法归一化日期 |
+| `to_tick(values)` | 长度为 `components` 的整数数组 | 64 位整数 | 把未归一化或已归一化时间转成可比较、可相减的刻度 |
+| `humanizer(ctx)` | `#{ api: 1, values, precision, language }` | 字符串 | 按模糊精度与语言格式化已归一化日期 |
 
-`components()` 在加载时调用一次，宿主据此校验分量数，不执行其余函数来推导长度。用户写的数组可以省略末尾分量，后端会补 `0`；超过该长度会报错。`from_tick` 必须返回恰好 `components` 个整数。宿主在 `calendar.rs` 中统一实现 `normalize(values) = from_tick(to_tick(values))`；脚本无需定义 `normalize`。`to_tick` 必须接受未归一化的日期分量，支持进位和借位。`to_tick` 的数值用于事件排序、起止先后判断和叙事线相对刻度，须保持同一历法内的时间顺序，并处于 64 位整数范围内。
+### `meta(ctx)` 返回字段
 
-公历 `to_tick(date)` 返回日期相对零年一月一日的秒数；全零数组也表示原点。月、日为零时按 1 计算，`normalize` 会输出补齐后的合法日期。日期间隔为 `to_tick(end) - to_tick(start)`，除以 `86400` 得到天数，闰年和跨月由日期转换处理。`humanizer` 不再调用 `normalize`。
+| 字段 | 必填 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| `id` | 是 | 非空字符串 | 稳定的语义标识（如 `"gregorian"`、`"lunar-settlement"`），同时透传给 `story.date.id` 与可计算属性的 `ctx.calendar.id` |
+| `name` | 是 | 非空字符串 | 本地化历法名称，显示在 Story 页 |
+| `description` | 否 | 字符串 | 本地化历法说明，显示在 Story 页 |
+| `components` | 是 | 整数（1..=64） | 时间分量数 |
+| `minimums` | 是 | 长度等于 `components` 的整数数组 | 绝对时间缺省尾部分量时的补齐起始值（公历为 `[0, 1, 1, 0, 0, 0]`）；非首位分量小于对应起始值会被宿主拒绝 |
 
-宿主通过 `calendar_components` 直接输出时间分量数，不包含本地化文字。`serialize(language)` 生成的名称与描述保存到 `story.date`，前端从中读取 `name` 和 `description`；原始 `date_mode` 路径只存在于 YAML 输入。
+宿主在 `calendar.rs` 中统一实现 `normalize(values) = from_tick(to_tick(values))`，并核对 `to_tick(from_tick(tick)) == tick` 的往返一致性；脚本无需定义 `normalize`。`to_tick` 必须接受未归一化的日期分量，支持进位和借位。`humanizer(ctx)` 通过 `ctx.precision` 获知作者实际写了几个分量（如只写了年份时 `precision == 1`），用于保留模糊时间展示。
 
-`language` 是应用设置中的 `zh` 或 `en`。应用切换语言后会重新解析当前文档，因此 `humanizer` 会收到新的语言。建议只在 `serialize` 和 `humanizer` 中按语言选择显示文字，让 `from_tick` 和 `to_tick` 的结果不受语言影响。
+`ctx.language` 为应用设置的 `zh` 或 `en`。应用切换语言后会重新解析文档，从而刷新 `meta(ctx)` 与 `humanizer(ctx)` 的本地化结果。建议让 `from_tick` 与 `to_tick` 保持语言无关。
 
 ## 语法要点
 
@@ -38,14 +43,23 @@ Rune 的整数运算沿用 Rust 语义：溢出和除零都会报错，`/` 向�
 
 ## 最小脚本示例
 
-下面的三分量历法把每年视作 10 个月、每月 30 天。示例仅演示接口形状；`to_tick` 的单位为天。
+下面的三分量历法把每年视作 10 个月、每月 30 天，`to_tick` 的单位为天：
 
 ```rune
-pub fn components() { 3 }
+pub fn meta(ctx) {
+    let zh = ctx.language == "zh";
+    #{
+        id: "ten-month",
+        name: if zh { "十月历" } else { "Ten Month Calendar" },
+        description: if zh { "每年十个月，每月三十天。" } else { "Ten months per year, thirty days per month." },
+        components: 3,
+        minimums: [0, 1, 1],
+    }
+}
 
 pub fn from_tick(total) {
-    let mut year = total / 300;
-    let mut remainder = total % 300;
+    let year = total / 300;
+    let remainder = total % 300;
     if remainder < 0 {
         year -= 1;
         remainder += 300;
@@ -57,26 +71,33 @@ pub fn to_tick(values) {
     values[0] * 300 + (values[1] - 1) * 30 + values[2] - 1
 }
 
-pub fn serialize(language) {
-    #{
-        name: if language == "zh" { "十月历" } else { "Ten Month Calendar" },
-        description: if language == "zh" { "每年十个月，每月三十天。" } else { "Ten months per year, thirty days per month." },
-    }
-}
-
-pub fn humanizer(value, language) {
-    if language == "zh" {
-        let stamp = `${value[0]}年${value[1]}月${value[2]}日`;
+pub fn humanizer(ctx) {
+    let value = ctx.values;
+    let precision = ctx.precision;
+    if ctx.language == "zh" {
+        let stamp = if precision <= 1 {
+            `${value[0]}年`
+        } else if precision == 2 {
+            `${value[0]}年${value[1]}月`
+        } else {
+            `${value[0]}年${value[1]}月${value[2]}日`
+        };
         return stamp;
     }
-    `Year ${value[0]}, month ${value[1]}, day ${value[2]}`
+    if precision <= 1 {
+        `Year ${value[0]}`
+    } else if precision == 2 {
+        `Year ${value[0]}, month ${value[1]}`
+    } else {
+        `Year ${value[0]}, month ${value[1]}, day ${value[2]}`
+    }
 }
 ```
 
-脚本读取、编译或接口检查失败时，文档解析会报错；编译诊断带源码行列定位。加载时调用 `components()` 并检查函数接口；函数在实际计算或展示时调用。脚本执行受指令预算限制，超限中断并报错。
+脚本读取、编译或接口检查失败时，文档解析会报错；编译诊断带源码行列定位。脚本编译产物按 `(路径, 源码)` 缓存，修改 YAML 时未改动的脚本免于重编译；每次调用受指令预算限制，超限中断并报错。
 
 ## 宿主代码层级
 
-- `src-tauri/src/calendar.rs`：统一加载与校验 Rune 插件，执行分量校验、历算、时间展示和 Story 页序列化。
-- `src-tauri/src/plugin_loader.rs`：Rune 宿主的公共上下文、编译、接口检查与限额调用。
-- `src-tauri/src/weft/phase.rs`：定义 `TimeUnit`（不定长整数数组），解析 `time_unit` 或 `[phase, 偏移分量…]` 的递归结构。锚点在首项，负数偏移表示减法；递归 flatten 只逐分量求和并检查溢出，不做进位。例如 `[[2025, 4, 2, 23, 50, 0], 0, 0, 0, 20]` 展平为 `[2025, 4, 2, 23, 70, 0]`，最后由历法 `normalize` 处理进位。
+- `src-tauri/src/calendar.rs`：统一加载与校验 Rune 插件，执行分量/起始值校验、历算、时间展示和元信息输出。
+- `src-tauri/src/plugin_loader.rs`：Rune 宿主的全局复用运行时、编译缓存、接口检查与限额调用。
+- `src-tauri/src/weft/phase.rs`：定义 `Phase`，解析 `time_unit` 或 `[phase, 偏移分量…]` 的递归结构；由 `Calendar::resolve` 按由内到外的顺序应用每层偏移并保留最大有效精度。

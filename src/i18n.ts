@@ -24,10 +24,11 @@ const validationMessages = {
       "entity `{entity}` 的 avatar `{path}` 必须指向已存在的图片文件",
     time_nonempty_list: "时间必须是非空列表",
     time_integer_component: "时间分量必须是整数",
+    time_nesting_too_deep: "时间锚点嵌套超过最大深度 {maximum}",
     event_end_before_start: "事件 `{event}` 的结束时间早于开始时间",
     invalid_calendar_path: "历法路径 `{path}` 必须指向现有的 .rn 文件",
     invalid_calculable_prop_path:
-      "可计算属性 `{prop}` 的路径 `{path}` 必须指向 .rn 文件",
+      "可计算属性 `{prop}` 的路径 `{path}` 必须指向现有的 .rn 文件",
     calculable_prop_file_read: "读取可计算属性 `{prop}` 的脚本失败：{source}",
     calculable_prop_compile: "可计算属性 `{prop}` 编译失败：{source}",
     calculable_prop_missing_interface:
@@ -38,15 +39,20 @@ const validationMessages = {
     calculable_prop_invalid_return:
       "可计算属性 `{prop}` 的 `{entry}` 返回值无效，预期 {expected}",
     calendar_components_out_of_range:
-      "历法 {calendar} 必须声明整数常量 COMPONENTS，取值为 1 到 64",
+      "历法 `{calendar}` 的分量数必须在 1 到 64 之间",
     calendar_file_read: "读取历法 `{calendar}` 的脚本失败：{source}",
     calendar_compile: "历法 `{calendar}` 编译失败：{source}",
+    calendar_missing_interface: "历法 `{calendar}` 缺少公开接口：{functions}",
     calendar_call: "历法 `{calendar}` 的 `{entry}` 执行失败：{source}",
-    calendar_invalid_return: "历法 `{calendar}` 的 `{entry}` 返回值类型无效",
+    calendar_invalid_return: "历法 `{calendar}` 的 `{entry}` 返回值无效",
     too_many_time_components:
       "时间分量过多：{actual} 个，该历法最多 {maximum} 个",
-    normalize_wrong_component_count: "normalize 必须返回 {expected} 个时间分量",
+    normalize_wrong_component_count: "from_tick 必须返回 {expected} 个时间分量",
     time_offset_out_of_range: "时间偏移超出整数范围",
+    time_component_below_minimum:
+      "第 {position} 个时间分量为 {value}，低于该历法允许的最小值 {minimum}",
+    calendar_round_trip_mismatch:
+      "历法 `{calendar}` 的 to_tick(from_tick(tick)) 未能还原同一刻度",
     invalid_structure: "Weft YAML 结构无效（{path}）：{reason}",
   },
   en: {
@@ -65,11 +71,13 @@ const validationMessages = {
       "Avatar `{path}` for entity `{entity}` must point to an existing image file",
     time_nonempty_list: "Time must be a nonempty list",
     time_integer_component: "Time components must be integers",
+    time_nesting_too_deep:
+      "Time anchor nesting exceeds maximum depth {maximum}",
     event_end_before_start: "End time is before start time for event `{event}`",
     invalid_calendar_path:
       "Calendar path `{path}` must point to an existing .rn file",
     invalid_calculable_prop_path:
-      "Path `{path}` for calculable prop `{prop}` must point to a .rn file",
+      "Path `{path}` for calculable prop `{prop}` must point to an existing .rn file",
     calculable_prop_file_read:
       "Failed to read calculable prop `{prop}`: {source}",
     calculable_prop_compile:
@@ -84,18 +92,24 @@ const validationMessages = {
     calculable_prop_invalid_return:
       "`{entry}` of calculable prop `{prop}` returned an invalid value; expected {expected}",
     calendar_components_out_of_range:
-      "Calendar {calendar} must declare an integer constant COMPONENTS between 1 and 64",
+      "Calendar `{calendar}` component count must be between 1 and 64",
     calendar_file_read:
       "Failed to read the script of calendar `{calendar}`: {source}",
     calendar_compile: "Failed to compile calendar `{calendar}`: {source}",
+    calendar_missing_interface:
+      "Calendar `{calendar}` is missing public interfaces: {functions}",
     calendar_call: "Error running `{entry}` of calendar `{calendar}`: {source}",
     calendar_invalid_return:
       "`{entry}` of calendar `{calendar}` returned an invalid value",
     too_many_time_components:
       "Too many time components: {actual}; this calendar allows at most {maximum}",
     normalize_wrong_component_count:
-      "normalize must return {expected} time components",
+      "from_tick must return {expected} time components",
     time_offset_out_of_range: "Time offset is outside the integer range",
+    time_component_below_minimum:
+      "Time component {position} is {value}, below the calendar minimum {minimum}",
+    calendar_round_trip_mismatch:
+      "Calendar `{calendar}`: to_tick(from_tick(tick)) did not return the same tick",
     invalid_structure: "Invalid Weft YAML structure at {path}: {reason}",
   },
 } satisfies Record<Lang, Record<ValidationCode, string>>;

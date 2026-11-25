@@ -1,12 +1,9 @@
-use std::{collections::HashMap, fs, path::Path, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
-use rune::{
-    Unit, Vm,
-    runtime::{RuntimeContext, Value as RuneValue},
-};
-use serde::Deserialize as _;
+use rune::{Unit, Vm, runtime::RuntimeContext};
 use serde_json::{Value, json};
 
+use crate::calendar::Calendar;
 use crate::plugin_loader;
 use crate::weft::errors::{DocumentError, ValidationError};
 
@@ -17,47 +14,47 @@ pub struct CalculablePropRuntime {
     runtime: Arc<RuntimeContext>,
     // 注册 ID → 编译好的脚本，加载时即完成读取、编译与接口检查。
     scripts: HashMap<String, Arc<Unit>>,
-    // 脚本上下文中的文档级常量，加载时确定，实体段只提供 entity。
-    date_mode: Option<String>,
+    // 文档级上下文常量，加载时确定，实体段只提供 entity。
+    calendar: Value,
     lang: String,
 }
 
 impl CalculablePropRuntime {
     // 注册表来自 story.calculable_props，脚本路径相对故事文件；
-    // date_mode 与 lang 随运行时一起固定，切换语言时整个文档会重新解析。
+    // calendar 元信息与 lang 随运行时一起固定，切换语言时整个文档会重新解析。
     pub fn load(
         specs: &HashMap<String, String>,
         base: &Path,
-        date_mode: Option<&str>,
+        calendar: &Calendar,
         lang: &str,
     ) -> Result<Self, DocumentError> {
         let runtime = plugin_loader::host_runtime();
         let mut scripts = HashMap::new();
-        for (name, source) in specs {
-            if Path::new(source)
-                .extension()
-                .is_none_or(|extension| extension != "rn")
-            {
+        let mut names: Vec<_> = specs.keys().collect();
+        names.sort_unstable();
+        for name in names {
+            let source = &specs[name];
+            let path = base.join(source);
+            if !plugin_loader::is_rune_script(&path) {
                 return Err(ValidationError::InvalidCalculablePropPath {
                     prop: name.clone(),
                     path: source.clone(),
                 }
                 .into());
             }
-            let script = fs::read_to_string(base.join(source)).map_err(|error| {
+            let script = plugin_loader::read_script(&path).map_err(|details| {
                 ValidationError::CalculablePropFileRead {
                     prop: name.clone(),
-                    details: error.to_string(),
+                    details,
                 }
             })?;
-            let unit = Arc::new(
-                plugin_loader::compile(&script, source).map_err(|details| {
-                    ValidationError::CalculablePropCompile {
-                        prop: name.clone(),
-                        details,
-                    }
-                })?,
-            );
+            let display = path.display().to_string();
+            let unit = plugin_loader::compile_cached(&script, &display).map_err(|details| {
+                ValidationError::CalculablePropCompile {
+                    prop: name.clone(),
+                    details,
+                }
+            })?;
             let missing = plugin_loader::missing_functions(&unit, &runtime, &["calculable_prop"]);
             if !missing.is_empty() {
                 return Err(ValidationError::CalculablePropMissingInterface {
@@ -71,7 +68,11 @@ impl CalculablePropRuntime {
         Ok(Self {
             runtime,
             scripts,
-            date_mode: date_mode.map(ToOwned::to_owned),
+            calendar: json!({
+                "id": calendar.id(),
+                "components": calendar.component_count(),
+                "minimums": calendar.minimums(),
+            }),
             lang: lang.to_owned(),
         })
     }
@@ -86,19 +87,19 @@ impl CalculablePropRuntime {
                 prop: name.to_owned(),
             })?;
         let context = json!({
-            "api": 1,
-            "date_mode": self.date_mode,
+            "api": plugin_loader::API_VERSION,
             "language": self.lang,
+            "calendar": self.calendar,
             "entity": entity,
         });
         // JSON 与脚本值都过 serde：null ↔ ()，数组/对象直接对应。
-        let argument = RuneValue::deserialize(&context).map_err(|error| {
+        let argument = plugin_loader::to_rune_value(&context).map_err(|details| {
             ValidationError::CalculablePropArgument {
                 prop: name.to_owned(),
-                details: error.to_string(),
+                details,
             }
         })?;
-        let mut vm = Vm::new(self.runtime.clone(), unit.clone());
+        let mut vm = Vm::new(Arc::clone(&self.runtime), Arc::clone(unit));
         let output =
             plugin_loader::call(&mut vm, "calculable_prop", (argument,)).map_err(|error| {
                 ValidationError::CalculablePropCall {

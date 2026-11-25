@@ -18,6 +18,7 @@ export type ValidationError =
   | { code: "invalid_avatar_path"; params: { entity: string; path: string } }
   | { code: "time_nonempty_list" }
   | { code: "time_integer_component" }
+  | { code: "time_nesting_too_deep"; params: { maximum: string } }
   | { code: "event_end_before_start"; params: { event: string } }
   | { code: "invalid_calendar_path"; params: { path: string } }
   | {
@@ -53,6 +54,10 @@ export type ValidationError =
   | { code: "calendar_file_read"; params: { calendar: string; source: string } }
   | { code: "calendar_compile"; params: { calendar: string; source: string } }
   | {
+      code: "calendar_missing_interface";
+      params: { calendar: string; functions: string };
+    }
+  | {
       code: "calendar_call";
       params: { calendar: string; entry: string; source: string };
     }
@@ -66,4 +71,9 @@ export type ValidationError =
     }
   | { code: "normalize_wrong_component_count"; params: { expected: string } }
   | { code: "time_offset_out_of_range" }
+  | {
+      code: "time_component_below_minimum";
+      params: { position: string; value: string; minimum: string };
+    }
+  | { code: "calendar_round_trip_mismatch"; params: { calendar: string } }
   | { code: "invalid_structure"; params: { path: string; reason: string } };

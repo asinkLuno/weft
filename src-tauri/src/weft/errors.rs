@@ -34,7 +34,7 @@ pub enum ValidationError {
     EventEndBeforeStart { event: String },
     #[error("calendar path must point to an existing .rn file: {path}")]
     InvalidCalendarPath { path: String },
-    #[error("calculable prop {prop} path must point to a .rn file: {path}")]
+    #[error("calculable prop {prop} path must point to an existing .rn file: {path}")]
     InvalidCalculablePropPath { prop: String, path: String },
     #[error("failed to read calculable prop {prop}: {details}")]
     CalculablePropFileRead {
@@ -85,6 +85,8 @@ pub enum ValidationError {
         #[serde(rename = "source")]
         details: String,
     },
+    #[error("calendar {calendar} is missing public interfaces: {functions}")]
+    CalendarMissingInterface { calendar: String, functions: String },
     #[error("failed to call {entry} in calendar {calendar}: {details}")]
     CalendarCall {
         calendar: String,

@@ -9,7 +9,7 @@ use serde_json::{Value as JsonValue, json};
 use serde_yaml_ng::Value;
 
 use crate::calculable_prop::CalculablePropRuntime;
-use crate::calendar::Calendar;
+use crate::calendar::{Calendar, Moment};
 use crate::weft::FromRaw;
 use crate::weft::errors::{DocumentError, ValidationError};
 use crate::weft::phase::Phase;
@@ -35,9 +35,11 @@ pub(crate) struct RawEntity {
 
 // ---- 实体 ----
 
-/// 单实体构建环境：在整段构建环境上补一个实体 ID。
+/// 单实体构建环境：在整段构建环境上补一个实体 ID 与已解析的基准时间。
 struct EntityContext<'a> {
     id: String,
+    base_time: Option<Phase>,
+    base_time_moment: Option<&'a Moment>,
     build: &'a EntityBuildContext<'a>,
 }
 
@@ -69,13 +71,16 @@ impl FromRaw<EntityContext<'_>> for Entity {
     type Raw = RawEntity;
 
     fn from_raw(raw: Self::Raw, context: EntityContext<'_>) -> Result<Self, DocumentError> {
-        let EntityContext { id, build } = context;
+        let EntityContext {
+            id,
+            base_time,
+            base_time_moment,
+            build,
+        } = context;
         let base = build.base;
         let calendar = build.calendar;
-        let base_time = Phase::from_yaml_scalar_opt(raw.base_time.as_ref())?;
-        let base_time_humanizer = base_time
-            .as_ref()
-            .map(|phase| calendar.humanize(&calendar.resolve(phase)?))
+        let base_time_humanizer = base_time_moment
+            .map(|moment| calendar.humanize(moment))
             .transpose()?;
         // 头像路径相对 YAML 文件，是否为存在的图片已在输入校验确认，此处仅解析绝对路径。
         let avatar = raw
@@ -141,18 +146,27 @@ pub(crate) fn build_entities(
             (belong_graph[node].as_str(), parents)
         })
         .collect();
-    let mut entities = HashMap::new();
-    for (id, mut input) in raw_entities {
+    let mut raw_entries: Vec<_> = raw_entities.into_iter().collect();
+    raw_entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    let mut entities = HashMap::with_capacity(raw_entries.len());
+    for (id, mut input) in raw_entries {
         let props = std::mem::take(&mut input.calculable_props);
         let belong_to = parents_by_id.get(id.as_str()).cloned().unwrap_or_default();
+        let base_time = Phase::from_yaml_scalar_opt(input.base_time.as_ref())?;
+        let base_time_moment = base_time
+            .as_ref()
+            .map(|phase| context.calendar.resolve(phase))
+            .transpose()?;
         let mut entity = Entity::from_raw(
             input,
             EntityContext {
                 id: id.clone(),
+                base_time,
+                base_time_moment: base_time_moment.as_ref(),
                 build: &context,
             },
         )?;
-        apply_calculable_props(&mut entity, &props, &belong_to, &context)?;
+        apply_calculable_props(&mut entity, &props, &belong_to, base_time_moment.as_ref(), &context)?;
         entities.insert(id, entity);
     }
     let mut belong_dag: Vec<_> = parents_by_id
@@ -248,20 +262,28 @@ fn apply_calculable_props(
     entity: &mut Entity,
     props: &[String],
     belong_to: &[String],
+    base_time_moment: Option<&Moment>,
     context: &EntityBuildContext<'_>,
 ) -> Result<(), DocumentError> {
-    // 归一化后的基准时间对同一实体的所有属性相同，只算一次。
-    let base_time = entity
-        .base_time
-        .as_ref()
-        .map(|phase| context.calendar.resolve(phase).map(|moment| moment.values))
-        .transpose()?;
+    if props.is_empty() {
+        return Ok(());
+    }
+    let base_time = base_time_moment.map(|moment| {
+        json!({
+            "values": moment.values,
+            "precision": moment.precision,
+            "tick": moment.tick,
+        })
+    });
+    // 传入原始输入字段的只读快照，避免同一实体上多个计算属性受执行顺序相互干扰。
+    let raw_extra_props = entity.extra_props.clone();
     for name in props {
         let input = json!({
             "id": entity.id,
             "base_time": base_time,
             "description": entity.description,
             "belong_to": belong_to,
+            "extra_props": raw_extra_props,
         });
         if let Some(value) = context.calculable_props.calculable_prop(name, input)? {
             entity.extra_props.insert(name.clone(), value);

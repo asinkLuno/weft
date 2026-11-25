@@ -1,7 +1,18 @@
 // 公历日期分量：[年, 月, 日, 时, 分, 秒]。历算与本地化展示分开。
-pub fn components() { 6 }
-
-pub fn minimums() { [0, 1, 1, 0, 0, 0] }
+pub fn meta(ctx) {
+    let zh = ctx.language == "zh";
+    #{
+        id: "gregorian",
+        name: if zh { "格里高利历" } else { "Gregorian Calendar" },
+        description: if zh {
+            "采用年、月、日和时分秒表示时间，并包含公历闰年规则。"
+        } else {
+            "Represents time with years, months, days, hours, minutes, and seconds."
+        },
+        components: 6,
+        minimums: [0, 1, 1, 0, 0, 0],
+    }
+}
 
 // 反算 tick；用整段日期换算处理跨月、跨年及负的时分秒。
 pub fn from_tick(tick) {
@@ -59,20 +70,11 @@ pub fn to_tick(values) {
     (era * 146097 + doe + 60) * 86400 + seconds
 }
 
-pub fn serialize(lang) {
-    let zh = lang == "zh";
-    #{
-        name: if zh { "格里高利历" } else { "Gregorian Calendar" },
-        description: if zh {
-            "采用年、月、日和时分秒表示时间，并包含公历闰年规则。"
-        } else {
-            "Represents time with years, months, days, hours, minutes, and seconds."
-        },
-    }
-}
-
 // 只格式化归一化日期；precision 保留作者输入的模糊程度。
-pub fn humanizer(value, precision, lang) {
+pub fn humanizer(ctx) {
+    let value = ctx.values;
+    let precision = ctx.precision;
+    let lang = ctx.language;
     let year = value[0];
     let month = value[1];
     let day = value[2];

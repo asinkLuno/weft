@@ -17,7 +17,7 @@ story:
 | `author` | 否 | 作者名 |
 | `description` | 否 | 故事简介 |
 | `date_mode` | 否 | Rune 脚本路径，缺省或留空使用内置公历 |
-| `calculatable_props` | 否 | 可计算属性注册表（ID → .rn 路径），见 [Rune calculable props 脚本](rune-calculable-props.md) |
+| `calculable_props` | 否 | 可计算属性注册表（ID → .rn 路径），见 [Rune calculable props 脚本](rune-calculable-props.md) |
 
 ## date_mode：选择历法
 

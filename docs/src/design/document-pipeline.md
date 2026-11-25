@@ -21,11 +21,11 @@ classDiagram
         +calendar_components usize?
     }
     class DocumentState {
-        +path PathBuf?
-        +last_written String?
-        +watcher Debouncer?
+        +next_generation u64
+        +active ActiveDocument?
     }
     class DocumentPayload {
+        +generation u64
         +doc JSON?
         +content String?
         +error DocumentError?
@@ -70,8 +70,9 @@ sequenceDiagram
 
 ## 文件与语言更新
 
-- `bind_document` 读取现有文件并绑定路径，监听其父目录以覆盖原子 rename 写入方式；监听事件按目标路径过滤并做 300 ms 防抖。
-- `save_document` 先通过完整解析管线校验，再原子写入临时文件并 rename。记录最近写入文本，抑制文件 watcher 对自身保存的重复回声。
-- 外部变更通过 `document-changed` 推送最新内容与解析结果；解析错误也推给前端，避免旧视图被误认为新内容。
+- `bind_document` 在入口规范化目标路径（含符号链接目录与文件目标），先建立防抖 watcher（300 ms）再读取初始快照，避免绑定到监听生效间的漏事件窗口。监听范围覆盖文档所在父目录以及 YAML 中引用的外部 `.rn` 历法（`story.date_mode`）与可计算属性脚本（`story.calculable_props`）所在目录；事件过滤仅响应内容/路径变更与 `rescan`，忽略 `Access` 与纯元数据事件。
+- 每次绑定分配单调递增的 `generation` 与提交序号 `seq`，并由 `DocumentPayload` 携带 `generation`；旧 watcher 回调在解绑或切换文档后立即停用，前端按 `generation` 丢弃迟到事件。
+- `save_document` 先通过完整解析管线校验，再原子写入临时文件并 rename。`DocumentState` 记录最近一次已同步且校验通过的 YAML 文本，对主文档自身的重复事件与保存回声做幂等跳过；外部 `.rn` 脚本变更或 `rescan` 则无条件触发重新解析。
+- 外部变更通过 `document-changed` 推送最新内容与解析结果；解析错误、文件删除与读取失败同样推给前端，避免旧视图被误认为新内容。
 - 切换应用语言会重新读取当前文件并解析，以刷新历法与计算属性的本地化文案。
-- `unbind_document` 清除绑定路径和 watcher；应用启动及关闭由 Tauri 管理。
+- `unbind_document` 停止并清除当前绑定与 watcher；前端初始化与卸载时会主动同步解绑，防止页面刷新后残留后端 watcher。
