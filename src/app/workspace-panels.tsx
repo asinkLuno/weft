@@ -9,14 +9,12 @@ import type {
 } from "dockview-react";
 import {
   BookOpen,
-  Columns2,
   FileCode2,
   GitBranch,
   Info,
   type LucideIcon,
   Plus,
   RotateCcw,
-  Rows2,
   Waypoints,
   X as XIcon,
 } from "lucide-react";
@@ -108,12 +106,11 @@ function nextPanelInstanceId(api: DockviewApi, kind: PanelId): string {
   return `${kind}-${index}`;
 }
 
-export function addPanelInGroup(
+function addPanelInGroup(
   api: DockviewApi,
   kind: PanelId,
   lang: Lang,
   group: DockviewGroupPanel,
-  direction?: "right" | "below",
 ): void {
   const id = nextPanelInstanceId(api, kind);
   api.addPanel({
@@ -121,9 +118,7 @@ export function addPanelInGroup(
     component: kind,
     title: panelTitle(kind, lang),
     params: { kind },
-    position: direction
-      ? { referenceGroup: group, direction }
-      : { referenceGroup: group },
+    position: { referenceGroup: group },
   });
 }
 
@@ -279,83 +274,59 @@ export function WorkspaceTab({ api, params }: IDockviewPanelHeaderProps) {
   );
 }
 
-function GroupActionMenu({
-  label,
-  icon: TriggerIcon,
-  lang,
-  onSelect,
-}: {
-  label: string;
-  icon: LucideIcon;
-  lang: Lang;
-  onSelect: (kind: PanelId) => void;
-}) {
-  return (
-    <details className="dropdown dropdown-end">
-      <summary
-        className="btn btn-ghost btn-xs btn-square"
-        aria-label={label}
-        title={label}
-      >
-        <TriggerIcon className="size-3.5" />
-      </summary>
-      <ul className="menu menu-xs dropdown-content z-20 mt-1 w-40 rounded-box border border-base-300 bg-base-100 p-1 shadow-md">
-        <li className="menu-title text-xs">{label}</li>
-        {PANEL_IDS.map((kind) => {
-          const Icon = PANEL_META[kind].icon;
-          return (
-            <li key={kind}>
-              <button
-                type="button"
-                onClick={(event) => {
-                  onSelect(kind);
-                  event.currentTarget
-                    .closest("details")
-                    ?.removeAttribute("open");
-                }}
-              >
-                <Icon className="size-3.5" />
-                {panelTitle(kind, lang)}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </details>
-  );
-}
-
-export function WorkspaceGroupActions({
+export function WorkspaceAddTabAction({
   containerApi,
   group,
 }: IDockviewHeaderActionsProps) {
   const { lang } = useWorkspaceDoc();
-  const t = strings[lang];
+  const label = strings[lang].addTab;
+  const [alignEnd, setAlignEnd] = useState(false);
 
   return (
-    <div className="inline-flex h-full items-center gap-0.5 px-1.5">
-      <GroupActionMenu
-        label={t.addTab}
-        icon={Plus}
-        lang={lang}
-        onSelect={(kind) => addPanelInGroup(containerApi, kind, lang, group)}
-      />
-      <GroupActionMenu
-        label={t.splitRight}
-        icon={Columns2}
-        lang={lang}
-        onSelect={(kind) =>
-          addPanelInGroup(containerApi, kind, lang, group, "right")
-        }
-      />
-      <GroupActionMenu
-        label={t.splitDown}
-        icon={Rows2}
-        lang={lang}
-        onSelect={(kind) =>
-          addPanelInGroup(containerApi, kind, lang, group, "below")
-        }
-      />
+    <div className="flex h-full items-center px-1">
+      <details
+        className={alignEnd ? "dropdown dropdown-end" : "dropdown"}
+        onToggle={(event) => {
+          if (!event.currentTarget.open) return;
+          const triggerRect = event.currentTarget.getBoundingClientRect();
+          const bounds = event.currentTarget
+            .closest(".dv-groupview")
+            ?.getBoundingClientRect() ?? { left: 0, right: window.innerWidth };
+          const spaceRight = bounds.right - triggerRect.left;
+          const spaceLeft = triggerRect.right - bounds.left;
+          setAlignEnd(spaceRight < 168 && spaceLeft > spaceRight);
+        }}
+      >
+        <summary
+          className="btn btn-ghost btn-xs btn-square"
+          aria-label={label}
+          title={label}
+        >
+          <Plus className="size-3.5" />
+        </summary>
+        <ul className="menu menu-xs dropdown-content z-20 mt-1 w-40 rounded-box border border-base-300 bg-base-100 p-1 shadow-md">
+          <li className="menu-title text-xs">{label}</li>
+          {PANEL_IDS.map((kind) => {
+            const Icon = PANEL_META[kind].icon;
+            return (
+              <li key={kind}>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    addPanelInGroup(containerApi, kind, lang, group);
+                    event.currentTarget
+                      .closest("details")
+                      ?.removeAttribute("open");
+                  }}
+                >
+                  <Icon className="size-3.5" />
+                  {panelTitle(kind, lang)}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </details>
     </div>
   );
 }

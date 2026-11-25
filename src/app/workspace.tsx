@@ -21,7 +21,7 @@ import {
   panelTitle,
   restoreLayout,
   WORKSPACE_COMPONENTS,
-  WorkspaceGroupActions,
+  WorkspaceAddTabAction,
   WorkspaceTab,
   WorkspaceWatermark,
 } from "./workspace-panels";
@@ -224,11 +224,11 @@ export function Workspace({
           <WorkspaceEditorContext.Provider value={editorContextValue}>
             <DockviewReact
               theme={themeLight}
-              disableDnd
+              dndStrategy="pointer"
               disableFloatingGroups
               components={WORKSPACE_COMPONENTS}
               defaultTabComponent={WorkspaceTab}
-              rightHeaderActionsComponent={WorkspaceGroupActions}
+              leftHeaderActionsComponent={WorkspaceAddTabAction}
               watermarkComponent={WorkspaceWatermark}
               onReady={onReady}
             />
