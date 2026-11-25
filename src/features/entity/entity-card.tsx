@@ -1,6 +1,6 @@
 import { Handle, Position } from "@xyflow/react";
 import { CalendarDays } from "lucide-react";
-import { memo } from "react";
+import { memo, useState } from "react";
 import type { EntityData } from "./model";
 
 const INITIALS_SPLIT_RE = /[\s·._-]+/u;
@@ -99,40 +99,49 @@ function EntityCard({ data }: { data: EntityData }) {
             <div className="flex flex-col gap-2">
               <p className="text-xs text-base-content/60">{data.belongLabel}</p>
               <div className="flex flex-wrap gap-1.5">
-                {data.parents.map((p) =>
-                  p.preview ? (
-                    <div
-                      key={p.id}
-                      className="dropdown dropdown-hover dropdown-right"
-                    >
-                      <button
-                        type="button"
-                        tabIndex={0}
-                        className="nodrag badge badge-outline h-auto max-w-full cursor-pointer whitespace-normal break-words"
-                      >
-                        {p.name}
-                      </button>
-                      <div
-                        role="dialog"
-                        className="dropdown-content z-20 w-max rounded-box"
-                      >
-                        <EntityCard data={p.preview} />
-                      </div>
-                    </div>
-                  ) : (
-                    <span
-                      key={p.id}
-                      className="badge badge-outline max-w-full whitespace-normal break-words"
-                    >
-                      {p.name}
-                    </span>
-                  ),
-                )}
+                {data.parents.map((p) => (
+                  <ParentBadge key={p.id} parent={p} />
+                ))}
               </div>
             </div>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+// 预览卡只在 hover/focus 时挂载：常挂会让画布上每张卡都多出父实体那一棵 DOM
+function ParentBadge({ parent }: { parent: EntityData["parents"][number] }) {
+  const [open, setOpen] = useState(false);
+  const preview = parent.preview;
+  if (!preview) {
+    return (
+      <span className="badge badge-outline max-w-full whitespace-normal break-words">
+        {parent.name}
+      </span>
+    );
+  }
+  return (
+    <fieldset
+      className="dropdown dropdown-hover dropdown-right m-0 min-w-0 border-0 p-0"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        tabIndex={0}
+        className="nodrag badge badge-outline h-auto max-w-full cursor-pointer whitespace-normal break-words"
+      >
+        {parent.name}
+      </button>
+      {open && (
+        <div role="dialog" className="dropdown-content z-20 w-max rounded-box">
+          <EntityCard data={preview} />
+        </div>
+      )}
+    </fieldset>
   );
 }

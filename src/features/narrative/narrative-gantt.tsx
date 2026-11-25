@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from "react";
+import { memo, type ReactNode, useState } from "react";
 import type { Lang, strings } from "@/i18n";
 import type { Narrative } from "@/lib/document";
 import type { EventItem, GanttBounds, GanttScale } from "./model";
@@ -32,10 +32,16 @@ function EventHoverCard({
   style?: React.CSSProperties;
   children: ReactNode;
 }) {
+  // 内容只在 hover/focus 时挂载：每个事件两个悬浮卡，常挂会翻倍 DOM
+  const [open, setOpen] = useState(false);
   return (
-    <div
-      className={`dropdown dropdown-hover dropdown-top ${className ?? ""}`}
+    <fieldset
+      className={`dropdown dropdown-hover dropdown-top m-0 min-w-0 border-0 p-0 ${className ?? ""}`}
       style={style}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
     >
       <button
         type="button"
@@ -45,13 +51,15 @@ function EventHoverCard({
       >
         {children}
       </button>
-      <div
-        role="dialog"
-        className="dropdown-content z-20 w-80 rounded-box bg-base-100 p-3 shadow"
-      >
-        <EventHoverContent event={event} />
-      </div>
-    </div>
+      {open && (
+        <div
+          role="dialog"
+          className="dropdown-content z-20 w-80 rounded-box bg-base-100 p-3 shadow"
+        >
+          <EventHoverContent event={event} />
+        </div>
+      )}
+    </fieldset>
   );
 }
 

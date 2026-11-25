@@ -296,40 +296,41 @@ export function useDocument(lang: Lang) {
     void recompileSaved(sessionSeq.current);
   }, [lang, recompileSaved]);
 
-  async function bind(
-    nextPath: string,
-  ): Promise<"bound" | "failed" | "ignored"> {
-    if (busyRef.current) return "ignored";
-    busyRef.current = true;
-    clearTimeout(checkTimer.current);
-    const session = ++sessionSeq.current;
-    docCompileSeq.current += 1;
-    checkSeq.current += 1;
-    try {
-      const result = await invoke<OpenDocumentResult>("open_document", {
-        path: nextPath,
-      });
-      if (!mountedRef.current || sessionSeq.current !== session) {
-        void invoke("close_document").catch(() => {});
-        return "ignored";
+  const bind = useCallback(
+    async (nextPath: string): Promise<"bound" | "failed" | "ignored"> => {
+      if (busyRef.current) return "ignored";
+      busyRef.current = true;
+      clearTimeout(checkTimer.current);
+      const session = ++sessionSeq.current;
+      docCompileSeq.current += 1;
+      checkSeq.current += 1;
+      try {
+        const result = await invoke<OpenDocumentResult>("open_document", {
+          path: nextPath,
+        });
+        if (!mountedRef.current || sessionSeq.current !== session) {
+          void invoke("close_document").catch(() => {});
+          return "ignored";
+        }
+        pathRef.current = nextPath;
+        savedContentRef.current = result.content;
+        draftStore.set(result.content);
+        setPath(nextPath);
+        setDirty(false);
+        setDiskStatus("synced");
+        clearTimeout(flashTimer.current);
+        setFlash(false);
+        applyPublishedCompile(result.compile, { updateDiagnostic: true });
+        return "bound";
+      } catch (error) {
+        console.error("open_document failed:", error);
+        return "failed";
+      } finally {
+        busyRef.current = false;
       }
-      pathRef.current = nextPath;
-      savedContentRef.current = result.content;
-      draftStore.set(result.content);
-      setPath(nextPath);
-      setDirty(false);
-      setDiskStatus("synced");
-      clearTimeout(flashTimer.current);
-      setFlash(false);
-      applyPublishedCompile(result.compile, { updateDiagnostic: true });
-      return "bound";
-    } catch (error) {
-      console.error("open_document failed:", error);
-      return "failed";
-    } finally {
-      busyRef.current = false;
-    }
-  }
+    },
+    [applyPublishedCompile, draftStore],
+  );
 
   const updateDraft = useCallback(
     (next: string) => {
@@ -415,7 +416,7 @@ export function useDocument(lang: Lang) {
     }
   }, [reloadInternal]);
 
-  async function openFile(): Promise<string | null> {
+  const openFile = useCallback(async (): Promise<string | null> => {
     try {
       const selected = await open({ multiple: false, filters: [WEFT_FILTER] });
       return typeof selected === "string" ? selected : null;
@@ -423,9 +424,9 @@ export function useDocument(lang: Lang) {
       console.error("openFile failed:", error);
       return null;
     }
-  }
+  }, []);
 
-  async function close() {
+  const close = useCallback(async () => {
     if (busyRef.current) return;
     busyRef.current = true;
     clearTimeout(checkTimer.current);
@@ -452,7 +453,7 @@ export function useDocument(lang: Lang) {
     } finally {
       busyRef.current = false;
     }
-  }
+  }, [draftStore]);
 
   return {
     path,

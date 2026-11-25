@@ -68,7 +68,10 @@ export function Workspace({
     undefined,
   );
 
-  saveActionRef.current = { dirty, saving, diskStatus, onSave };
+  // 快捷键回调读最新动作：渲染期不写 ref，放到提交阶段同步
+  useEffect(() => {
+    saveActionRef.current = { dirty, saving, diskStatus, onSave };
+  });
 
   useEffect(() => {
     langRef.current = lang;

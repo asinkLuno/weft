@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { asLang, initialLang, type Lang } from "@/i18n";
 import { settings } from "@/lib/settings";
 
@@ -24,8 +24,8 @@ export function useAppSettings() {
         }
       },
     );
-    void subscription
-      .then(() => invoke<unknown>("get_language"))
+    // 与 listen 并行：languageChanged 已经挡住"事件先到、旧值后到"的覆盖
+    void invoke<unknown>("get_language")
       .then((value) => {
         if (cancelled || languageChanged) return;
         const next = asLang(value);
@@ -50,25 +50,31 @@ export function useAppSettings() {
     };
   }, []);
 
-  function updateRecents(next: string[]) {
+  const updateRecents = useCallback((next: string[]) => {
     recentsChanged.current = true;
     recentFiles.current = next;
     setRecents(next);
     void settings.set("recentFiles", next).catch(console.error);
-  }
+  }, []);
 
-  function remember(path: string) {
-    updateRecents(
-      [path, ...recentFiles.current.filter((item) => item !== path)].slice(
-        0,
-        5,
-      ),
-    );
-  }
+  const remember = useCallback(
+    (path: string) => {
+      updateRecents(
+        [path, ...recentFiles.current.filter((item) => item !== path)].slice(
+          0,
+          5,
+        ),
+      );
+    },
+    [updateRecents],
+  );
 
-  function forget(path: string) {
-    updateRecents(recentFiles.current.filter((item) => item !== path));
-  }
+  const forget = useCallback(
+    (path: string) => {
+      updateRecents(recentFiles.current.filter((item) => item !== path));
+    },
+    [updateRecents],
+  );
 
   return { lang, recents, remember, forget };
 }

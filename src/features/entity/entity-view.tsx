@@ -40,7 +40,7 @@ function DimensionFilter({
       </summary>
       <ul className="menu dropdown-content z-10 max-h-72 w-48 overflow-auto rounded-box bg-base-100 p-1 shadow">
         {sections.map((section, i) => (
-          <Fragment key={section[0].v}>
+          <Fragment key={section[0]?.v ?? String(i)}>
             {i > 0 && (
               <li
                 aria-hidden="true"
