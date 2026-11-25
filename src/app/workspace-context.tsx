@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
-import type { DraftStore } from "@/features/document/use-document";
-import type { Lang } from "@/i18n";
+import type { DiskStatus, DraftStore } from "@/features/document/use-document";
+import type { CompileDiagnostic, Lang } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 
 export type WorkspaceDocState = {
@@ -11,12 +11,14 @@ export type WorkspaceDocState = {
 
 export type WorkspaceEditorState = {
   draftStore: DraftStore;
+  diagnostic: CompileDiagnostic | null;
   dirty: boolean;
   saving: boolean;
-  hasExternalChange: boolean;
+  diskStatus: DiskStatus;
   onDraftChange: (next: string) => void;
   onSave: () => Promise<boolean>;
-  onReloadFromDisk: () => void;
+  onForceSave: () => Promise<boolean>;
+  onReloadFromDisk: () => Promise<void>;
 };
 
 export const WorkspaceDocContext = createContext<WorkspaceDocState | null>(

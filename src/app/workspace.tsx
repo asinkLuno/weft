@@ -6,8 +6,8 @@ import {
 import { FileText, RotateCcw, X as XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import type { DraftStore } from "@/features/document/use-document";
-import { type Lang, strings } from "@/i18n";
+import type { DiskStatus, DraftStore } from "@/features/document/use-document";
+import { type CompileDiagnostic, type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 import { settings } from "@/lib/settings";
 import {
@@ -33,28 +33,32 @@ const LAYOUT_SETTINGS_KEY = "workspaceLayout:v1";
 export function Workspace({
   path,
   doc,
+  diagnostic,
   draftStore,
   dirty,
   saving,
-  hasExternalChange,
+  diskStatus,
   lang,
   flash,
   onDraftChange,
   onSave,
+  onForceSave,
   onReloadFromDisk,
   onClose,
 }: {
   path: string;
   doc: WeftDoc | null;
+  diagnostic: CompileDiagnostic | null;
   draftStore: DraftStore;
   dirty: boolean;
   saving: boolean;
-  hasExternalChange: boolean;
+  diskStatus: DiskStatus;
   lang: Lang;
   flash: boolean;
   onDraftChange: (next: string) => void;
   onSave: () => Promise<boolean>;
-  onReloadFromDisk: () => void;
+  onForceSave: () => Promise<boolean>;
+  onReloadFromDisk: () => Promise<void>;
   onClose: () => void;
 }) {
   const t = strings[lang];
@@ -62,12 +66,12 @@ export function Workspace({
   const cleanupDockRef = useRef<(() => void) | null>(null);
   const langRef = useRef(lang);
   const restoringLayout = useRef(false);
-  const saveActionRef = useRef({ dirty, saving, onSave });
+  const saveActionRef = useRef({ dirty, saving, diskStatus, onSave });
   const persistTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
 
-  saveActionRef.current = { dirty, saving, onSave };
+  saveActionRef.current = { dirty, saving, diskStatus, onSave };
 
   useEffect(() => {
     langRef.current = lang;
@@ -90,9 +94,10 @@ export function Workspace({
         const {
           dirty: isDirty,
           saving: isSaving,
+          diskStatus: status,
           onSave: save,
         } = saveActionRef.current;
-        if (isDirty && !isSaving) {
+        if ((isDirty || status === "deleted") && !isSaving) {
           void save();
         }
       }
@@ -166,20 +171,24 @@ export function Workspace({
   const editorContextValue = useMemo(
     () => ({
       draftStore,
+      diagnostic,
       dirty,
       saving,
-      hasExternalChange,
+      diskStatus,
       onDraftChange,
       onSave,
+      onForceSave,
       onReloadFromDisk,
     }),
     [
       draftStore,
+      diagnostic,
       dirty,
       saving,
-      hasExternalChange,
+      diskStatus,
       onDraftChange,
       onSave,
+      onForceSave,
       onReloadFromDisk,
     ],
   );
@@ -190,6 +199,16 @@ export function Workspace({
     applyDefaultLayout(api, lang);
     schedulePersistLayout(api);
   }
+
+  const statusAlert = dirty || diskStatus !== "synced";
+  const statusLabel =
+    diskStatus === "deleted"
+      ? t.statusDeleted
+      : diskStatus === "modified"
+        ? t.statusConflict
+        : dirty
+          ? t.unsaved
+          : t.saved;
 
   return (
     <div className="app" lang={lang === "zh" ? "zh-CN" : "en"}>
@@ -215,8 +234,8 @@ export function Workspace({
         <span className="statusbar-path" title={path}>
           {path}
         </span>
-        <span className={`statusbar-state${dirty ? " is-dirty" : ""}`}>
-          {dirty ? t.unsaved : t.fileWatching}
+        <span className={`statusbar-state${statusAlert ? " is-dirty" : ""}`}>
+          {statusLabel}
         </span>
         <Button
           variant="ghost"

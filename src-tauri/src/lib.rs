@@ -57,7 +57,6 @@ fn apply_lang(app: &AppHandle, lang: &str) {
         let _ = app.set_menu(menu);
     }
     let _ = app.emit("settings-changed", json!({ "language": lang }));
-    weft_doc::refresh_language(app);
 }
 
 #[tauri::command]
@@ -81,10 +80,13 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(Mutex::new(weft_doc::DocumentState::default()))
         .invoke_handler(tauri::generate_handler![
-            weft_doc::bind_document,
+            weft_doc::open_document,
+            weft_doc::compile_document,
             weft_doc::check_document,
+            weft_doc::inspect_disk,
+            weft_doc::reload_document,
             weft_doc::save_document,
-            weft_doc::unbind_document,
+            weft_doc::close_document,
             get_language,
         ])
         .setup(|app| {

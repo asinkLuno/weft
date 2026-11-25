@@ -48,6 +48,13 @@
   font-size: 12px;
 }
 
+.weft-editor-banner-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .weft-editor-surface {
   flex: 1;
   min-height: 0;

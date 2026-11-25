@@ -143,11 +143,13 @@ function EditorPanel() {
   const { path, lang } = useWorkspaceDoc();
   const {
     draftStore,
+    diagnostic,
     dirty,
     saving,
-    hasExternalChange,
+    diskStatus,
     onDraftChange,
     onSave,
+    onForceSave,
     onReloadFromDisk,
   } = useWorkspaceEditor();
 
@@ -156,12 +158,14 @@ function EditorPanel() {
       <WeftEditorView
         path={path}
         draftStore={draftStore}
+        diagnostic={diagnostic}
         dirty={dirty}
         saving={saving}
-        hasExternalChange={hasExternalChange}
+        diskStatus={diskStatus}
         lang={lang}
         onChange={onDraftChange}
         onSave={onSave}
+        onForceSave={onForceSave}
         onReloadFromDisk={onReloadFromDisk}
       />
     </Suspense>

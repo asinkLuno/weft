@@ -6,21 +6,19 @@ import {
   setDiagnostics,
 } from "@codemirror/lint";
 import { EditorView } from "@codemirror/view";
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import CodeMirror from "@uiw/react-codemirror";
 import { RefreshCw, RotateCcw, Save } from "lucide-react";
 import {
   memo,
-  useCallback,
   useEffect,
   useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
 } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { DraftStore } from "@/features/document/use-document";
+import type { DiskStatus, DraftStore } from "@/features/document/use-document";
 import {
   type CompileDiagnostic,
   formatValidationError,
@@ -72,41 +70,30 @@ function toCodeMirrorDiagnostic(
   };
 }
 
-async function checkDocument(
-  view: EditorView,
-  lang: Lang,
-): Promise<Diagnostic[]> {
-  try {
-    const raw = await invoke<CompileDiagnostic | null>("check_document", {
-      content: view.state.doc.toString(),
-    });
-    return raw ? [toCodeMirrorDiagnostic(raw, view, lang)] : [];
-  } catch (error) {
-    console.error("check_document failed:", error);
-    return [];
-  }
-}
-
 function WeftEditorViewInner({
   path,
   draftStore,
+  diagnostic,
   dirty,
   saving,
-  hasExternalChange,
+  diskStatus,
   lang,
   onChange,
   onSave,
+  onForceSave,
   onReloadFromDisk,
 }: {
   path: string;
   draftStore: DraftStore;
+  diagnostic: CompileDiagnostic | null;
   dirty: boolean;
   saving: boolean;
-  hasExternalChange: boolean;
+  diskStatus: DiskStatus;
   lang: Lang;
   onChange: (next: string) => void;
   onSave: () => Promise<boolean>;
-  onReloadFromDisk: () => void;
+  onForceSave: () => Promise<boolean>;
+  onReloadFromDisk: () => Promise<void>;
 }) {
   const value = useSyncExternalStore(
     draftStore.subscribe,
@@ -114,51 +101,16 @@ function WeftEditorViewInner({
   );
   const t = strings[lang];
   const langRef = useRef(lang);
-  const viewRef = useRef<EditorView | null>(null);
-  const refreshSeqRef = useRef(0);
-
-  const refreshDiagnostics = useCallback(() => {
-    const view = viewRef.current;
-    if (!view) return;
-    const doc = view.state.doc;
-    const seq = ++refreshSeqRef.current;
-    void checkDocument(view, langRef.current).then((diagnostics) => {
-      if (
-        viewRef.current === view &&
-        refreshSeqRef.current === seq &&
-        view.state.doc === doc
-      ) {
-        view.dispatch(setDiagnostics(view.state, diagnostics));
-      }
-    });
-  }, []);
+  langRef.current = lang;
+  const [editorView, setEditorView] = useState<EditorView | null>(null);
 
   useEffect(() => {
-    if (langRef.current === lang) return;
-    langRef.current = lang;
-    refreshDiagnostics();
-  }, [lang, refreshDiagnostics]);
-
-  // 外部文件或依赖脚本变更时刷新诊断（.weft 文本未变时 CodeMirror linter 不会自动重跑）
-  useEffect(() => {
-    let active = true;
-    let unlisten: UnlistenFn | undefined;
-    void listen("document-changed", () => {
-      if (active) refreshDiagnostics();
-    })
-      .then((fn) => {
-        if (active) unlisten = fn;
-        else fn();
-      })
-      .catch((error: unknown) => {
-        console.error("editor lint listener failed:", error);
-      });
-    return () => {
-      active = false;
-      viewRef.current = null;
-      unlisten?.();
-    };
-  }, [refreshDiagnostics]);
+    if (!editorView) return;
+    const diagnostics = diagnostic
+      ? [toCodeMirrorDiagnostic(diagnostic, editorView, lang)]
+      : [];
+    editorView.dispatch(setDiagnostics(editorView.state, diagnostics));
+  }, [editorView, diagnostic, lang]);
 
   const extensions = useMemo(
     () => [
@@ -170,12 +122,14 @@ function WeftEditorViewInner({
         maxRenderedOptions: 30,
       }),
       lintGutter(),
-      linter((view) => checkDocument(view, langRef.current), { delay: 250 }),
+      linter(null),
       EditorView.lineWrapping,
       ...weftThemeExtension,
     ],
     [],
   );
+
+  const canSave = (dirty || diskStatus === "deleted") && !saving;
 
   return (
     <div className="weft-editor-view">
@@ -189,12 +143,14 @@ function WeftEditorViewInner({
           </Badge>
         )}
         <div className="weft-editor-actions">
-          {dirty && (
+          {dirty && diskStatus !== "deleted" && (
             <Button
               variant="ghost"
               size="xs"
               disabled={saving}
-              onClick={onReloadFromDisk}
+              onClick={() => {
+                void onReloadFromDisk();
+              }}
             >
               <RotateCcw className="size-3.5" />
               {t.revert}
@@ -203,7 +159,7 @@ function WeftEditorViewInner({
           <Button
             variant="default"
             size="xs"
-            disabled={!dirty || saving}
+            disabled={!canSave}
             onClick={() => {
               void onSave();
             }}
@@ -214,13 +170,52 @@ function WeftEditorViewInner({
         </div>
       </div>
 
-      {hasExternalChange && (
+      {diskStatus === "modified" && (
         <div className="weft-editor-banner">
           <span>{t.externalChanged}</span>
-          <Button variant="outline" size="xs" onClick={onReloadFromDisk}>
-            <RefreshCw className="size-3" />
-            {t.reloadFromDisk}
-          </Button>
+          <div className="weft-editor-banner-actions">
+            <Button
+              variant="outline"
+              size="xs"
+              disabled={saving}
+              onClick={() => {
+                void onReloadFromDisk();
+              }}
+            >
+              <RefreshCw className="size-3" />
+              {t.reloadFromDisk}
+            </Button>
+            <Button
+              variant="destructive"
+              size="xs"
+              disabled={saving}
+              onClick={() => {
+                void onForceSave();
+              }}
+            >
+              <Save className="size-3" />
+              {t.overwriteDisk}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {diskStatus === "deleted" && (
+        <div className="weft-editor-banner">
+          <span>{t.externalDeleted}</span>
+          <div className="weft-editor-banner-actions">
+            <Button
+              variant="default"
+              size="xs"
+              disabled={saving}
+              onClick={() => {
+                void onForceSave();
+              }}
+            >
+              <Save className="size-3" />
+              {t.recreateFile}
+            </Button>
+          </div>
         </div>
       )}
 
@@ -234,7 +229,7 @@ function WeftEditorViewInner({
           extensions={extensions}
           onChange={onChange}
           onCreateEditor={(view) => {
-            viewRef.current = view;
+            setEditorView(view);
           }}
         />
       </div>

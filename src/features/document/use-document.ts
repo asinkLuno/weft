@@ -1,14 +1,32 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { CompileDiagnostic, Lang } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 
-type DocumentPayload = {
-  generation: number;
-  doc: WeftDoc | null;
-  content: string | null;
+export type DiskStatus = "synced" | "modified" | "deleted";
+
+type CompileResult =
+  | { status: "ok"; doc: WeftDoc }
+  | { status: "invalid"; diagnostic: CompileDiagnostic }
+  | { status: "failed"; message: string };
+
+type OpenDocumentResult = {
+  content: string;
+  compile: CompileResult;
 };
+
+type DiskInspection = {
+  file:
+    | { status: "unchanged" }
+    | { status: "modified"; content: string }
+    | { status: "deleted" };
+  scriptsChanged: boolean;
+};
+
+type SaveResult =
+  | { status: "saved"; content: string; compile: CompileResult }
+  | { status: "conflict"; diskContent: string };
 
 export type DraftStore = {
   getSnapshot: () => string;
@@ -36,16 +54,19 @@ function createDraftStore() {
 }
 
 const WEFT_FILTER = { name: "Weft", extensions: ["weft"] };
+const CHECK_DEBOUNCE_MS = 250;
 
-// 所有文档命令与事件集中在这里；绑定、保存和解绑按边界校验会话代数。
-// 编译错误不经由这里弹窗，改由编辑器内的 lint 通道直接向后端查询并标红。
-export function useDocument() {
+// 编辑草稿与已保存视图分离：输入期间只做内联诊断，保存后才更新渲染视图；
+// 外部文件与 .rn 脚本变更在窗口回到焦点及保存前探测，不运行后台 watcher。
+export function useDocument(lang: Lang) {
   const [path, setPath] = useState<string | null>(null);
   const [doc, setDoc] = useState<WeftDoc | null>(null);
+  const [diagnostic, setDiagnostic] = useState<CompileDiagnostic | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [hasExternalChange, setHasExternalChange] = useState(false);
+  const [diskStatus, setDiskStatus] = useState<DiskStatus>("synced");
   const [flash, setFlash] = useState(false);
+
   const draftStoreRef = useRef<ReturnType<typeof createDraftStore> | null>(
     null,
   );
@@ -54,23 +75,22 @@ export function useDocument() {
   }
   const draftStore = draftStoreRef.current;
 
-  const boundGeneration = useRef<number | null>(null);
-  const busy = useRef(false);
-  const savingRef = useRef(false);
+  const mountedRef = useRef(false);
+  const pathRef = useRef<string | null>(null);
   const savedContentRef = useRef<string | null>(null);
-  const pendingChange = useRef<DocumentPayload | null>(null);
-  const mounted = useRef(false);
-  const sessionToken = useRef(0);
-  const unlistenRef = useRef<UnlistenFn | null>(null);
-  const listenerReady = useRef<Promise<void> | null>(null);
+  const busyRef = useRef(false);
+  const savingRef = useRef(false);
+  const inspectingRef = useRef(false);
+  const sessionSeq = useRef(0);
+  const docCompileSeq = useRef(0);
+  const checkSeq = useRef(0);
+  const prevLangRef = useRef(lang);
+  const checkTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
   const flashTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
-
-  const syncDirty = useCallback(() => {
-    const saved = savedContentRef.current;
-    setDirty(saved !== null && draftStore.getSnapshot() !== saved);
-  }, [draftStore]);
 
   const triggerFlash = useCallback(() => {
     setFlash(true);
@@ -78,141 +98,236 @@ export function useDocument() {
     flashTimer.current = setTimeout(() => setFlash(false), 400);
   }, []);
 
-  const syncExternalContent = useCallback(
-    (nextContent: string | null) => {
-      if (nextContent === null) return;
-      const currentDraft = draftStore.getSnapshot();
-      const wasDirty =
-        savedContentRef.current !== null &&
-        currentDraft !== savedContentRef.current;
-      savedContentRef.current = nextContent;
-      if (!wasDirty || currentDraft === nextContent) {
-        draftStore.set(nextContent);
-        setDirty(false);
-        setHasExternalChange(false);
-      } else {
-        setDirty(true);
-        setHasExternalChange(true);
+  const applyPublishedCompile = useCallback(
+    (
+      result: CompileResult,
+      options: { updateDiagnostic: boolean; flashOnOk?: boolean },
+    ) => {
+      if (result.status === "ok") {
+        setDoc(result.doc);
+        if (options.updateDiagnostic) setDiagnostic(null);
+        if (options.flashOnOk) triggerFlash();
+        return;
       }
+      setDoc(null);
+      if (result.status === "invalid") {
+        if (options.updateDiagnostic) setDiagnostic(result.diagnostic);
+        return;
+      }
+      console.error("compile_document failed:", result.message);
+      if (options.updateDiagnostic) setDiagnostic(null);
     },
-    [draftStore],
+    [triggerFlash],
   );
 
-  const startListener = useCallback(
-    (resetBackend: boolean): Promise<void> => {
-      const token = ++sessionToken.current;
-      const prevUnlisten = unlistenRef.current;
-      unlistenRef.current = null;
-      prevUnlisten?.();
+  const checkDraft = useCallback(async (content: string, session: number) => {
+    const seq = ++checkSeq.current;
+    try {
+      const next = await invoke<CompileDiagnostic | null>("check_document", {
+        content,
+      });
+      if (
+        !mountedRef.current ||
+        sessionSeq.current !== session ||
+        checkSeq.current !== seq
+      ) {
+        return;
+      }
+      setDiagnostic(next);
+    } catch (error) {
+      console.error("check_document failed:", error);
+    }
+  }, []);
 
-      const setup = (async () => {
-        if (resetBackend) {
-          // 清理页面刷新/HMR 前后端可能残留的旧 watcher
-          await invoke("unbind_document").catch(() => {});
-        }
-        if (token !== sessionToken.current) return;
-        const unlisten = await listen<DocumentPayload>(
-          "document-changed",
-          ({ payload }) => {
-            if (token !== sessionToken.current) return;
-            if (busy.current) {
-              pendingChange.current = payload;
-              return;
-            }
-            if (
-              boundGeneration.current === null ||
-              payload.generation !== boundGeneration.current
-            ) {
-              return;
-            }
-            setDoc(payload.doc);
-            syncExternalContent(payload.content);
-            if (payload.doc) triggerFlash();
-          },
-        );
-        if (token !== sessionToken.current) {
-          unlisten();
+  // 重新编译已保存的文档内容以刷新视图；若草稿未保存则同时刷新草稿诊断。
+  const recompileSaved = useCallback(
+    async (session: number, options: { flashOnOk?: boolean } = {}) => {
+      const saved = savedContentRef.current;
+      if (saved === null) return;
+      const currentDraft = draftStore.getSnapshot();
+      const isDirty = currentDraft !== saved;
+
+      const seq = ++docCompileSeq.current;
+      if (!isDirty) {
+        clearTimeout(checkTimer.current);
+        checkSeq.current += 1;
+      }
+
+      try {
+        const result = await invoke<CompileResult>("compile_document", {
+          content: saved,
+        });
+        if (
+          !mountedRef.current ||
+          sessionSeq.current !== session ||
+          docCompileSeq.current !== seq
+        ) {
           return;
         }
-        unlistenRef.current = unlisten;
-      })();
+        const stillClean = draftStore.getSnapshot() === saved;
+        applyPublishedCompile(result, {
+          updateDiagnostic: stillClean,
+          flashOnOk: options.flashOnOk,
+        });
+      } catch (error) {
+        console.error("compile_document failed:", error);
+      }
 
-      listenerReady.current = setup;
-      void setup.catch((error: unknown) => {
-        if (token === sessionToken.current) {
-          listenerReady.current = null;
-          console.error("document listener failed:", error);
-        }
-      });
-      return setup;
+      if (isDirty) {
+        clearTimeout(checkTimer.current);
+        void checkDraft(draftStore.getSnapshot(), session);
+      }
     },
-    [syncExternalContent, triggerFlash],
+    [applyPublishedCompile, checkDraft, draftStore],
   );
 
+  const reloadInternal = useCallback(
+    async (session: number, options: { flashOnOk?: boolean } = {}) => {
+      clearTimeout(checkTimer.current);
+      const docSeq = ++docCompileSeq.current;
+      const diagSeq = ++checkSeq.current;
+      const result = await invoke<OpenDocumentResult>("reload_document");
+      if (
+        !mountedRef.current ||
+        sessionSeq.current !== session ||
+        docCompileSeq.current !== docSeq ||
+        checkSeq.current !== diagSeq
+      ) {
+        return;
+      }
+      savedContentRef.current = result.content;
+      draftStore.set(result.content);
+      setDirty(false);
+      setDiskStatus("synced");
+      applyPublishedCompile(result.compile, {
+        updateDiagnostic: true,
+        flashOnOk: options.flashOnOk,
+      });
+    },
+    [applyPublishedCompile, draftStore],
+  );
+
+  const inspectDisk = useCallback(async () => {
+    if (
+      !mountedRef.current ||
+      pathRef.current === null ||
+      busyRef.current ||
+      savingRef.current ||
+      inspectingRef.current
+    ) {
+      return;
+    }
+    const session = sessionSeq.current;
+    inspectingRef.current = true;
+    try {
+      const result = await invoke<DiskInspection>("inspect_disk");
+      if (!mountedRef.current || sessionSeq.current !== session) return;
+
+      const currentDraft = draftStore.getSnapshot();
+      const isDirty =
+        savedContentRef.current !== null &&
+        currentDraft !== savedContentRef.current;
+
+      if (result.file.status === "deleted") {
+        setDiskStatus("deleted");
+        if (result.scriptsChanged) {
+          void recompileSaved(session, { flashOnOk: true });
+        }
+        return;
+      }
+
+      if (result.file.status === "modified") {
+        if (!isDirty || result.file.content === currentDraft) {
+          await reloadInternal(session, { flashOnOk: true });
+          return;
+        }
+        setDiskStatus("modified");
+        if (result.scriptsChanged) {
+          void recompileSaved(session);
+        }
+        return;
+      }
+
+      setDiskStatus("synced");
+      if (result.scriptsChanged) {
+        void recompileSaved(session, { flashOnOk: true });
+      }
+    } catch (error) {
+      console.error("inspect_disk failed:", error);
+    } finally {
+      inspectingRef.current = false;
+    }
+  }, [draftStore, recompileSaved, reloadInternal]);
+
+  // 挂载时清理页面刷新/HMR 前可能残留的后端会话，并在窗口恢复焦点时探测外部改动。
   useEffect(() => {
-    mounted.current = true;
-    void startListener(true);
-    return () => {
-      mounted.current = false;
-      sessionToken.current += 1;
-      listenerReady.current = null;
-      clearTimeout(flashTimer.current);
-      const unlisten = unlistenRef.current;
-      unlistenRef.current = null;
-      unlisten?.();
-      if (boundGeneration.current !== null || busy.current) {
-        boundGeneration.current = null;
-        void invoke("unbind_document").catch(() => {});
+    mountedRef.current = true;
+    void invoke("close_document").catch(() => {});
+
+    const handleFocus = () => {
+      void inspectDisk();
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void inspectDisk();
       }
     };
-  }, [startListener]);
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
 
-  function takePendingChange(): DocumentPayload | null {
-    const payload = pendingChange.current;
-    pendingChange.current = null;
-    return payload;
-  }
+    return () => {
+      mountedRef.current = false;
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      clearTimeout(checkTimer.current);
+      clearTimeout(flashTimer.current);
+      if (pathRef.current !== null || busyRef.current) {
+        pathRef.current = null;
+        void invoke("close_document").catch(() => {});
+      }
+    };
+  }, [inspectDisk]);
+
+  // 语言切换后重编已保存文档刷新本地化展示值，未保存草稿同步刷新诊断。
+  useEffect(() => {
+    if (prevLangRef.current === lang) return;
+    prevLangRef.current = lang;
+    if (pathRef.current === null || busyRef.current) return;
+    void recompileSaved(sessionSeq.current);
+  }, [lang, recompileSaved]);
 
   async function bind(
     nextPath: string,
   ): Promise<"bound" | "failed" | "ignored"> {
-    if (busy.current) return "ignored";
-    busy.current = true;
-    pendingChange.current = null;
+    if (busyRef.current) return "ignored";
+    busyRef.current = true;
+    clearTimeout(checkTimer.current);
+    const session = ++sessionSeq.current;
+    docCompileSeq.current += 1;
+    checkSeq.current += 1;
     try {
-      // 先完成订阅（若首次订阅失败则自动重试），再绑定文件，避免初次打开时漏掉 watcher 更新。
-      const ready = listenerReady.current ?? startListener(false);
-      await ready;
-      const payload = await invoke<DocumentPayload>("bind_document", {
+      const result = await invoke<OpenDocumentResult>("open_document", {
         path: nextPath,
       });
-      if (!mounted.current) {
-        void invoke("unbind_document").catch(() => {});
+      if (!mountedRef.current || sessionSeq.current !== session) {
+        void invoke("close_document").catch(() => {});
         return "ignored";
       }
-      // 绑定期间若收到同一会话代数的新变更，优先采用较新快照；旧文档迟到事件按代数丢弃。
-      const changed = takePendingChange();
-      const effective =
-        changed && changed.generation === payload.generation
-          ? changed
-          : payload;
-      const initialContent = effective.content ?? "";
-      boundGeneration.current = payload.generation;
-      savedContentRef.current = effective.content;
-      draftStore.set(initialContent);
+      pathRef.current = nextPath;
+      savedContentRef.current = result.content;
+      draftStore.set(result.content);
       setPath(nextPath);
-      setDoc(effective.doc);
       setDirty(false);
-      setHasExternalChange(false);
+      setDiskStatus("synced");
       clearTimeout(flashTimer.current);
       setFlash(false);
+      applyPublishedCompile(result.compile, { updateDiagnostic: true });
       return "bound";
     } catch (error) {
-      console.error("bind_document failed:", error);
+      console.error("open_document failed:", error);
       return "failed";
     } finally {
-      pendingChange.current = null;
-      busy.current = false;
+      busyRef.current = false;
     }
   }
 
@@ -220,56 +335,85 @@ export function useDocument() {
     (next: string) => {
       draftStore.set(next);
       const saved = savedContentRef.current;
-      const nextDirty = saved !== null && next !== saved;
-      setDirty(nextDirty);
-      if (!nextDirty) {
-        setHasExternalChange(false);
-      }
+      setDirty(saved !== null && next !== saved);
+      clearTimeout(checkTimer.current);
+      const session = sessionSeq.current;
+      checkTimer.current = setTimeout(() => {
+        void checkDraft(next, session);
+      }, CHECK_DEBOUNCE_MS);
     },
-    [draftStore],
+    [checkDraft, draftStore],
   );
 
-  const save = useCallback(async (): Promise<boolean> => {
-    if (
-      busy.current ||
-      savingRef.current ||
-      boundGeneration.current === null ||
-      savedContentRef.current === null
-    ) {
-      return false;
-    }
-    const generation = boundGeneration.current;
-    const content = draftStore.getSnapshot();
-    savingRef.current = true;
-    setSaving(true);
-    try {
-      const payload = await invoke<DocumentPayload>("save_document", {
-        content,
-      });
-      if (!mounted.current || boundGeneration.current !== generation) {
+  const saveWithMode = useCallback(
+    async (force: boolean): Promise<boolean> => {
+      if (
+        busyRef.current ||
+        savingRef.current ||
+        pathRef.current === null ||
+        savedContentRef.current === null
+      ) {
         return false;
       }
-      setDoc(payload.doc);
-      savedContentRef.current = payload.content;
-      syncDirty();
-      setHasExternalChange(false);
-      if (payload.doc) triggerFlash();
-      return true;
-    } catch (error) {
-      console.error("save_document failed:", error);
-      return false;
-    } finally {
-      savingRef.current = false;
-      if (mounted.current) setSaving(false);
-    }
-  }, [draftStore, syncDirty, triggerFlash]);
+      const session = sessionSeq.current;
+      const content = draftStore.getSnapshot();
+      clearTimeout(checkTimer.current);
+      const docSeq = ++docCompileSeq.current;
+      const diagSeq = ++checkSeq.current;
+      savingRef.current = true;
+      setSaving(true);
+      try {
+        const result = await invoke<SaveResult>("save_document", {
+          content,
+          force,
+        });
+        if (!mountedRef.current || sessionSeq.current !== session) {
+          return false;
+        }
+        if (result.status === "conflict") {
+          setDiskStatus("modified");
+          return false;
+        }
+        savedContentRef.current = result.content;
+        const currentDraft = draftStore.getSnapshot();
+        setDirty(currentDraft !== result.content);
+        setDiskStatus("synced");
+        if (docCompileSeq.current === docSeq) {
+          const updateDiag =
+            checkSeq.current === diagSeq && currentDraft === result.content;
+          applyPublishedCompile(result.compile, {
+            updateDiagnostic: updateDiag,
+            flashOnOk: true,
+          });
+        }
+        return true;
+      } catch (error) {
+        console.error("save_document failed:", error);
+        return false;
+      } finally {
+        savingRef.current = false;
+        if (mountedRef.current) setSaving(false);
+      }
+    },
+    [applyPublishedCompile, draftStore],
+  );
 
-  const reloadFromDisk = useCallback(() => {
-    if (savedContentRef.current === null) return;
-    draftStore.set(savedContentRef.current);
-    setDirty(false);
-    setHasExternalChange(false);
-  }, [draftStore]);
+  const save = useCallback(() => saveWithMode(false), [saveWithMode]);
+  const forceSave = useCallback(() => saveWithMode(true), [saveWithMode]);
+
+  const reloadFromDisk = useCallback(async () => {
+    if (busyRef.current || savingRef.current || pathRef.current === null) {
+      return;
+    }
+    busyRef.current = true;
+    try {
+      await reloadInternal(sessionSeq.current, { flashOnOk: true });
+    } catch (error) {
+      console.error("reload_document failed:", error);
+    } finally {
+      busyRef.current = false;
+    }
+  }, [reloadInternal]);
 
   async function openFile(): Promise<string | null> {
     try {
@@ -282,41 +426,47 @@ export function useDocument() {
   }
 
   async function close() {
-    if (busy.current) return;
-    busy.current = true;
-    pendingChange.current = null;
+    if (busyRef.current) return;
+    busyRef.current = true;
+    clearTimeout(checkTimer.current);
+    sessionSeq.current += 1;
+    docCompileSeq.current += 1;
+    checkSeq.current += 1;
     try {
-      await invoke("unbind_document");
-      if (!mounted.current) return;
-      boundGeneration.current = null;
+      await invoke("close_document");
+      if (!mountedRef.current) return;
+      pathRef.current = null;
       savedContentRef.current = null;
       draftStore.set("");
       savingRef.current = false;
       setPath(null);
       setDoc(null);
+      setDiagnostic(null);
       setDirty(false);
       setSaving(false);
-      setHasExternalChange(false);
+      setDiskStatus("synced");
       clearTimeout(flashTimer.current);
       setFlash(false);
     } catch (error) {
-      console.error("unbind_document failed:", error);
+      console.error("close_document failed:", error);
     } finally {
-      busy.current = false;
+      busyRef.current = false;
     }
   }
 
   return {
     path,
     doc,
+    diagnostic,
     draftStore,
     dirty,
     saving,
-    hasExternalChange,
+    diskStatus,
     flash,
     bind,
     updateDraft,
     save,
+    forceSave,
     reloadFromDisk,
     openFile,
     close,

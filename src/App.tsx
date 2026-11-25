@@ -19,18 +19,20 @@ export default function App() {
   const {
     path,
     doc,
+    diagnostic,
     draftStore,
     dirty,
     saving,
-    hasExternalChange,
+    diskStatus,
     flash,
     bind,
     updateDraft,
     save,
+    forceSave,
     reloadFromDisk,
     openFile,
     close,
-  } = useDocument();
+  } = useDocument(lang);
 
   async function openRecent(nextPath: string) {
     const result = await bind(nextPath);
@@ -49,14 +51,16 @@ export default function App() {
         key={path}
         path={path}
         doc={doc}
+        diagnostic={diagnostic}
         draftStore={draftStore}
         dirty={dirty}
         saving={saving}
-        hasExternalChange={hasExternalChange}
+        diskStatus={diskStatus}
         lang={lang}
         flash={flash}
         onDraftChange={updateDraft}
         onSave={save}
+        onForceSave={forceSave}
         onReloadFromDisk={reloadFromDisk}
         onClose={close}
       />
