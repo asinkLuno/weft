@@ -1,27 +1,15 @@
 //! 用 examples/story.weft 跑一遍完整编译，打印归属 DAG。
 
-#![allow(dead_code)]
-
-#[path = "../src/calculable_prop.rs"]
-mod calculable_prop;
-#[path = "../src/calendar.rs"]
-mod calendar;
-#[path = "../src/plugin_loader.rs"]
-mod plugin_loader;
-#[path = "../src/weft/mod.rs"]
-mod weft;
-
 use std::{collections::HashMap, fs, path::Path};
 
-use weft::entity::BelongNode;
+use weft_core::{compiler, entity::BelongNode};
 
 fn main() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let base = manifest.join("../examples");
-    let gregorian = manifest.join("rune/gregorian.rn");
+    let base = manifest.join("../../examples");
     let content = fs::read_to_string(base.join("story.weft")).expect("read story.weft");
 
-    let doc = weft::compiler::compile_with_scripts(&content, &base, &gregorian, "zh")
+    let doc = compiler::compile_with_scripts(&content, &base, "zh")
         .1
         .expect("compile story");
 

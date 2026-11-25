@@ -4,8 +4,8 @@ use rune::{Unit, Vm, runtime::RuntimeContext};
 use serde_json::{Value, json};
 
 use crate::calendar::Calendar;
+use crate::errors::{ByteSpan, Diagnostic, DocumentError, ValidationError};
 use crate::plugin_loader;
-use crate::weft::errors::{DocumentError, SourceSpan, ValidationError};
 
 // 可计算属性运行时：脚本接收实体上下文，calculable_prop 的返回值直接作为
 // 实体 extra_props 中该属性注册 ID 下的值，不生成实体，也不改归属。
@@ -21,24 +21,30 @@ pub struct CalculablePropRuntime {
 
 impl CalculablePropRuntime {
     // 注册表来自 story.calculable_props，脚本路径相对故事文件；
-    // calendar 元信息与 lang 随运行时一起固定，切换语言时整个文档会重新解析。
-    pub fn load(
-        specs: &HashMap<String, (String, SourceSpan)>,
+    // 逐条加载并把全部加载失败汇入 diagnostics，不因单条脚本失败而漏检其余脚本。
+    pub fn load_collecting(
+        specs: &HashMap<String, (String, ByteSpan)>,
         base: &Path,
         calendar: &Calendar,
         lang: &str,
-    ) -> Result<Self, DocumentError> {
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Self {
         let runtime = plugin_loader::host_runtime();
         let mut scripts = HashMap::new();
         let mut names: Vec<_> = specs.keys().collect();
         names.sort_unstable();
         for name in names {
             let (source, span) = &specs[name];
-            let unit = load_script(name, source, base, &runtime)
-                .map_err(|err| DocumentError::validation_at(err, span.clone()))?;
-            scripts.insert(name.clone(), unit);
+            match load_script(name, source, base, &runtime) {
+                Ok(unit) => {
+                    scripts.insert(name.clone(), unit);
+                }
+                Err(err) => {
+                    diagnostics.push(Diagnostic::from_validation(err, Some(*span)));
+                }
+            }
         }
-        Ok(Self {
+        Self {
             runtime,
             scripts,
             calendar: json!({
@@ -47,7 +53,11 @@ impl CalculablePropRuntime {
                 "minimums": calendar.minimums(),
             }),
             lang: lang.to_owned(),
-        })
+        }
+    }
+
+    pub fn has_script(&self, name: &str) -> bool {
+        self.scripts.contains_key(name)
     }
 
     // 计算一个属性：脚本上下文由文档级常量与实体段提供的 entity 拼成；

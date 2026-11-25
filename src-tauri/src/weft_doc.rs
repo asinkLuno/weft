@@ -14,10 +14,9 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_log::log::error;
-
-use crate::plugin_loader::MAX_SCRIPT_BYTES;
-use crate::weft::compiler::{self, StoryScriptRefs};
-use crate::weft::errors::{CompileDiagnostic, DocumentError};
+use weft_core::compiler::{self, StoryScriptRefs};
+use weft_core::errors::{CompileDiagnostic, DocumentError};
+use weft_core::plugin_loader::MAX_SCRIPT_BYTES;
 
 #[derive(Clone, PartialEq, Eq)]
 enum ScriptFingerprint {
@@ -157,34 +156,13 @@ fn snapshot_script_refs(refs: StoryScriptRefs, base: &Path) -> BTreeMap<PathBuf,
     fingerprints
 }
 
-fn resolve_gregorian(app: &AppHandle) -> Result<PathBuf, DocumentError> {
-    app.path()
-        .resolve(
-            crate::calendar::GREGORIAN,
-            tauri::path::BaseDirectory::Resource,
-        )
-        .map_err(DocumentError::raw)
-}
-
 fn compile_text(
     app: &AppHandle,
     content: &str,
     base: &Path,
 ) -> (Option<BTreeMap<PathBuf, ScriptFingerprint>>, CompileResult) {
-    let gregorian = match resolve_gregorian(app) {
-        Ok(path) => path,
-        Err(err) => {
-            error!("failed to resolve gregorian script: {err}");
-            return (
-                None,
-                CompileResult::Failed {
-                    message: err.to_string(),
-                },
-            );
-        }
-    };
     let lang = crate::current_lang(app);
-    let (refs, compiled) = compiler::compile_with_scripts(content, base, &gregorian, &lang);
+    let (refs, compiled) = compiler::compile_with_scripts(content, base, &lang);
     let scripts = refs.map(|r| snapshot_script_refs(r, base));
     let result = match compiled {
         Ok(doc) => {
@@ -318,9 +296,8 @@ pub fn check_document(
             .parent
             .clone()
     };
-    let gregorian = resolve_gregorian(&app)?;
     let lang = crate::current_lang(&app);
-    match compiler::compile_with_scripts(&content, &parent, &gregorian, &lang).1 {
+    match compiler::compile_with_scripts(&content, &parent, &lang).1 {
         Ok(_) => Ok(None),
         Err(DocumentError::Validation { error, span }) => {
             Ok(Some(CompileDiagnostic { error, span }))

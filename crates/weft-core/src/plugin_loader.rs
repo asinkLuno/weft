@@ -21,7 +21,7 @@ pub(crate) const API_VERSION: u32 = 1;
 // 脚本来自用户文件，限制指令预算与文件体积防止失控；上下文不装 io（无 print/dbg），
 // 原生函数不注入，预算对脚本内的全部执行生效。
 pub(crate) const INSTRUCTION_BUDGET: usize = 1_000_000;
-pub(crate) const MAX_SCRIPT_BYTES: u64 = 1024 * 1024;
+pub const MAX_SCRIPT_BYTES: u64 = 1024 * 1024;
 const COMPILE_CACHE_LIMIT: usize = 128;
 
 fn build_context() -> Context {

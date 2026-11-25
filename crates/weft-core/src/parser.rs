@@ -1,4 +1,4 @@
-//! `.weft` 领域语言词法分析器、AST 与 chumsky 语法解析器。
+//! `.weft` 领域语言词法分析器、AST、注释扫描器与支持错误恢复的 chumsky 语法解析器。
 //!
 //! 语法为类 HCL 的声明式块语言：
 //! - 顶层声明：`story { ... }`、`time <name> = <expr>`、`entity <name> { ... }`、
@@ -11,37 +11,13 @@ use std::fmt;
 
 use chumsky::{input::ValueInput, prelude::*};
 
-use crate::weft::errors::{DocumentError, SourceSpan, ValidationError};
+use crate::errors::{ByteSpan, Diagnostic, DocumentError, ValidationError};
 
 pub type Span = SimpleSpan;
 pub type Spanned<T> = (T, Span);
 
-fn clamp_char_boundary(src: &str, offset: usize) -> usize {
-    let mut safe = offset.min(src.len());
-    while safe > 0 && !src.is_char_boundary(safe) {
-        safe -= 1;
-    }
-    safe
-}
-
-/// 把 chumsky 字节区间转成 UTF-16 偏移（对齐 CodeMirror）与 1-based `(line, column)`。
-pub(crate) fn source_span(src: &str, span: Span) -> SourceSpan {
-    let start_byte = clamp_char_boundary(src, span.start);
-    let end_byte = clamp_char_boundary(src, span.end.max(start_byte));
-    let prefix = &src[..start_byte];
-    let start = prefix.encode_utf16().count();
-    let end = start + src[start_byte..end_byte].encode_utf16().count();
-    let line = prefix.bytes().filter(|&b| b == b'\n').count() + 1;
-    let column = match prefix.rfind('\n') {
-        Some(pos) => prefix[pos + 1..].chars().count() + 1,
-        None => prefix.chars().count() + 1,
-    };
-    SourceSpan {
-        start,
-        end,
-        line,
-        column,
-    }
+pub(crate) fn to_byte_span(span: Span) -> ByteSpan {
+    ByteSpan::new(span.start, span.end)
 }
 
 // ---- AST ----
@@ -116,6 +92,16 @@ pub enum Expr {
     },
 }
 
+/// 源码中的注释记录（供格式化器保真回写）。
+#[derive(Clone, Debug)]
+pub struct Comment {
+    pub span: ByteSpan,
+    pub text: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub is_block: bool,
+}
+
 // ---- Token ----
 
 #[derive(Clone, Debug, PartialEq)]
@@ -163,15 +149,132 @@ impl fmt::Display for Token {
     }
 }
 
-// ---- 词法分析器 ----
+// ---- 标识符规则（词法与格式化共用） ----
 
-fn is_ident_start(c: char) -> bool {
+pub fn is_ident_start(c: char) -> bool {
     c.is_alphabetic() || c == '_'
 }
 
-fn is_ident_continue(c: char) -> bool {
+pub fn is_ident_continue(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '·' || c == '・'
 }
+
+pub fn is_valid_bare_name(s: &str) -> bool {
+    if s.is_empty() || matches!(s, "true" | "false" | "null") {
+        return false;
+    }
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    is_ident_start(first) && chars.all(is_ident_continue)
+}
+
+// ---- 注释扫描器 ----
+
+/// 扫描 `.weft` 源码中的全部注释（跳过字符串字面量内的 `#` / `//` / `/*`）。
+pub fn extract_comments(src: &str) -> Vec<Comment> {
+    let mut comments = Vec::new();
+    let bytes = src.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    let mut line = 1usize;
+
+    while i < len {
+        // 三引号多行字符串
+        if bytes[i..].starts_with(b"\"\"\"") {
+            i += 3;
+            while i < len {
+                if bytes[i] == b'\\' && i + 1 < len {
+                    if bytes[i + 1] == b'\n' {
+                        line += 1;
+                    }
+                    i += 2;
+                } else if bytes[i..].starts_with(b"\"\"\"") {
+                    i += 3;
+                    break;
+                } else {
+                    if bytes[i] == b'\n' {
+                        line += 1;
+                    }
+                    i += 1;
+                }
+            }
+            continue;
+        }
+
+        // 单行双引号字符串
+        if bytes[i] == b'"' {
+            i += 1;
+            while i < len {
+                if bytes[i] == b'\\' && i + 1 < len {
+                    i += 2;
+                } else if bytes[i] == b'"' {
+                    i += 1;
+                    break;
+                } else if bytes[i] == b'\n' {
+                    line += 1;
+                    i += 1;
+                    break;
+                } else {
+                    i += 1;
+                }
+            }
+            continue;
+        }
+
+        // 行注释 `# ...` 或 `// ...`
+        if bytes[i] == b'#' || bytes[i..].starts_with(b"//") {
+            let start = i;
+            let start_line = line;
+            while i < len && bytes[i] != b'\n' {
+                i += 1;
+            }
+            let text = src[start..i].trim_end_matches('\r').trim_end().to_owned();
+            comments.push(Comment {
+                span: ByteSpan::new(start, i),
+                text,
+                start_line,
+                end_line: start_line,
+                is_block: false,
+            });
+            continue;
+        }
+
+        // 块注释 `/* ... */`
+        if bytes[i..].starts_with(b"/*") {
+            let start = i;
+            let start_line = line;
+            i += 2;
+            while i < len && !bytes[i..].starts_with(b"*/") {
+                if bytes[i] == b'\n' {
+                    line += 1;
+                }
+                i += 1;
+            }
+            if i < len {
+                i += 2;
+            }
+            comments.push(Comment {
+                span: ByteSpan::new(start, i),
+                text: src[start..i].to_owned(),
+                start_line,
+                end_line: line,
+                is_block: true,
+            });
+            continue;
+        }
+
+        if bytes[i] == b'\n' {
+            line += 1;
+        }
+        i += 1;
+    }
+
+    comments
+}
+
+// ---- 词法分析器 ----
 
 fn dedent_multiline(raw: &str) -> String {
     let trimmed = raw
@@ -297,19 +400,21 @@ fn lexer<'src>()
 
     let comment = line_comment.or(block_comment).padded();
 
-    let token = choice((multiline_str, single_str, number, punct, ident));
+    let token = choice((multiline_str, single_str, number, punct, ident))
+        .map_with(|tok, e| Some((tok, e.span())))
+        .recover_with(skip_then_retry_until(any().ignored(), end()));
 
     token
-        .map_with(|tok, e| (tok, e.span()))
         .padded_by(comment.repeated())
         .padded()
         .repeated()
-        .collect()
+        .collect::<Vec<_>>()
+        .map(|items| items.into_iter().flatten().collect())
         .then_ignore(comment.repeated().padded())
         .then_ignore(end())
 }
 
-// ---- 语法解析器 ----
+// ---- 语法解析器（带块级与顶层错误恢复） ----
 
 fn opt_sep<'tokens, I>()
 -> impl Parser<'tokens, I, (), extra::Err<Rich<'tokens, Token, Span>>> + Clone
@@ -332,6 +437,33 @@ where
     .labelled("name")
 }
 
+fn kw<'tokens, I>(
+    word: &'static str,
+) -> impl Parser<'tokens, I, (), extra::Err<Rich<'tokens, Token, Span>>> + Clone
+where
+    I: ValueInput<'tokens, Token = Token, Span = Span>,
+{
+    select! {
+        Token::Ident(s) if s == word => (),
+    }
+    .labelled(word)
+}
+
+fn top_kw<'tokens, I>()
+-> impl Parser<'tokens, I, (), extra::Err<Rich<'tokens, Token, Span>>> + Clone
+where
+    I: ValueInput<'tokens, Token = Token, Span = Span>,
+{
+    choice((
+        kw("story"),
+        kw("time"),
+        kw("entity"),
+        kw("link"),
+        kw("event"),
+        kw("narrative"),
+    ))
+}
+
 fn attr_block_parser<'tokens, I, E>(
     val_expr: E,
 ) -> impl Parser<'tokens, I, Vec<Spanned<Attr>>, extra::Err<Rich<'tokens, Token, Span>>> + Clone
@@ -339,16 +471,36 @@ where
     I: ValueInput<'tokens, Token = Token, Span = Span>,
     E: Parser<'tokens, I, Spanned<Expr>, extra::Err<Rich<'tokens, Token, Span>>> + Clone,
 {
-    name_parser()
+    let attr = name_parser()
         .then_ignore(just(Token::Eq))
         .then(val_expr)
         .map(|(key, value)| Attr { key, value })
-        .map_with(|attr, e| (attr, e.span()))
+        .map_with(|attr, e| Some((attr, e.span())))
         .labelled("attribute")
         .then_ignore(opt_sep())
-        .repeated()
+        .recover_with(via_parser(
+            any()
+                .and_is(
+                    just(Token::RBrace)
+                        .ignored()
+                        .or(name_parser().then(just(Token::Eq)).ignored())
+                        .not(),
+                )
+                .repeated()
+                .at_least(1)
+                .to(None),
+        ));
+
+    attr.repeated()
         .collect::<Vec<_>>()
+        .map(|items| items.into_iter().flatten().collect())
         .delimited_by(just(Token::LBrace), just(Token::RBrace))
+        .recover_with(via_parser(nested_delimiters(
+            Token::LBrace,
+            Token::RBrace,
+            [(Token::LBracket, Token::RBracket)],
+            |_| Vec::new(),
+        )))
 }
 
 fn parser<'tokens, I>() -> impl Parser<'tokens, I, WeftAst, extra::Err<Rich<'tokens, Token, Span>>>
@@ -373,6 +525,12 @@ where
             .allow_trailing()
             .collect::<Vec<_>>()
             .delimited_by(just(Token::LBracket), just(Token::RBracket))
+            .recover_with(via_parser(nested_delimiters(
+                Token::LBracket,
+                Token::RBracket,
+                [(Token::LBrace, Token::RBrace)],
+                |_| Vec::new(),
+            )))
             .map(Expr::List)
             .labelled("list");
 
@@ -442,13 +600,6 @@ where
 
     let attr_block = attr_block_parser(expr.clone());
 
-    let kw = |word: &'static str| {
-        select! {
-            Token::Ident(s) if s == word => (),
-        }
-        .labelled(word)
-    };
-
     let story_decl = kw("story")
         .ignore_then(attr_block.clone())
         .map(TopItem::Story)
@@ -479,17 +630,24 @@ where
             relation,
             right,
         })
-        .map_with(|edge, e| (edge, e.span()))
-        .labelled("link edge");
+        .map_with(|edge, e| Some((edge, e.span())))
+        .labelled("link edge")
+        .then_ignore(opt_sep());
 
     let link_decl = kw("link")
         .ignore_then(name.clone())
         .then(
             link_edge
-                .then_ignore(opt_sep())
                 .repeated()
                 .collect::<Vec<_>>()
-                .delimited_by(just(Token::LBrace), just(Token::RBrace)),
+                .map(|items| items.into_iter().flatten().collect())
+                .delimited_by(just(Token::LBrace), just(Token::RBrace))
+                .recover_with(via_parser(nested_delimiters(
+                    Token::LBrace,
+                    Token::RBrace,
+                    [(Token::LBracket, Token::RBracket)],
+                    |_| Vec::new(),
+                ))),
         )
         .map(|(group, edges)| TopItem::Link { group, edges })
         .labelled("link block");
@@ -505,7 +663,13 @@ where
         .separated_by(just(Token::Comma))
         .allow_trailing()
         .collect::<Vec<_>>()
-        .delimited_by(just(Token::LBracket), just(Token::RBracket));
+        .delimited_by(just(Token::LBracket), just(Token::RBracket))
+        .recover_with(via_parser(nested_delimiters(
+            Token::LBracket,
+            Token::RBracket,
+            [(Token::LBrace, Token::RBrace)],
+            |_| Vec::new(),
+        )));
 
     let narrative_decl = kw("narrative")
         .ignore_then(name)
@@ -523,39 +687,76 @@ where
         event_decl,
         narrative_decl,
     ))
-    .map_with(|item, e| (item, e.span()));
+    .map_with(|item, e| Some((item, e.span())))
+    .recover_with(via_parser(
+        any()
+            .and_is(top_kw().not())
+            .repeated()
+            .at_least(1)
+            .to(None),
+    ));
 
     top_item
         .repeated()
         .collect::<Vec<_>>()
         .then_ignore(end())
-        .map(|items| WeftAst { items })
+        .map(|items| WeftAst {
+            items: items.into_iter().flatten().collect(),
+        })
 }
 
 // ---- 对外入口 ----
 
-fn syntax_error(src: &str, span: Span, details: impl Into<String>) -> DocumentError {
-    DocumentError::validation_at(
+fn syntax_diagnostic(span: Span, details: impl Into<String>) -> Diagnostic {
+    Diagnostic::from_validation(
         ValidationError::SyntaxError {
             details: details.into(),
         },
-        source_span(src, span),
+        Some(to_byte_span(span)),
     )
 }
 
-/// 完整解析 `.weft` 源码为 AST；遇到词法或语法错误时返回带源码位置的 `DocumentError`。
-pub(crate) fn parse_weft(src: &str) -> Result<WeftAst, DocumentError> {
+/// 容错解析 `.weft` 源码：尽可能恢复并产出部分 AST 与全部词法/语法诊断。
+pub fn parse_weft_recover(src: &str) -> (Option<WeftAst>, Vec<Diagnostic>) {
+    let mut diagnostics = Vec::new();
     let (tokens, lex_errs) = lexer().parse(src).into_output_errors();
-    if let Some(first) = lex_errs.first() {
-        return Err(syntax_error(src, *first.span(), first.to_string()));
+    for err in lex_errs {
+        diagnostics.push(syntax_diagnostic(*err.span(), err.to_string()));
     }
-    let tokens = tokens.unwrap_or_default();
+    let Some(tokens) = tokens else {
+        return (None, diagnostics);
+    };
     let eoi = Span::from(src.len()..src.len());
     let (ast, parse_errs) = parser()
         .parse(tokens.as_slice().map(eoi, |(tok, span)| (tok, span)))
         .into_output_errors();
-    if let Some(first) = parse_errs.first() {
-        return Err(syntax_error(src, *first.span(), first.to_string()));
+    for err in parse_errs {
+        diagnostics.push(syntax_diagnostic(*err.span(), err.to_string()));
     }
-    ast.ok_or_else(|| syntax_error(src, eoi, "unexpected end of input"))
+    if ast.is_none() && diagnostics.is_empty() {
+        diagnostics.push(syntax_diagnostic(eoi, "unexpected end of input"));
+    }
+    (ast, diagnostics)
+}
+
+/// 严格解析 `.weft` 源码（供格式化器等需要零语法错误的场景使用）。
+pub fn parse_weft(src: &str) -> Result<WeftAst, DocumentError> {
+    let (ast, diagnostics) = parse_weft_recover(src);
+    if let Some(first) = diagnostics.into_iter().next() {
+        let span = first.span.unwrap_or_else(|| ByteSpan::new(src.len(), src.len()));
+        let err = first
+            .error
+            .unwrap_or_else(|| ValidationError::SyntaxError {
+                details: first.message,
+            });
+        return Err(DocumentError::validation_at(err, span.to_source_span(src)));
+    }
+    ast.ok_or_else(|| {
+        DocumentError::validation_at(
+            ValidationError::SyntaxError {
+                details: "unexpected end of input".to_owned(),
+            },
+            ByteSpan::new(src.len(), src.len()).to_source_span(src),
+        )
+    })
 }

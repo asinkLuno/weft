@@ -1,9 +1,6 @@
 //! 历法插件：加载与校验 Rune 脚本，执行历算、时间展示和 Story 页元信息输出。
 
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 
 use rune::{
     Unit, Vm,
@@ -12,11 +9,12 @@ use rune::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::errors::{DocumentError, ValidationError};
+use crate::phase::Phase;
 use crate::plugin_loader;
-use crate::weft::errors::{DocumentError, ValidationError};
-use crate::weft::phase::Phase;
 
-pub(crate) const GREGORIAN: &str = "rune/gregorian.rn";
+const BUILTIN_GREGORIAN_NAME: &str = "<builtin:gregorian.rn>";
+const BUILTIN_GREGORIAN_SRC: &str = include_str!("../rune/gregorian.rn");
 
 /// 历法脚本 `meta(ctx)` 输出的公开元信息。
 #[derive(Debug, Clone, Serialize)]
@@ -41,7 +39,7 @@ struct RawCalendarMeta {
 pub struct Calendar {
     runtime: Arc<RuntimeContext>,
     unit: Arc<Unit>,
-    source: PathBuf,
+    source_name: String,
     language: String,
     meta: CalendarMeta,
     // 时间分量数，时间列表按它校验长度。
@@ -62,6 +60,10 @@ pub struct Moment {
 }
 
 impl Calendar {
+    pub fn builtin_gregorian(lang: &str) -> Result<Self, DocumentError> {
+        Self::from_source(BUILTIN_GREGORIAN_SRC, BUILTIN_GREGORIAN_NAME, lang)
+    }
+
     pub fn new(source: &Path, lang: &str) -> Result<Self, DocumentError> {
         let name = source.display().to_string();
         let script = plugin_loader::read_script(source).map_err(|details| {
@@ -70,9 +72,13 @@ impl Calendar {
                 details,
             }
         })?;
-        let unit = plugin_loader::compile_cached(&script, &name).map_err(|details| {
+        Self::from_source(&script, &name, lang)
+    }
+
+    pub fn from_source(script: &str, name: &str, lang: &str) -> Result<Self, DocumentError> {
+        let unit = plugin_loader::compile_cached(script, name).map_err(|details| {
             ValidationError::CalendarCompile {
-                calendar: name.clone(),
+                calendar: name.to_owned(),
                 details,
             }
         })?;
@@ -84,7 +90,7 @@ impl Calendar {
         );
         if !missing.is_empty() {
             return Err(ValidationError::CalendarMissingInterface {
-                calendar: name,
+                calendar: name.to_owned(),
                 functions: missing.join(", "),
             }
             .into());
@@ -97,37 +103,40 @@ impl Calendar {
             "language": lang,
         }))
         .map_err(|details| ValidationError::CalendarCall {
-            calendar: name.clone(),
+            calendar: name.to_owned(),
             entry: "meta".to_owned(),
             details,
         })?;
-        let raw_output = Self::call(&mut vm, &name, "meta", (meta_ctx,))?;
+        let raw_output = Self::call(&mut vm, name, "meta", (meta_ctx,))?;
         let raw_json = serde_json::to_value(&raw_output).map_err(|_| {
             ValidationError::CalendarInvalidReturn {
-                calendar: name.clone(),
+                calendar: name.to_owned(),
                 entry: "meta".to_owned(),
             }
         })?;
         let raw: RawCalendarMeta = serde_json::from_value(raw_json).map_err(|_| {
             ValidationError::CalendarInvalidReturn {
-                calendar: name.clone(),
+                calendar: name.to_owned(),
                 entry: "meta".to_owned(),
             }
         })?;
         if raw.id.trim().is_empty() || raw.name.trim().is_empty() {
             return Err(ValidationError::CalendarInvalidReturn {
-                calendar: name,
+                calendar: name.to_owned(),
                 entry: "meta".to_owned(),
             }
             .into());
         }
         if !(1..=64).contains(&raw.components) {
-            return Err(ValidationError::CalendarComponentsOutOfRange { calendar: name }.into());
+            return Err(ValidationError::CalendarComponentsOutOfRange {
+                calendar: name.to_owned(),
+            }
+            .into());
         }
         let components = raw.components as usize;
         if raw.minimums.len() != components {
             return Err(ValidationError::CalendarInvalidReturn {
-                calendar: name,
+                calendar: name.to_owned(),
                 entry: "meta".to_owned(),
             }
             .into());
@@ -136,7 +145,7 @@ impl Calendar {
         Ok(Self {
             runtime,
             unit,
-            source: source.to_path_buf(),
+            source_name: name.to_owned(),
             language: lang.to_owned(),
             meta: CalendarMeta {
                 id: raw.id,
@@ -209,7 +218,7 @@ impl Calendar {
             "language": &self.language,
         }))
         .map_err(|details| ValidationError::CalendarCall {
-            calendar: self.source.display().to_string(),
+            calendar: self.source_name.clone(),
             entry: "humanizer".to_owned(),
             details,
         })?;
@@ -271,7 +280,7 @@ impl Calendar {
         }
         if self.to_tick_with(vm, &result)? != tick {
             return Err(ValidationError::CalendarRoundTripMismatch {
-                calendar: self.source.display().to_string(),
+                calendar: self.source_name.clone(),
             }
             .into());
         }
@@ -294,7 +303,7 @@ impl Calendar {
         entry: &str,
         args: impl GuardedArgs,
     ) -> Result<RuneValue, DocumentError> {
-        Self::call(vm, &self.source.display().to_string(), entry, args)
+        Self::call(vm, &self.source_name, entry, args)
     }
 
     fn call(
@@ -315,7 +324,7 @@ impl Calendar {
 
     fn invalid_return(&self, entry: &str) -> ValidationError {
         ValidationError::CalendarInvalidReturn {
-            calendar: self.source.display().to_string(),
+            calendar: self.source_name.clone(),
             entry: entry.to_owned(),
         }
     }
