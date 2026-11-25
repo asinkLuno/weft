@@ -11,7 +11,7 @@ export default defineConfig(() => ({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
 
@@ -33,8 +33,8 @@ export default defineConfig(() => ({
       : undefined,
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
-      // 4. 本应用会监听/编辑 yaml，变更不能触发 vite full-reload（会冲掉前端状态退回欢迎页）
-      ignored: ["**/src-tauri/**", "**/*.{yaml,yml}"],
+      // 4. 本应用会监听/编辑 .weft 文档与 .rn 插件，变更（含原子写临时文件）不能触发 vite full-reload（会冲掉前端状态退回欢迎页）
+      ignored: ["**/src-tauri/**", "**/*.{weft,weft-tmp,rn}"],
     },
   },
 }));

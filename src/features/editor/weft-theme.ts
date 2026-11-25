@@ -91,45 +91,90 @@ export const weftEditorTheme = EditorView.theme({
     border: "1px solid var(--border)",
     borderRadius: "var(--radius)",
   },
+  ".cm-tooltip": {
+    backgroundColor: "var(--popover)",
+    color: "var(--popover-foreground)",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius)",
+    boxShadow: "0 8px 24px -6px rgb(0 0 0 / 0.14)",
+    overflow: "hidden",
+  },
+  ".cm-tooltip-autocomplete > ul": {
+    fontFamily: "inherit",
+    fontSize: "12.5px",
+    maxHeight: "240px",
+    padding: "4px",
+  },
+  ".cm-tooltip-autocomplete > ul > li": {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "4px 8px",
+    borderRadius: "calc(var(--radius) - 2px)",
+  },
+  ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
+    backgroundColor: "color-mix(in srgb, var(--riso-blue) 14%, transparent)",
+    color: "var(--foreground)",
+  },
+  ".cm-completionLabel": {
+    color: "var(--foreground)",
+  },
+  ".cm-completionMatchedText": {
+    color: "var(--riso-blue)",
+    fontWeight: "600",
+    textDecoration: "none",
+  },
+  ".cm-completionDetail": {
+    marginLeft: "auto",
+    color: "var(--muted-foreground)",
+    fontSize: "11px",
+    fontStyle: "normal",
+  },
+  ".cm-completionInfo": {
+    backgroundColor: "var(--popover)",
+    color: "var(--muted-foreground)",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius)",
+    padding: "6px 10px",
+    fontSize: "12px",
+    lineHeight: "1.5",
+    maxWidth: "280px",
+  },
 });
 
 const weftHighlight = HighlightStyle.define([
   {
-    tag: [tags.propertyName, tags.attributeName, tags.name],
+    tag: tags.propertyName,
     color: "var(--riso-blue)",
     fontWeight: "500",
   },
-  { tag: [tags.string, tags.special(tags.string)], color: "var(--foreground)" },
-  { tag: [tags.number, tags.integer, tags.float], color: "var(--riso-red)" },
   {
-    tag: [tags.bool, tags.null, tags.atom, tags.keyword],
+    tag: [tags.variableName, tags.string],
+    color: "var(--foreground)",
+  },
+  { tag: tags.number, color: "var(--riso-red)" },
+  {
+    tag: [tags.atom, tags.keyword],
     color: "var(--riso-red)",
     fontWeight: "600",
   },
   {
-    tag: [tags.comment, tags.lineComment, tags.blockComment],
+    tag: tags.operator,
+    color: "var(--riso-blue)",
+    fontWeight: "600",
+  },
+  {
+    tag: tags.comment,
     color: "var(--muted-foreground)",
     fontStyle: "italic",
   },
   {
-    tag: [
-      tags.punctuation,
-      tags.separator,
-      tags.bracket,
-      tags.squareBracket,
-      tags.brace,
-    ],
+    tag: tags.punctuation,
     color: "var(--muted-foreground)",
-  },
-  { tag: [tags.meta, tags.labelName], color: "var(--riso-blue)" },
-  {
-    tag: tags.invalid,
-    color: "var(--destructive)",
-    textDecoration: "underline wavy",
   },
 ]);
 
-export const weftYamlThemeExtension = [
+export const weftThemeExtension = [
   weftEditorTheme,
   syntaxHighlighting(weftHighlight),
 ];

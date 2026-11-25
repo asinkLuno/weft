@@ -1,25 +1,26 @@
-//! 叙事线名称映射到事件 ID 列表，保留 YAML 中的顺序。
+//! 叙事线名称映射到事件 ID 列表，保留文档中的顺序。
 
-use crate::weft::errors::{DocumentError, ValidationError};
+use std::collections::BTreeMap;
+
+use crate::weft::errors::{DocumentError, SourceSpan, ValidationError};
 use crate::weft::event::RawEvent;
-use std::collections::HashMap;
 
 pub type Narrative = Vec<String>;
 
 pub(crate) fn check(
-    narratives: &HashMap<String, Narrative>,
-    events: &HashMap<String, RawEvent>,
+    narratives: &BTreeMap<String, Vec<(String, SourceSpan)>>,
+    events: &BTreeMap<String, RawEvent>,
 ) -> Result<(), DocumentError> {
-    let mut names: Vec<_> = narratives.keys().collect();
-    names.sort_unstable();
-    for name in names {
-        for id in &narratives[name] {
+    for (name, refs) in narratives {
+        for (id, span) in refs {
             if !events.contains_key(id) {
-                return Err(ValidationError::UnknownNarrativeEvent {
-                    narrative: name.clone(),
-                    event: id.clone(),
-                }
-                .into());
+                return Err(DocumentError::validation_at(
+                    ValidationError::UnknownNarrativeEvent {
+                        narrative: name.clone(),
+                        event: id.clone(),
+                    },
+                    span.clone(),
+                ));
             }
         }
     }

@@ -1,6 +1,17 @@
+use std::fmt;
+
 use serde::Serialize;
 use thiserror::Error;
 use ts_rs::TS;
+
+/// 源码定位信息（字节偏移与 1-based 行列号），用于编辑器高亮与报错提示。
+#[derive(Clone, Debug, Serialize, TS)]
+pub struct SourceSpan {
+    pub start: usize,
+    pub end: usize,
+    pub line: usize,
+    pub column: usize,
+}
 
 // 校验错误的唯一代码定义。Serde 和 ts-rs 共用这些变体名与参数字段。
 #[derive(Clone, Debug, Error, Serialize, TS)]
@@ -12,6 +23,37 @@ pub enum ValidationError {
     DocumentNotBound,
     #[error("invalid path")]
     InvalidPath,
+    #[error("syntax error: {details}")]
+    SyntaxError {
+        #[serde(rename = "source")]
+        details: String,
+    },
+    #[error("missing required story block")]
+    MissingStory,
+    #[error("duplicate story block")]
+    DuplicateStory,
+    #[error("duplicate entity `{entity}`")]
+    DuplicateEntity { entity: String },
+    #[error("duplicate event `{event}`")]
+    DuplicateEvent { event: String },
+    #[error("duplicate narrative `{narrative}`")]
+    DuplicateNarrative { narrative: String },
+    #[error("duplicate time anchor `{name}`")]
+    DuplicateTimeAnchor { name: String },
+    #[error("missing required field `{field}` in {section}")]
+    MissingField { section: String, field: String },
+    #[error("invalid value for field `{field}` in {section}: {reason}")]
+    InvalidField {
+        section: String,
+        field: String,
+        reason: String,
+    },
+    #[error("unknown field `{field}` in {section}")]
+    UnknownField { section: String, field: String },
+    #[error("unknown time reference `{reference}`")]
+    UnknownTimeRef { reference: String },
+    #[error("time reference `{target}` forms a cycle")]
+    TimeCycle { target: String },
     #[error("entity link {group} refers to unknown entity {entity}")]
     UnknownLinkEntity { group: String, entity: String },
     #[error("event {event} refers to unknown entity {entity}")]
@@ -110,28 +152,52 @@ pub enum ValidationError {
     },
     #[error("calendar {calendar}: to_tick(from_tick(tick)) does not return the same tick")]
     CalendarRoundTripMismatch { calendar: String },
-    #[error("invalid document structure at {path}: {reason}")]
-    InvalidStructure { path: String, reason: String },
 }
 
 #[derive(Clone, Debug, Error, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DocumentError {
-    #[error("{error}")]
+    #[error("{}", format_validation(error, span.as_ref()))]
     Validation {
         #[source]
         error: ValidationError,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        span: Option<SourceSpan>,
     },
     #[error("{message}")]
     Raw { message: String },
 }
 
+fn format_validation(error: &ValidationError, span: Option<&SourceSpan>) -> String {
+    match span {
+        Some(span) => format!("line {}, col {}: {error}", span.line, span.column),
+        None => error.to_string(),
+    }
+}
+
 impl DocumentError {
     pub(crate) fn validation(error: ValidationError) -> Self {
-        Self::Validation { error }
+        Self::Validation { error, span: None }
     }
 
-    pub(crate) fn raw(message: impl ToString) -> Self {
+    pub(crate) fn validation_at(error: ValidationError, span: SourceSpan) -> Self {
+        Self::Validation {
+            error,
+            span: Some(span),
+        }
+    }
+
+    pub(crate) fn with_span(self, span: SourceSpan) -> Self {
+        match self {
+            Self::Validation { error, span: None } => Self::Validation {
+                error,
+                span: Some(span),
+            },
+            other => other,
+        }
+    }
+
+    pub(crate) fn raw(message: impl fmt::Display) -> Self {
         Self::Raw {
             message: message.to_string(),
         }
@@ -143,4 +209,3 @@ impl From<ValidationError> for DocumentError {
         Self::validation(error)
     }
 }
-

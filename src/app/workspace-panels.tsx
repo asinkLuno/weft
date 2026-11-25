@@ -13,6 +13,7 @@ import {
   Columns2,
   FileCode2,
   GitBranch,
+  Info,
   type LucideIcon,
   Plus,
   RotateCcw,
@@ -39,9 +40,9 @@ import { StoryView } from "@/features/story/story-view";
 import { type Lang, strings } from "@/i18n";
 import { useWorkspaceDoc, useWorkspaceEditor } from "./workspace-context";
 
-const YamlEditorView = lazy(() =>
-  import("@/features/editor/yaml-editor-view").then((m) => ({
-    default: m.YamlEditorView,
+const WeftEditorView = lazy(() =>
+  import("@/features/editor/weft-editor-view").then((m) => ({
+    default: m.WeftEditorView,
   })),
 );
 const EntityView = lazy(() =>
@@ -54,11 +55,22 @@ const NarrativeView = lazy(() =>
     default: m.NarrativeView,
   })),
 );
+const InfoView = lazy(() =>
+  import("@/features/info/info-view").then((m) => ({
+    default: m.InfoView,
+  })),
+);
 
-export const PANEL_IDS = ["editor", "story", "entity", "narrative"] as const;
+export const PANEL_IDS = [
+  "editor",
+  "story",
+  "entity",
+  "narrative",
+  "info",
+] as const;
 export type PanelId = (typeof PANEL_IDS)[number];
 
-type PanelLabelKey = "panelEditor" | "tab1" | "tab2" | "tab4";
+type PanelLabelKey = "panelEditor" | "tab1" | "tab2" | "tab4" | "tabInfo";
 
 export const PANEL_META: Record<
   PanelId,
@@ -68,6 +80,7 @@ export const PANEL_META: Record<
   story: { icon: BookOpen, labelKey: "tab1" },
   entity: { icon: Waypoints, labelKey: "tab2" },
   narrative: { icon: GitBranch, labelKey: "tab4" },
+  info: { icon: Info, labelKey: "tabInfo" },
 };
 
 export const WEFT_DOCKVIEW_THEME: DockviewTheme = {
@@ -140,7 +153,7 @@ function EditorPanel() {
 
   return (
     <Suspense fallback={null}>
-      <YamlEditorView
+      <WeftEditorView
         path={path}
         draftStore={draftStore}
         dirty={dirty}
@@ -211,6 +224,17 @@ function EntityPanel({ api }: IDockviewPanelProps) {
   );
 }
 
+function InfoPanel() {
+  const { lang } = useWorkspaceDoc();
+  return (
+    <div className="dock-pane-scroll">
+      <Suspense fallback={null}>
+        <InfoView lang={lang} />
+      </Suspense>
+    </div>
+  );
+}
+
 function NarrativePanel() {
   const { doc, lang } = useWorkspaceDoc();
   return (
@@ -230,6 +254,7 @@ export const WORKSPACE_COMPONENTS: Record<
   story: StoryPanel,
   entity: EntityPanel,
   narrative: NarrativePanel,
+  info: InfoPanel,
 };
 
 function EditorDirtyDot() {
@@ -391,20 +416,15 @@ export function applyDefaultLayout(api: DockviewApi, lang: Lang): void {
     params: { kind: "story" },
     position: { referencePanel: editorPanel, direction: "right" },
   });
-  api.addPanel({
-    id: "entity",
-    component: "entity",
-    title: panelTitle("entity", lang),
-    params: { kind: "entity" },
-    position: { referencePanel: storyPanel, direction: "within" },
-  });
-  api.addPanel({
-    id: "narrative",
-    component: "narrative",
-    title: panelTitle("narrative", lang),
-    params: { kind: "narrative" },
-    position: { referencePanel: storyPanel, direction: "within" },
-  });
+  for (const kind of ["entity", "narrative", "info"] as const) {
+    api.addPanel({
+      id: kind,
+      component: kind,
+      title: panelTitle(kind, lang),
+      params: { kind },
+      position: { referencePanel: storyPanel, direction: "within" },
+    });
+  }
   storyPanel.api.setActive();
   if (api.width > 0) {
     editorPanel.group.api.setSize({

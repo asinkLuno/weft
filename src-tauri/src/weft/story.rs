@@ -1,21 +1,19 @@
 use std::{collections::HashMap, path::Path};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::calculable_prop::CalculablePropRuntime;
 use crate::calendar::{Calendar, CalendarMeta};
 use crate::plugin_loader;
-use crate::weft::FromRaw;
 use crate::weft::errors::{DocumentError, ValidationError};
 
-// YAML 输入只包含元数据和脚本路径。
-#[derive(Debug, Deserialize)]
+// 输入阶段只包含元数据和脚本路径。
+#[derive(Debug)]
 pub(crate) struct RawStory {
     pub title: String,
     pub description: Option<String>,
     pub author: Option<String>,
     pub date_mode: Option<String>,
-    #[serde(default)]
     pub calculable_props: HashMap<String, String>,
 }
 
@@ -39,10 +37,8 @@ pub struct Story {
     pub calculable_prop_runtime: CalculablePropRuntime,
 }
 
-impl FromRaw<StoryContext<'_>> for Story {
-    type Raw = RawStory;
-
-    fn from_raw(raw: Self::Raw, context: StoryContext<'_>) -> Result<Self, DocumentError> {
+impl Story {
+    pub(crate) fn build(raw: RawStory, context: StoryContext<'_>) -> Result<Self, DocumentError> {
         let StoryContext {
             base,
             gregorian,

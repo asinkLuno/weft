@@ -83,7 +83,7 @@ export function Workspace({
     }
   }, [lang]);
 
-  // 全局 Ctrl/Cmd+S 兜底：焦点不在编辑器面板内时也可保存；CodeMirror 已处理时会 preventDefault。
+  // 全局 Ctrl/Cmd+S 保存（覆盖编辑器与其余面板）
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.defaultPrevented) return;

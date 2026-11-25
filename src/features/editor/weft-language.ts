@@ -1,0 +1,138 @@
+import { StreamLanguage, type StringStream } from "@codemirror/language";
+import {
+  ATOMS,
+  BUILTIN_PROPS,
+  IDENT_CONT_RE,
+  IDENT_START_RE,
+  NAMED_DECL_KEYWORDS,
+  TOP_KEYWORDS,
+} from "./weft-schema";
+
+type WeftParserState = {
+  inBlockComment: boolean;
+  inMultilineString: boolean;
+  expectDeclName: boolean;
+};
+
+function consumeMultilineString(
+  stream: StringStream,
+  state: WeftParserState,
+): string {
+  while (!stream.eol()) {
+    if (stream.match('"""')) {
+      state.inMultilineString = false;
+      return "string";
+    }
+    if (stream.peek() === "\\") {
+      stream.next();
+      stream.next();
+    } else {
+      stream.next();
+    }
+  }
+  return "string";
+}
+
+function consumeBlockComment(
+  stream: StringStream,
+  state: WeftParserState,
+): string {
+  while (!stream.eol()) {
+    if (stream.match("*/")) {
+      state.inBlockComment = false;
+      return "comment";
+    }
+    stream.next();
+  }
+  return "comment";
+}
+
+export const weftLanguage = StreamLanguage.define<WeftParserState>({
+  name: "weft",
+  startState: () => ({
+    inBlockComment: false,
+    inMultilineString: false,
+    expectDeclName: false,
+  }),
+  token(stream, state) {
+    if (state.inBlockComment) {
+      return consumeBlockComment(stream, state);
+    }
+    if (state.inMultilineString) {
+      return consumeMultilineString(stream, state);
+    }
+    if (stream.eatSpace()) {
+      return null;
+    }
+    if (stream.match("/*")) {
+      state.inBlockComment = true;
+      return consumeBlockComment(stream, state);
+    }
+    if (stream.match("#") || stream.match("//")) {
+      stream.skipToEnd();
+      return "comment";
+    }
+    if (stream.match('"""')) {
+      state.expectDeclName = false;
+      state.inMultilineString = true;
+      return consumeMultilineString(stream, state);
+    }
+    if (stream.peek() === '"') {
+      state.expectDeclName = false;
+      stream.next();
+      while (!stream.eol()) {
+        const ch = stream.next();
+        if (ch === "\\") {
+          stream.next();
+        } else if (ch === '"') {
+          break;
+        }
+      }
+      return "string";
+    }
+    if (stream.match("--")) {
+      state.expectDeclName = false;
+      return "operator";
+    }
+    if (stream.match(/^[0-9]+(?:\.[0-9]+)?/)) {
+      state.expectDeclName = false;
+      return "number";
+    }
+    if (stream.match(/^[+\-=.]/)) {
+      state.expectDeclName = false;
+      return "operator";
+    }
+    if (stream.match(/^[{}[\],;]/)) {
+      state.expectDeclName = false;
+      return "punctuation";
+    }
+    if (stream.match(IDENT_START_RE)) {
+      while (!stream.eol() && stream.match(IDENT_CONT_RE)) {
+        // consume full Unicode identifier
+      }
+      const word = stream.current();
+      if (state.expectDeclName) {
+        state.expectDeclName = false;
+        return "variableName";
+      }
+      if (ATOMS.has(word)) return "atom";
+      if (TOP_KEYWORDS.has(word)) {
+        state.expectDeclName = NAMED_DECL_KEYWORDS.has(word);
+        return "keyword";
+      }
+      if (BUILTIN_PROPS.has(word)) return "propertyName";
+      // Look ahead for `=` to highlight custom extra_props keys as propertyName
+      if (/^\s*=/.test(stream.string.slice(stream.pos))) {
+        return "propertyName";
+      }
+      return "variableName";
+    }
+    state.expectDeclName = false;
+    stream.next();
+    return null;
+  },
+  languageData: {
+    commentTokens: { line: "#" },
+    closeBrackets: { brackets: ["[", "{", '"'] },
+  },
+});

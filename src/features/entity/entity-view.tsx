@@ -91,7 +91,7 @@ function EntityViewInner({
   // 两级筛选：先选维度（归属/关系），再选值；dim 为 null 即无筛选
   const [dim, setDim] = useState<"belong" | "link" | null>(null);
   const [pick, setPick] = useState<string | null>(null);
-  // 节点摆放松存 settings.json（按文件隔离），不写进用户的 YAML；
+  // 节点摆放松存 settings.json（按文件隔离），不写进用户的 .weft；
   // 拖动落位写入 ref + store，不触发整个实体图重建（React Flow 内部已持有最新位置）。
   const layoutKey = `layout:${path}`;
   const savedPositionsRef = useRef<Record<string, { x: number; y: number }>>(

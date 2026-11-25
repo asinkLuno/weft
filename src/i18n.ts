@@ -1,9 +1,10 @@
-import type { ValidationError } from "./generated/validation-error";
+import type { SourceSpan, ValidationError } from "./generated/validation-error";
 
+export type { SourceSpan };
 export type Lang = "zh" | "en";
 
 export type DocumentError =
-  | { type: "validation"; error: ValidationError }
+  | { type: "validation"; error: ValidationError; span?: SourceSpan }
   | { type: "raw"; message: string };
 
 type ValidationCode = ValidationError["code"];
@@ -13,7 +14,19 @@ const validationMessages = {
     file_deleted: "文件已删除或被移走",
     document_not_bound: "尚未绑定文档",
     invalid_path: "无效路径",
-    unknown_link_entity: "entity_link `{group}` 引用了不存在的实体 `{entity}`",
+    syntax_error: "语法错误：{source}",
+    missing_story: "缺少必填的 story 块",
+    duplicate_story: "重复声明了 story 块",
+    duplicate_entity: "重复声明了实体 `{entity}`",
+    duplicate_event: "重复声明了事件 `{event}`",
+    duplicate_narrative: "重复声明了叙事线 `{narrative}`",
+    duplicate_time_anchor: "重复声明了时间锚点 `{name}`",
+    missing_field: "{section} 缺少必填字段 `{field}`",
+    invalid_field: "{section} 的字段 `{field}` 值无效：{reason}",
+    unknown_field: "{section} 包含未知字段 `{field}`",
+    unknown_time_ref: "引用了不存在的时间 `{reference}`",
+    time_cycle: "时间引用 `{target}` 形成了循环",
+    unknown_link_entity: "link `{group}` 引用了不存在的实体 `{entity}`",
     unknown_event_entity: "event `{event}` 引用了不存在的实体 `{entity}`",
     unknown_narrative_event:
       "narrative `{narrative}` 引用了不存在的事件 `{event}`",
@@ -22,7 +35,7 @@ const validationMessages = {
     entity_cycle: "entity `{entity}` 的 belong_to 形成了循环",
     invalid_avatar_path:
       "entity `{entity}` 的 avatar `{path}` 必须指向已存在的图片文件",
-    time_nonempty_list: "时间必须是非空列表",
+    time_nonempty_list: "时间必须是非空整数列表或有效时间表达式",
     time_integer_component: "时间分量必须是整数",
     time_nesting_too_deep: "时间锚点嵌套超过最大深度 {maximum}",
     event_end_before_start: "事件 `{event}` 的结束时间早于开始时间",
@@ -53,14 +66,24 @@ const validationMessages = {
       "第 {position} 个时间分量为 {value}，低于该历法允许的最小值 {minimum}",
     calendar_round_trip_mismatch:
       "历法 `{calendar}` 的 to_tick(from_tick(tick)) 未能还原同一刻度",
-    invalid_structure: "Weft YAML 结构无效（{path}）：{reason}",
   },
   en: {
     file_deleted: "File deleted or moved",
     document_not_bound: "No document is bound",
     invalid_path: "Invalid path",
-    unknown_link_entity:
-      "entity_link `{group}` refers to unknown entity `{entity}`",
+    syntax_error: "Syntax error: {source}",
+    missing_story: "Missing required story block",
+    duplicate_story: "Duplicate story block",
+    duplicate_entity: "Duplicate entity `{entity}`",
+    duplicate_event: "Duplicate event `{event}`",
+    duplicate_narrative: "Duplicate narrative `{narrative}`",
+    duplicate_time_anchor: "Duplicate time anchor `{name}`",
+    missing_field: "Missing required field `{field}` in {section}",
+    invalid_field: "Invalid value for `{field}` in {section}: {reason}",
+    unknown_field: "Unknown field `{field}` in {section}",
+    unknown_time_ref: "Unknown time reference `{reference}`",
+    time_cycle: "Time reference `{target}` forms a cycle",
+    unknown_link_entity: "link `{group}` refers to unknown entity `{entity}`",
     unknown_event_entity: "event `{event}` refers to unknown entity `{entity}`",
     unknown_narrative_event:
       "narrative `{narrative}` refers to unknown event `{event}`",
@@ -69,7 +92,8 @@ const validationMessages = {
     entity_cycle: "belong_to for entity `{entity}` forms a cycle",
     invalid_avatar_path:
       "Avatar `{path}` for entity `{entity}` must point to an existing image file",
-    time_nonempty_list: "Time must be a nonempty list",
+    time_nonempty_list:
+      "Time must be a nonempty integer list or valid time expression",
     time_integer_component: "Time components must be integers",
     time_nesting_too_deep:
       "Time anchor nesting exceeds maximum depth {maximum}",
@@ -110,11 +134,14 @@ const validationMessages = {
       "Time component {position} is {value}, below the calendar minimum {minimum}",
     calendar_round_trip_mismatch:
       "Calendar `{calendar}`: to_tick(from_tick(tick)) did not return the same tick",
-    invalid_structure: "Invalid Weft YAML structure at {path}: {reason}",
   },
 } satisfies Record<Lang, Record<ValidationCode, string>>;
 
-function formatValidationError(error: ValidationError, lang: Lang): string {
+function formatValidationError(
+  error: ValidationError,
+  lang: Lang,
+  span?: SourceSpan,
+): string {
   const code = error.code;
   const messages: Record<string, string> = validationMessages[lang];
   const template = messages[code] ?? code;
@@ -122,10 +149,16 @@ function formatValidationError(error: ValidationError, lang: Lang): string {
     string,
     string
   >;
-  return template.replace(
+  const message = template.replace(
     /\{(\w+)\}/g,
     (_, key: string) => params[key] ?? `{${key}}`,
   );
+  if (span) {
+    return lang === "zh"
+      ? `第 ${span.line} 行第 ${span.column} 列：${message}`
+      : `Line ${span.line}, col ${span.column}: ${message}`;
+  }
+  return message;
 }
 
 export function formatDocumentError(error: unknown, lang: Lang): string {
@@ -133,7 +166,7 @@ export function formatDocumentError(error: unknown, lang: Lang): string {
     const e = error as Partial<DocumentError>;
     if (e.type === "raw" && typeof e.message === "string") return e.message;
     if (e.type === "validation" && e.error) {
-      return formatValidationError(e.error, lang);
+      return formatValidationError(e.error, lang, e.span);
     }
   }
   return String(error);
@@ -148,16 +181,17 @@ export const strings = {
       "打开故事文件，梳理人物与实体的关系，沿着时间线阅读每一条叙事。",
     recentDescription: "继续阅读你的故事。",
     recentEmpty: "从第一个故事开始。打开的文件会留在这里。",
-    fileHint: "支持 .yaml 和 .yml 文件，保存修改后视图自动更新。",
+    fileHint: "支持 .weft 文件，保存修改后视图自动更新。",
     fileWatching: "正在跟随文件更新",
     fileError: "文件需要检查",
     entityEmpty: "暂无实体，请在故事文件中添加实体。",
-    storyEmpty: "暂无故事信息，请在 YAML 编辑器中检查并修复错误。",
+    storyEmpty: "暂无故事信息，请在编辑器中检查并修复错误。",
     loading: "正在载入实体…",
-    panelEditor: "YAML",
+    panelEditor: "Weft",
     tab1: "故事",
     tab2: "实体",
     tab4: "叙事",
+    tabInfo: "格式说明",
     author: "作者",
     calendar: "历法",
     belongTo: "归属",
@@ -165,7 +199,7 @@ export const strings = {
     baseTime: "基准时间",
     narrativeEmpty: "暂无叙事",
     ganttEvent: "事件",
-    open: "打开 YAML 文件",
+    open: "打开 Weft 文件",
     recent: "最近打开",
     close: "关闭文件",
     save: "保存",
@@ -187,17 +221,17 @@ export const strings = {
       "Open a story file to explore its people, trace their connections, and follow each narrative through time.",
     recentDescription: "Pick up where you left off.",
     recentEmpty: "Start with your first story. Opened files will appear here.",
-    fileHint:
-      "Supports .yaml and .yml files. Views update when you save changes.",
+    fileHint: "Supports .weft files. Views update when you save changes.",
     fileWatching: "Following file changes",
     fileError: "File needs attention",
     entityEmpty: "No entities yet. Add entities to your story file.",
-    storyEmpty: "No story data yet. Check the YAML editor for errors.",
+    storyEmpty: "No story data yet. Check the editor for errors.",
     loading: "Loading entities…",
-    panelEditor: "YAML",
+    panelEditor: "Weft",
     tab1: "Story",
     tab2: "Entities",
     tab4: "Narratives",
+    tabInfo: "Format",
     author: "Author",
     calendar: "Calendar",
     belongTo: "Belongs to",
@@ -205,7 +239,7 @@ export const strings = {
     baseTime: "Base time",
     narrativeEmpty: "No narratives",
     ganttEvent: "Event",
-    open: "Open YAML File",
+    open: "Open Weft File",
     recent: "Recent",
     close: "Close File",
     save: "Save",

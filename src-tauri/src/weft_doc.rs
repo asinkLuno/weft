@@ -1,8 +1,8 @@
-//! YAML 文档边界：数据模型、语法与结构校验、文件监听及变更推送。
-//! 保存前通过同一解析流程校验，错误通过 DocumentPayload 返回前端。
+//! `.weft` 文档边界：编译校验、文件监听及变更推送。
+//! 保存前通过同一编译流程校验，错误通过 DocumentPayload 返回前端。
 
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::HashSet,
     fs, io,
     path::{Path, PathBuf},
     sync::{
@@ -13,106 +13,15 @@ use std::{
     time::Duration,
 };
 
-use notify::{
-    EventKind, RecursiveMode,
-    event::ModifyKind,
-};
+use notify::{EventKind, RecursiveMode, event::ModifyKind};
 use notify_debouncer_full::{DebouncedEvent, Debouncer, RecommendedCache, new_debouncer};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_log::log::{error, warn};
 
-use crate::weft::FromRaw;
-use crate::weft::entity::{
-    BelongNode, Entity, EntityBuildContext, EntityLink, RawEntity, build_entities,
-};
+use crate::weft::compiler::{self, StoryScriptRefs};
 use crate::weft::errors::{DocumentError, ValidationError};
-use crate::weft::event::{self, Event, RawEvent, build_events, check as check_event};
-use crate::weft::narrative::{Narrative, check as check_narrative};
-use crate::weft::story::{RawStory, Story, StoryContext};
-
-// YAML 数据模型：顶层键逐个补齐，未知键在反序列化时滤掉。
-#[derive(Debug, Serialize)]
-pub struct WeftDoc {
-    pub story: Story,
-    pub entity: HashMap<String, Entity>,
-    // 归属 DAG：只含实体 ID 与构建期反查出的直接上级，按 id 排序。
-    pub belong_dag: Vec<BelongNode>,
-    // 关系组名 → 关系列表；只校验引用，随文档原样输出。
-    pub entity_link: HashMap<String, Vec<EntityLink>>,
-    // 事件字典：事件 ID → 事件定义
-    #[serde(default)]
-    pub event: BTreeMap<String, Event>,
-    // 叙事线名称 → 事件 ID 列表
-    #[serde(default)]
-    pub narrative: BTreeMap<String, Narrative>,
-    // 运行时填充：所选历法的时间分量数，不来自 YAML
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub calendar_components: Option<usize>,
-}
-
-#[derive(Deserialize)]
-struct RawWeftDoc {
-    story: RawStory,
-    #[serde(default)]
-    entity: HashMap<String, RawEntity>,
-    #[serde(default)]
-    entity_link: HashMap<String, Vec<EntityLink>>,
-    #[serde(default)]
-    event: HashMap<String, RawEvent>,
-    #[serde(default)]
-    narrative: HashMap<String, Narrative>,
-}
-
-impl WeftDoc {
-    fn from_yaml(
-        yaml: &serde_yaml_ng::Value,
-        base: &Path,
-        gregorian: &Path,
-        lang: &str,
-    ) -> Result<Self, DocumentError> {
-        let raw: RawWeftDoc = serde_path_to_error::deserialize(yaml).map_err(|error| {
-            ValidationError::InvalidStructure {
-                path: error.path().to_string(),
-                reason: error.inner().to_string(),
-            }
-        })?;
-        // 按段检查：story → entity → event → narrative；每段先引用后结构，
-        // 前面的段不成立，后面段的问题没有报告价值
-        let story = Story::from_raw(
-            raw.story,
-            StoryContext {
-                base,
-                gregorian,
-                lang,
-            },
-        )?;
-        let (entity, belong_dag) = build_entities(
-            raw.entity,
-            &raw.entity_link,
-            EntityBuildContext {
-                base,
-                calendar: &story.calendar,
-                calculable_props: &story.calculable_prop_runtime,
-            },
-        )?;
-        check_event(&raw.event, &entity)?;
-        check_narrative(&raw.narrative, &raw.event)?;
-        let narrative = raw.narrative.into_iter().collect();
-        let event = build_events(raw.event)?;
-        let doc = WeftDoc {
-            story,
-            entity,
-            belong_dag,
-            entity_link: raw.entity_link,
-            event,
-            narrative,
-            calendar_components: None,
-        };
-        Ok(doc)
-    }
-}
 
 const EVENT: &str = "document-changed";
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(300);
@@ -154,7 +63,7 @@ impl ChangeTrigger {
 struct DocumentTarget {
     parent: PathBuf,
     path: PathBuf,
-    // 若 YAML 本身是符号链接且指向另一路径，则同时跟踪真实目标，避免直接编辑真实文件漏事件。
+    // 若文档本身是符号链接且指向另一路径，则同时跟踪真实目标，避免直接编辑真实文件漏事件。
     real_path: Option<PathBuf>,
 }
 
@@ -273,7 +182,7 @@ struct ActiveDocument {
     // 每次状态提交递增：防止耗时解析（旧事件/旧语言刷新）覆盖更新后的结果。
     seq: u64,
     target: DocumentTarget,
-    // 最近一次与前端一致且校验通过的 YAML 文本；用于幂等抑制回声与重复事件。
+    // 最近一次与前端一致且校验通过的 .weft 文本；用于幂等抑制回声与重复事件。
     last_synced: Option<String>,
     watch_filter: Arc<Mutex<WatchFilter>>,
     watched_dirs: HashSet<PathBuf>,
@@ -352,20 +261,6 @@ impl DocumentPayload {
     }
 }
 
-// 仅用于提前提取脚本路径依赖：即使 YAML 其他段或脚本本身编译失败，也能继续监听对应 .rn 文件。
-#[derive(Deserialize, Default)]
-struct ScriptRefsDoc {
-    #[serde(default)]
-    story: ScriptRefsStory,
-}
-
-#[derive(Deserialize, Default)]
-struct ScriptRefsStory {
-    date_mode: Option<String>,
-    #[serde(default)]
-    calculable_props: HashMap<String, String>,
-}
-
 fn non_empty_parent(path: &Path) -> &Path {
     match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
@@ -410,12 +305,9 @@ fn resolve_script_watch_paths(raw: &Path, out: &mut HashSet<PathBuf>) {
     out.insert(resolved);
 }
 
-// 解析失败（如用户编辑中途 YAML 语法损坏）返回 None，调用方保留上一份脚本监听列表。
-fn extract_script_paths(content: &str, base: &Path) -> Option<HashSet<PathBuf>> {
-    let refs: ScriptRefsDoc = serde_yaml_ng::from_str(content).ok()?;
+fn resolve_script_refs(refs: StoryScriptRefs, base: &Path) -> HashSet<PathBuf> {
     let mut paths = HashSet::new();
     if let Some(date_mode) = refs
-        .story
         .date_mode
         .as_deref()
         .map(str::trim)
@@ -423,13 +315,13 @@ fn extract_script_paths(content: &str, base: &Path) -> Option<HashSet<PathBuf>> 
     {
         resolve_script_watch_paths(&base.join(date_mode), &mut paths);
     }
-    for source in refs.story.calculable_props.values() {
+    for source in refs.calculable_props {
         let trimmed = source.trim();
         if !trimmed.is_empty() {
             resolve_script_watch_paths(&base.join(trimmed), &mut paths);
         }
     }
-    Some(paths)
+    paths
 }
 
 fn is_content_event(kind: &EventKind) -> bool {
@@ -503,30 +395,36 @@ fn read_document_text(
     None
 }
 
-fn parse(app: &AppHandle, content: &str, base: &Path, lang: &str) -> Result<Value, DocumentError> {
-    let yaml: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(content).map_err(DocumentError::raw)?;
-    // 序列化 weft_doc.rs 声明过的结构：未知键在这里被滤掉
-    let gregorian = app
+fn parse(
+    app: &AppHandle,
+    content: &str,
+    base: &Path,
+    lang: &str,
+) -> (Option<HashSet<PathBuf>>, Result<Value, DocumentError>) {
+    let gregorian = match app
         .path()
         .resolve(
             crate::calendar::GREGORIAN,
             tauri::path::BaseDirectory::Resource,
         )
-        .map_err(DocumentError::raw)?;
-    let mut doc = WeftDoc::from_yaml(&yaml, base, &gregorian, lang)?;
-    // 实体（含可计算属性）已构建完毕，计算事件时间。
-    let cal = &doc.story.calendar;
-    doc.calendar_components = Some(cal.component_count());
-    event::apply_times(&mut doc.event, cal)?;
-    for entity in doc.entity.values() {
-        if let Some(avatar) = &entity.avatar {
-            app.asset_protocol_scope()
-                .allow_file(avatar)
-                .map_err(DocumentError::raw)?;
+        .map_err(DocumentError::raw)
+    {
+        Ok(path) => path,
+        Err(err) => return (None, Err(err)),
+    };
+    let (refs, compiled) = compiler::compile_with_scripts(content, base, &gregorian, lang);
+    let scripts = refs.map(|r| resolve_script_refs(r, base));
+    let result = compiled.and_then(|doc| {
+        for entity in doc.entity.values() {
+            if let Some(avatar) = &entity.avatar {
+                app.asset_protocol_scope()
+                    .allow_file(avatar)
+                    .map_err(DocumentError::raw)?;
+            }
         }
-    }
-    serde_json::to_value(doc).map_err(DocumentError::raw)
+        serde_json::to_value(doc).map_err(DocumentError::raw)
+    });
+    (scripts, result)
 }
 
 fn commit_and_emit(
@@ -601,10 +499,10 @@ fn push_changed(app: &AppHandle, generation: u64, trigger: ChangeTrigger) {
     };
 
     {
-        let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
+        let st = state.lock().unwrap_or_else(|p| p.into_inner());
         let Some(active) = st
             .active
-            .as_mut()
+            .as_ref()
             .filter(|active| active.generation == generation && active.seq == start_seq)
         else {
             return;
@@ -614,12 +512,9 @@ fn push_changed(app: &AppHandle, generation: u64, trigger: ChangeTrigger) {
         {
             return;
         }
-        if let Some(scripts) = extract_script_paths(&content, &parent) {
-            active.sync_scripts(scripts);
-        }
     }
 
-    let parsed = parse(app, &content, &parent, &crate::current_lang(app));
+    let (scripts, parsed) = parse(app, &content, &parent, &crate::current_lang(app));
     let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
     let Some(active) = st
         .active
@@ -628,6 +523,9 @@ fn push_changed(app: &AppHandle, generation: u64, trigger: ChangeTrigger) {
     else {
         return;
     };
+    if let Some(scripts) = scripts {
+        active.sync_scripts(scripts);
+    }
     match parsed {
         Ok(doc) => commit_and_emit(
             app,
@@ -666,8 +564,8 @@ pub fn refresh_language(app: &AppHandle) {
     let result = fs::read_to_string(&path)
         .map_err(DocumentError::raw)
         .map(|content| {
-            let parsed = parse(app, &content, &parent, &crate::current_lang(app));
-            (content, parsed)
+            let (scripts, parsed) = parse(app, &content, &parent, &crate::current_lang(app));
+            (content, scripts, parsed)
         });
 
     let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
@@ -679,19 +577,23 @@ pub fn refresh_language(app: &AppHandle) {
         return;
     };
     match result {
-        Ok((content, Ok(doc))) => {
-            if let Some(scripts) = extract_script_paths(&content, &parent) {
+        Ok((content, scripts, parsed)) => {
+            if let Some(scripts) = scripts {
                 active.sync_scripts(scripts);
             }
-            active.last_synced = Some(content.clone());
-            let _ = app.emit(EVENT, DocumentPayload::ready(generation, doc, content));
-        }
-        Ok((content, Err(err))) => {
-            if let Some(scripts) = extract_script_paths(&content, &parent) {
-                active.sync_scripts(scripts);
+            match parsed {
+                Ok(doc) => {
+                    active.last_synced = Some(content.clone());
+                    let _ = app.emit(EVENT, DocumentPayload::ready(generation, doc, content));
+                }
+                Err(err) => {
+                    active.last_synced = None;
+                    let _ = app.emit(
+                        EVENT,
+                        DocumentPayload::failed(generation, err, Some(content)),
+                    );
+                }
             }
-            active.last_synced = None;
-            let _ = app.emit(EVENT, DocumentPayload::failed(generation, err, Some(content)));
         }
         Err(err) => {
             active.last_synced = None;
@@ -779,7 +681,9 @@ pub fn bind_document(
         error!("failed to read document {}: {err}", target.path.display());
         DocumentError::raw(err)
     })?;
-    let initial_scripts = extract_script_paths(&content, &target.parent).unwrap_or_default();
+    // 语法/脚本错误不算绑定失败：正常进入展示页，错误原样带给前端
+    let (scripts, parsed) = parse(&app, &content, &target.parent, &crate::current_lang(&app));
+    let initial_scripts = scripts.unwrap_or_default();
     for dir in desired_watch_dirs(&target, &initial_scripts) {
         if watched_dirs.contains(&dir) {
             continue;
@@ -798,8 +702,6 @@ pub fn bind_document(
         .unwrap_or_else(|p| p.into_inner())
         .set_scripts(initial_scripts);
 
-    // 语法/脚本错误不算绑定失败：正常进入展示页，错误原样带给前端
-    let parsed = parse(&app, &content, &target.parent, &crate::current_lang(&app));
     let last_synced = parsed.is_ok().then(|| content.clone());
     let pending_trigger = {
         let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
@@ -845,8 +747,9 @@ pub fn save_document(
         .ok_or(DocumentError::validation(ValidationError::DocumentNotBound))?;
     let path = active.target.path.clone();
     let parent = active.target.parent.clone();
-    // 非法 YAML / 历法错误不落盘；目录取自当前绑定，保存不改路径
-    let doc = parse(&app, &content, &parent, &crate::current_lang(&app)).inspect_err(|err| {
+    // 非法 .weft / 历法错误不落盘；目录取自当前绑定，保存不改路径
+    let (scripts, parsed) = parse(&app, &content, &parent, &crate::current_lang(&app));
+    let doc = parsed.inspect_err(|err| {
         error!("failed to validate document before saving: {err}");
     })?;
     // 原子写：先写临时文件再 rename，外部 watcher 不会读到半截内容
@@ -869,7 +772,7 @@ pub fn save_document(
     // 写成功后更新已同步快照与序号，同时同步新的脚本依赖监听目录，并将新解析结果直接返回前端
     active.seq += 1;
     active.last_synced = Some(content.clone());
-    if let Some(scripts) = extract_script_paths(&content, &parent) {
+    if let Some(scripts) = scripts {
         active.sync_scripts(scripts);
     }
     Ok(DocumentPayload::ready(active.generation, doc, content))

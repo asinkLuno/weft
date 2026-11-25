@@ -37,7 +37,7 @@ function createDraftStore() {
   };
 }
 
-const YAML_FILTER = { name: "YAML", extensions: ["yaml", "yml"] };
+const WEFT_FILTER = { name: "Weft", extensions: ["weft"] };
 
 // 所有文档命令与事件集中在这里；绑定、保存和解绑按边界校验会话代数。
 // 高频编辑文本存放在外部 DraftStore 中，仅由编辑器通过 useSyncExternalStore 订阅，
@@ -283,7 +283,7 @@ export function useDocument() {
 
   async function openFile(): Promise<string | null> {
     try {
-      const selected = await open({ multiple: false, filters: [YAML_FILTER] });
+      const selected = await open({ multiple: false, filters: [WEFT_FILTER] });
       return typeof selected === "string" ? selected : null;
     } catch (error) {
       if (mounted.current) setActiveError(error);

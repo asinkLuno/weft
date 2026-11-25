@@ -56,7 +56,7 @@ pub(crate) fn read_script(path: &Path) -> Result<String, String> {
 
 type UnitCache = Mutex<HashMap<(String, String), Arc<Unit>>>;
 
-// 编译单个脚本并按 (路径, 源码) 缓存编译产物：编辑 YAML 时未变动的脚本免于重编译。
+// 编译单个脚本并按 (路径, 源码) 缓存编译产物：编辑 .weft 时未变动的脚本免于重编译。
 pub(crate) fn compile_cached(script: &str, path: &str) -> Result<Arc<Unit>, String> {
     static CACHE: OnceLock<UnitCache> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));

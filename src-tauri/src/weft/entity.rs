@@ -1,47 +1,41 @@
-//! 实体、归属图与关系模型：YAML 输入结构、构建上下文与运行时结构，
+//! 实体、归属图与关系模型：编译期输入结构、构建上下文与运行时结构，
 //! 以及校验、可计算属性执行和图构建的完整流程。
 
-use std::{collections::HashMap, fs, path::Path};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs,
+    path::Path,
+};
 
 use daggy::{Dag, Walker};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{Value as JsonValue, json};
-use serde_yaml_ng::Value;
 
 use crate::calculable_prop::CalculablePropRuntime;
 use crate::calendar::{Calendar, Moment};
-use crate::weft::FromRaw;
-use crate::weft::errors::{DocumentError, ValidationError};
+use crate::weft::errors::{DocumentError, SourceSpan, ValidationError};
 use crate::weft::phase::Phase;
 
 // ---- 输入结构 ----
 
-// 归属与可计算属性声明仅用于输入阶段，归属校验后反查进 belong_dag。
-// base_time 保留原始 YAML 值，构建时经 Phase::from_yaml_scalar_opt 解析。
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 pub(crate) struct RawEntity {
-    #[serde(default)]
-    pub base_time: Option<Value>,
+    pub base_time: Option<(Phase, SourceSpan)>,
     pub description: Option<String>,
-    pub avatar: Option<String>,
-    #[serde(default)]
-    pub belong_to: Vec<String>,
-    #[serde(default)]
-    pub calculable_props: Vec<String>,
-    // 内置 key 之外的一切输入字段原样收进 extra_props。
-    #[serde(flatten)]
-    pub extra_props: HashMap<String, Value>,
+    pub avatar: Option<(String, SourceSpan)>,
+    pub belong_to: Vec<(String, SourceSpan)>,
+    pub calculable_props: Vec<(String, SourceSpan)>,
+    pub extra_props: HashMap<String, JsonValue>,
 }
 
-// ---- 实体 ----
-
-/// 单实体构建环境：在整段构建环境上补一个实体 ID 与已解析的基准时间。
-struct EntityContext<'a> {
-    id: String,
-    base_time: Option<Phase>,
-    base_time_moment: Option<&'a Moment>,
-    build: &'a EntityBuildContext<'a>,
+#[derive(Debug)]
+pub(crate) struct RawEntityLink {
+    pub left: (String, SourceSpan),
+    pub right: (String, SourceSpan),
+    pub relations: String,
 }
+
+// ---- 运行时结构 ----
 
 /// 已完成头像解析和基准时间展示归一化的实体；事件通过实体 ID 引用。
 #[derive(Debug, Serialize)]
@@ -49,12 +43,10 @@ pub struct Entity {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
-    // 原始 Phase 用于偏移运算，展示归一化不会改写它。
     pub base_time: Option<Phase>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_time_humanizer: Option<String>,
     pub description: Option<String>,
-    // 非内置输入字段转成 JSON 后透传，为空时序列化中省略。
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub extra_props: HashMap<String, JsonValue>,
 }
@@ -67,48 +59,8 @@ pub struct BelongNode {
     pub belong_to: Vec<String>,
 }
 
-impl FromRaw<EntityContext<'_>> for Entity {
-    type Raw = RawEntity;
-
-    fn from_raw(raw: Self::Raw, context: EntityContext<'_>) -> Result<Self, DocumentError> {
-        let EntityContext {
-            id,
-            base_time,
-            base_time_moment,
-            build,
-        } = context;
-        let base = build.base;
-        let calendar = build.calendar;
-        let base_time_humanizer = base_time_moment
-            .map(|moment| calendar.humanize(moment))
-            .transpose()?;
-        // 头像路径相对 YAML 文件，是否为存在的图片已在输入校验确认，此处仅解析绝对路径。
-        let avatar = raw
-            .avatar
-            .filter(|source| !source.trim().is_empty())
-            .and_then(|source| fs::canonicalize(base.join(source)).ok())
-            .filter(|path| path.is_file())
-            .map(|path| path.to_string_lossy().into_owned());
-        Ok(Self {
-            id,
-            avatar,
-            base_time,
-            base_time_humanizer,
-            description: raw.description,
-            extra_props: raw
-                .extra_props
-                .into_iter()
-                .map(|(key, value)| serde_json::to_value(value).map(|value| (key, value)))
-                .collect::<Result<_, _>>()
-                .map_err(DocumentError::raw)?,
-        })
-    }
-}
-
-// ---- 关系 ----
-
 /// 一条关系：两个实体 ID 与关系类型；ID 是否合法由构建管线统一校验。
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Serialize)]
 pub struct EntityLink {
     pub entities: (String, String),
     pub relations: String,
@@ -116,7 +68,6 @@ pub struct EntityLink {
 
 // ---- 构建管线 ----
 
-/// 实体段构建所需的外部环境：文件路径、历法与可计算属性运行时。
 pub(crate) struct EntityBuildContext<'a> {
     pub base: &'a Path,
     pub calendar: &'a Calendar,
@@ -125,13 +76,13 @@ pub(crate) struct EntityBuildContext<'a> {
 
 /// 构建实体段：校验输入，RawEntity 转成 Entity 并执行可计算属性，
 /// 结果写进 extra_props。归属 DAG 的边已去重且无环，反查出的直接上级写进 belong_dag。
-/// 关系只校验 ID，数据仍归文档层所有。
 pub(crate) fn build_entities(
-    raw_entities: HashMap<String, RawEntity>,
-    entity_link: &HashMap<String, Vec<EntityLink>>,
+    raw_entities: BTreeMap<String, RawEntity>,
+    raw_links: &BTreeMap<String, Vec<RawEntityLink>>,
     context: EntityBuildContext<'_>,
-) -> Result<(HashMap<String, Entity>, Vec<BelongNode>), DocumentError> {
-    let belong_graph = build_belong_graph(&raw_entities, entity_link)?;
+) -> Result<(HashMap<String, Entity>, Vec<BelongNode>, HashMap<String, Vec<EntityLink>>), DocumentError>
+{
+    let belong_graph = build_belong_graph(&raw_entities, raw_links)?;
     validate_avatars(&raw_entities, context.base)?;
     let parents_by_id: HashMap<&str, Vec<String>> = belong_graph
         .graph()
@@ -146,29 +97,49 @@ pub(crate) fn build_entities(
             (belong_graph[node].as_str(), parents)
         })
         .collect();
-    let mut raw_entries: Vec<_> = raw_entities.into_iter().collect();
-    raw_entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-    let mut entities = HashMap::with_capacity(raw_entries.len());
-    for (id, mut input) in raw_entries {
-        let props = std::mem::take(&mut input.calculable_props);
+
+    let mut entities = HashMap::with_capacity(raw_entities.len());
+    for (id, input) in raw_entities {
         let belong_to = parents_by_id.get(id.as_str()).cloned().unwrap_or_default();
-        let base_time = Phase::from_yaml_scalar_opt(input.base_time.as_ref())?;
-        let base_time_moment = base_time
+        let base_time_moment = input
+            .base_time
             .as_ref()
-            .map(|phase| context.calendar.resolve(phase))
+            .map(|(phase, span)| {
+                context
+                    .calendar
+                    .resolve(phase)
+                    .map_err(|err| err.with_span(span.clone()))
+            })
             .transpose()?;
-        let mut entity = Entity::from_raw(
-            input,
-            EntityContext {
-                id: id.clone(),
-                base_time,
-                base_time_moment: base_time_moment.as_ref(),
-                build: &context,
-            },
+        let base_time_humanizer = base_time_moment
+            .as_ref()
+            .map(|moment| context.calendar.humanize(moment))
+            .transpose()?;
+        let avatar = input
+            .avatar
+            .map(|(source, _)| source)
+            .filter(|source| !source.trim().is_empty())
+            .and_then(|source| fs::canonicalize(context.base.join(source)).ok())
+            .filter(|path| path.is_file())
+            .map(|path| path.to_string_lossy().into_owned());
+        let mut entity = Entity {
+            id: id.clone(),
+            avatar,
+            base_time: input.base_time.map(|(phase, _)| phase),
+            base_time_humanizer,
+            description: input.description,
+            extra_props: input.extra_props,
+        };
+        apply_calculable_props(
+            &mut entity,
+            &input.calculable_props,
+            &belong_to,
+            base_time_moment.as_ref(),
+            &context,
         )?;
-        apply_calculable_props(&mut entity, &props, &belong_to, base_time_moment.as_ref(), &context)?;
         entities.insert(id, entity);
     }
+
     let mut belong_dag: Vec<_> = parents_by_id
         .into_iter()
         .map(|(id, belong_to)| BelongNode {
@@ -177,68 +148,86 @@ pub(crate) fn build_entities(
         })
         .collect();
     belong_dag.sort_unstable_by(|a, b| a.id.cmp(&b.id));
-    Ok((entities, belong_dag))
+
+    let entity_link = raw_links
+        .iter()
+        .map(|(group, edges)| {
+            (
+                group.clone(),
+                edges
+                    .iter()
+                    .map(|edge| EntityLink {
+                        entities: (edge.left.0.clone(), edge.right.0.clone()),
+                        relations: edge.relations.clone(),
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    Ok((entities, belong_dag, entity_link))
 }
 
 fn build_belong_graph(
-    entities: &HashMap<String, RawEntity>,
-    links: &HashMap<String, Vec<EntityLink>>,
+    entities: &BTreeMap<String, RawEntity>,
+    links: &BTreeMap<String, Vec<RawEntityLink>>,
 ) -> Result<Dag<String, ()>, DocumentError> {
-    let mut entity_ids: Vec<_> = entities.keys().collect();
-    entity_ids.sort_unstable();
-    for id in entity_ids {
-        for parent in &entities[id].belong_to {
+    for (id, raw) in entities {
+        for (parent, span) in &raw.belong_to {
             if !entities.contains_key(parent) {
-                return Err(ValidationError::EntityUnknownParent {
-                    entity: id.clone(),
-                    target: parent.clone(),
-                }
-                .into());
+                return Err(DocumentError::validation_at(
+                    ValidationError::EntityUnknownParent {
+                        entity: id.clone(),
+                        target: parent.clone(),
+                    },
+                    span.clone(),
+                ));
             }
         }
     }
-    let mut groups: Vec<_> = links.keys().collect();
-    groups.sort_unstable();
-    for group in groups {
-        for link in &links[group] {
-            for id in [&link.entities.0, &link.entities.1] {
+    for (group, edges) in links {
+        for link in edges {
+            for (id, span) in [&link.left, &link.right] {
                 if !entities.contains_key(id) {
-                    return Err(ValidationError::UnknownLinkEntity {
-                        group: group.clone(),
-                        entity: id.clone(),
-                    }
-                    .into());
+                    return Err(DocumentError::validation_at(
+                        ValidationError::UnknownLinkEntity {
+                            group: group.clone(),
+                            entity: id.clone(),
+                        },
+                        span.clone(),
+                    ));
                 }
             }
         }
     }
     let mut graph = Dag::new();
-    let mut ids: Vec<_> = entities.keys().collect();
-    ids.sort_unstable();
-    let indices: HashMap<_, _> = ids
-        .iter()
-        .map(|id| (id.as_str(), graph.add_node((*id).clone())))
+    let indices: HashMap<_, _> = entities
+        .keys()
+        .map(|id| (id.as_str(), graph.add_node(id.clone())))
         .collect();
-    for id in ids {
-        for parent in &entities[id].belong_to {
+    for (id, raw) in entities {
+        for (parent, span) in &raw.belong_to {
             graph
                 .update_edge(indices[parent.as_str()], indices[id.as_str()], ())
-                .map_err(|_| ValidationError::EntityCycle { entity: id.clone() })?;
+                .map_err(|_| {
+                    DocumentError::validation_at(
+                        ValidationError::EntityCycle { entity: id.clone() },
+                        span.clone(),
+                    )
+                })?;
         }
     }
     Ok(graph)
 }
 
-// 头像路径相对 YAML 文件；必须解析到已存在的图片文件，否则逐条报错。
-fn validate_avatars(entity: &HashMap<String, RawEntity>, base: &Path) -> Result<(), DocumentError> {
-    let mut ids: Vec<_> = entity.keys().collect();
-    ids.sort_unstable();
-    for id in ids {
-        let input = &entity[id];
-        let Some(source) = input
+fn validate_avatars(
+    entities: &BTreeMap<String, RawEntity>,
+    base: &Path,
+) -> Result<(), DocumentError> {
+    for (id, input) in entities {
+        let Some((source, span)) = input
             .avatar
-            .as_deref()
-            .filter(|source| !source.trim().is_empty())
+            .as_ref()
+            .filter(|(source, _)| !source.trim().is_empty())
         else {
             continue;
         };
@@ -246,21 +235,21 @@ fn validate_avatars(entity: &HashMap<String, RawEntity>, base: &Path) -> Result<
             .map(|path| path.is_file() && is_image(&path))
             .unwrap_or(false);
         if !valid {
-            return Err(ValidationError::InvalidAvatarPath {
-                entity: id.clone(),
-                path: source.to_owned(),
-            }
-            .into());
+            return Err(DocumentError::validation_at(
+                ValidationError::InvalidAvatarPath {
+                    entity: id.clone(),
+                    path: source.clone(),
+                },
+                span.clone(),
+            ));
         }
     }
     Ok(())
 }
 
-// 执行实体的可计算属性：脚本返回值写进 extra_props 的属性注册 ID 下，
-// 与输入字段同名时以计算结果为准；返回 () 则不写入。
 fn apply_calculable_props(
     entity: &mut Entity,
-    props: &[String],
+    props: &[(String, SourceSpan)],
     belong_to: &[String],
     base_time_moment: Option<&Moment>,
     context: &EntityBuildContext<'_>,
@@ -275,9 +264,8 @@ fn apply_calculable_props(
             "tick": moment.tick,
         })
     });
-    // 传入原始输入字段的只读快照，避免同一实体上多个计算属性受执行顺序相互干扰。
     let raw_extra_props = entity.extra_props.clone();
-    for name in props {
+    for (name, span) in props {
         let input = json!({
             "id": entity.id,
             "base_time": base_time,
@@ -285,7 +273,11 @@ fn apply_calculable_props(
             "belong_to": belong_to,
             "extra_props": raw_extra_props,
         });
-        if let Some(value) = context.calculable_props.calculable_prop(name, input)? {
+        let value = context
+            .calculable_props
+            .calculable_prop(name, input)
+            .map_err(|err| err.with_span(span.clone()))?;
+        if let Some(value) = value {
             entity.extra_props.insert(name.clone(), value);
         }
     }
@@ -294,7 +286,6 @@ fn apply_calculable_props(
 
 // ---- 校验工具 ----
 
-// 头像经 asset protocol 直接交给 <img>，按扩展名接受 WebView 可渲染的图片。
 const IMAGE_EXTENSIONS: [&str; 8] = ["bmp", "gif", "ico", "jpeg", "jpg", "png", "svg", "webp"];
 
 fn is_image(path: &Path) -> bool {

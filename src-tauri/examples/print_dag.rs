@@ -1,6 +1,4 @@
-//! 用 examples/story.yaml 跑一遍实体构建，打印归属 DAG。
-//! 与 weft_doc::WeftDoc::from_yaml 走同一条 Story → entity::build_entities 管线，
-//! 只是不经过 Tauri AppHandle（资产授权等运行时部分与本图无关）。
+//! 用 examples/story.weft 跑一遍完整编译，打印归属 DAG。
 
 #![allow(dead_code)]
 
@@ -15,54 +13,23 @@ mod weft;
 
 use std::{collections::HashMap, fs, path::Path};
 
-use serde::Deserialize;
-use weft::FromRaw;
-use weft::entity::{BelongNode, EntityBuildContext, EntityLink, RawEntity, build_entities};
-use weft::story::{RawStory, Story, StoryContext};
-
-// 与 RawWeftDoc 的实体相关字段一致；其余段与归属 DAG 无关。
-#[derive(Deserialize)]
-struct RawDoc {
-    story: RawStory,
-    #[serde(default)]
-    entity: HashMap<String, RawEntity>,
-    #[serde(default)]
-    entity_link: HashMap<String, Vec<EntityLink>>,
-}
+use weft::entity::BelongNode;
 
 fn main() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let base = manifest.join("../examples");
     let gregorian = manifest.join("rune/gregorian.rn");
-    let content = fs::read_to_string(base.join("story.yaml")).expect("read story.yaml");
-    let raw: RawDoc =
-        serde_yaml_ng::from_str(&content).expect("deserialize story.yaml");
+    let content = fs::read_to_string(base.join("story.weft")).expect("read story.weft");
 
-    let story = Story::from_raw(
-        raw.story,
-        StoryContext {
-            base: &base,
-            gregorian: &gregorian,
-            lang: "zh",
-        },
-    )
-    .expect("build story");
-    let (entities, belong_dag) = build_entities(
-        raw.entity,
-        &raw.entity_link,
-        EntityBuildContext {
-            base: &base,
-            calendar: &story.calendar,
-            calculable_props: &story.calculable_prop_runtime,
-        },
-    )
-    .expect("build entities");
+    let doc = weft::compiler::compile_with_scripts(&content, &base, &gregorian, "zh")
+        .1
+        .expect("compile story");
 
-    print_dag(&belong_dag);
-    println!("\n实体数：{}", entities.len());
+    print_dag(&doc.belong_dag);
+    println!("\n实体数：{}", doc.entity.len());
     println!(
         "\nbelong_dag JSON：\n{}",
-        serde_json::to_string_pretty(&belong_dag).expect("serialize dag")
+        serde_json::to_string_pretty(&doc.belong_dag).expect("serialize dag")
     );
 }
 

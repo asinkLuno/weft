@@ -1,17 +1,14 @@
+use std::collections::HashMap;
+
 use serde::Serialize;
-use serde_yaml_ng::Value as Yaml;
 
 use crate::weft::errors::{DocumentError, ValidationError};
-
-
-// YAML 里 phase 可以是 time_unit，也可以是 [phase, 偏移分量…]，递归锚点位于首项。
-// 解析时就把递归摊平：最内层是绝对时间，外面每套一层多一段偏移。
-// [[[2025, 4, 2, 10], 0, 0, 0, 2], 1] 得到 base = [2025, 4, 2, 10]，
-// offsets = [[0, 0, 0, 2], [1]]。
+use crate::weft::parser::{BinOp, Expr, Span, Spanned, source_span};
 
 pub type TimeUnit = Vec<i64>;
 const MAX_PHASE_DEPTH: usize = 64;
-// phase 可以是 time_unit，也可以是 [phase, 偏移分量…]；锚点递归深度最多 64 层。
+
+/// 运行时时间表达式树：最内层为绝对时间，外层每套一层多一段分量偏移。
 #[derive(Debug, Clone, Serialize)]
 pub struct Phase {
     pub components: TimeUnit,
@@ -19,61 +16,205 @@ pub struct Phase {
 }
 
 impl Phase {
-    pub(crate) fn from_yaml(value: &Yaml) -> Result<Self, DocumentError> {
-        Self::from_yaml_at_depth(value, 1)
-    }
-
-    fn from_yaml_at_depth(value: &Yaml, depth: usize) -> Result<Self, DocumentError> {
-        if depth > MAX_PHASE_DEPTH {
-            return Err(ValidationError::TimeNestingTooDeep {
-                maximum: MAX_PHASE_DEPTH.to_string(),
-            }
-            .into());
-        }
-        let sequence = value
-            .as_sequence()
-            .ok_or_else(|| DocumentError::validation(ValidationError::TimeNonemptyList))?;
-        match sequence.first() {
-            None => Err(ValidationError::TimeNonemptyList.into()),
-            Some(anchor @ Yaml::Sequence(_)) => Ok(Self {
-                components: integers(&sequence[1..])?,
-                anchor: Some(Box::new(Self::from_yaml_at_depth(anchor, depth + 1)?)),
-            }),
-            Some(_) => Ok(Self {
-                components: integers(sequence)?,
-                anchor: None,
-            }),
-        }
-    }
-
-
-    /// 标量兼容：单个整数等价于单分量 Phase，其余结构交给 [`Phase::from_yaml`]。
-    /// 实体的 `base_time` 和事件的 `start_time` / `end_time` 共用。
-    pub(crate) fn from_yaml_scalar(value: &Yaml) -> Result<Self, DocumentError> {
-        match value {
-            Yaml::Number(_) => Self::from_yaml(&Yaml::Sequence(vec![value.clone()])),
-            value => Self::from_yaml(value),
-        }
-    }
-
-    /// 标量形式再兼容缺省：Null 或未提供都视为 None。
-    pub(crate) fn from_yaml_scalar_opt(
-        value: Option<&Yaml>,
-    ) -> Result<Option<Self>, DocumentError> {
-        match value {
-            None | Some(Yaml::Null) => Ok(None),
-            Some(value) => Self::from_yaml_scalar(value).map(Some),
+    fn depth(&self) -> usize {
+        match &self.anchor {
+            Some(inner) => 1 + inner.depth(),
+            None => 1,
         }
     }
 }
 
-fn integers(values: &[Yaml]) -> Result<TimeUnit, DocumentError> {
-    values
-        .iter()
-        .map(|value| {
-            value
-                .as_i64()
-                .ok_or_else(|| DocumentError::validation(ValidationError::TimeIntegerComponent))
-        })
-        .collect()
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum TimeTarget {
+    Anchor(String),
+    EntityBaseTime(String),
+    EventStart(String),
+    EventEnd(String),
+}
+
+impl TimeTarget {
+    fn display_name(&self) -> String {
+        match self {
+            Self::Anchor(name) => name.clone(),
+            Self::EntityBaseTime(id) => format!("{id}.base_time"),
+            Self::EventStart(id) => format!("{id}.start"),
+            Self::EventEnd(id) => format!("{id}.end"),
+        }
+    }
+
+    fn self_event(&self) -> Option<&str> {
+        match self {
+            Self::EventStart(id) | Self::EventEnd(id) => Some(id.as_str()),
+            Self::Anchor(_) | Self::EntityBaseTime(_) => None,
+        }
+    }
+}
+
+/// 解析 `.weft` 中的时间表达式（绝对时间、命名锚点、跨事件/实体引用与 `+`/`-` 偏移），
+/// 检测循环引用与嵌套超限，输出历法无关的 `Phase`。
+pub(crate) struct TimeResolver<'a> {
+    src: &'a str,
+    exprs: &'a HashMap<TimeTarget, Spanned<Expr>>,
+    resolved: HashMap<TimeTarget, Phase>,
+    visiting: Vec<TimeTarget>,
+}
+
+impl<'a> TimeResolver<'a> {
+    pub(crate) fn new(src: &'a str, exprs: &'a HashMap<TimeTarget, Spanned<Expr>>) -> Self {
+        Self {
+            src,
+            exprs,
+            resolved: HashMap::new(),
+            visiting: Vec::new(),
+        }
+    }
+
+    pub(crate) fn resolve_target(
+        &mut self,
+        target: &TimeTarget,
+        use_span: Span,
+    ) -> Result<Phase, DocumentError> {
+        if let Some(cached) = self.resolved.get(target) {
+            return Ok(cached.clone());
+        }
+        if self.visiting.contains(target) {
+            return Err(DocumentError::validation_at(
+                ValidationError::TimeCycle {
+                    target: target.display_name(),
+                },
+                source_span(self.src, use_span),
+            ));
+        }
+        let Some(expr) = self.exprs.get(target) else {
+            return Err(DocumentError::validation_at(
+                ValidationError::UnknownTimeRef {
+                    reference: target.display_name(),
+                },
+                source_span(self.src, use_span),
+            ));
+        };
+        self.visiting.push(target.clone());
+        let result = self.resolve_expr(expr, target.self_event());
+        self.visiting.pop();
+        let phase = result?;
+        self.resolved.insert(target.clone(), phase.clone());
+        Ok(phase)
+    }
+
+    fn resolve_expr(
+        &mut self,
+        expr: &Spanned<Expr>,
+        self_event: Option<&str>,
+    ) -> Result<Phase, DocumentError> {
+        let (node, span) = expr;
+        let phase = match node {
+            Expr::Int(value) => Phase {
+                components: vec![*value],
+                anchor: None,
+            },
+            Expr::List(items) => Phase {
+                components: self.parse_int_list(items, *span)?,
+                anchor: None,
+            },
+            Expr::Ident(name) => {
+                if let Some(event_id) = self_event {
+                    if name == "start" {
+                        return self.resolve_target(
+                            &TimeTarget::EventStart(event_id.to_owned()),
+                            *span,
+                        );
+                    }
+                    if name == "end" {
+                        return self
+                            .resolve_target(&TimeTarget::EventEnd(event_id.to_owned()), *span);
+                    }
+                }
+                self.resolve_target(&TimeTarget::Anchor(name.clone()), *span)?
+            }
+            Expr::Member { base, field } => {
+                let target = match field.0.as_str() {
+                    "start" => TimeTarget::EventStart(base.0.clone()),
+                    "end" => TimeTarget::EventEnd(base.0.clone()),
+                    "base_time" => TimeTarget::EntityBaseTime(base.0.clone()),
+                    _ => {
+                        return Err(DocumentError::validation_at(
+                            ValidationError::UnknownTimeRef {
+                                reference: format!("{}.{}", base.0, field.0),
+                            },
+                            source_span(self.src, *span),
+                        ));
+                    }
+                };
+                self.resolve_target(&target, *span)?
+            }
+            Expr::Binary { lhs, op, rhs } => {
+                let anchor = self.resolve_expr(lhs, self_event)?;
+                let mut offset = self.parse_offset(rhs)?;
+                if *op == BinOp::Sub {
+                    for value in &mut offset {
+                        *value = value.checked_neg().ok_or_else(|| {
+                            DocumentError::validation_at(
+                                ValidationError::TimeOffsetOutOfRange,
+                                source_span(self.src, rhs.1),
+                            )
+                        })?;
+                    }
+                }
+                Phase {
+                    components: offset,
+                    anchor: Some(Box::new(anchor)),
+                }
+            }
+            _ => {
+                return Err(DocumentError::validation_at(
+                    ValidationError::TimeNonemptyList,
+                    source_span(self.src, *span),
+                ));
+            }
+        };
+        if phase.depth() > MAX_PHASE_DEPTH {
+            return Err(DocumentError::validation_at(
+                ValidationError::TimeNestingTooDeep {
+                    maximum: MAX_PHASE_DEPTH.to_string(),
+                },
+                source_span(self.src, *span),
+            ));
+        }
+        Ok(phase)
+    }
+
+    fn parse_offset(&self, expr: &Spanned<Expr>) -> Result<TimeUnit, DocumentError> {
+        let (node, span) = expr;
+        match node {
+            Expr::Int(value) => Ok(vec![*value]),
+            Expr::List(items) => self.parse_int_list(items, *span),
+            _ => Err(DocumentError::validation_at(
+                ValidationError::TimeNonemptyList,
+                source_span(self.src, *span),
+            )),
+        }
+    }
+
+    fn parse_int_list(
+        &self,
+        items: &[Spanned<Expr>],
+        list_span: Span,
+    ) -> Result<TimeUnit, DocumentError> {
+        if items.is_empty() {
+            return Err(DocumentError::validation_at(
+                ValidationError::TimeNonemptyList,
+                source_span(self.src, list_span),
+            ));
+        }
+        items
+            .iter()
+            .map(|(item, span)| match item {
+                Expr::Int(value) => Ok(*value),
+                _ => Err(DocumentError::validation_at(
+                    ValidationError::TimeIntegerComponent,
+                    source_span(self.src, *span),
+                )),
+            })
+            .collect()
+    }
 }

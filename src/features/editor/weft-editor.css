@@ -1,4 +1,4 @@
-.yaml-editor-view {
+.weft-editor-view {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -6,7 +6,7 @@
   background: var(--card);
 }
 
-.yaml-editor-toolbar {
+.weft-editor-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -16,7 +16,7 @@
   background: var(--background);
 }
 
-.yaml-editor-filename {
+.weft-editor-filename {
   overflow: hidden;
   color: var(--foreground);
   font-family:
@@ -28,7 +28,7 @@
   white-space: nowrap;
 }
 
-.yaml-editor-actions {
+.weft-editor-actions {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -36,7 +36,7 @@
   flex-shrink: 0;
 }
 
-.yaml-editor-banner {
+.weft-editor-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -48,13 +48,13 @@
   font-size: 12px;
 }
 
-.yaml-editor-surface {
+.weft-editor-surface {
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
 
-.yaml-editor-cm,
-.yaml-editor-cm .cm-editor {
+.weft-editor-cm,
+.weft-editor-cm .cm-editor {
   height: 100%;
 }

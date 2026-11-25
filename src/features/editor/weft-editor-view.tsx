@@ -1,5 +1,5 @@
-import { yaml } from "@codemirror/lang-yaml";
-import { EditorView, keymap } from "@codemirror/view";
+import { autocompletion } from "@codemirror/autocomplete";
+import { EditorView } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import { RefreshCw, RotateCcw, Save } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
@@ -7,8 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { DraftStore } from "@/features/document/use-document";
 import { type Lang, strings } from "@/i18n";
-import { weftYamlThemeExtension } from "./yaml-theme";
-import "./yaml-editor.css";
+import { createWeftCompletionSource } from "./weft-completion";
+import { weftLanguage } from "./weft-language";
+import { weftThemeExtension } from "./weft-theme";
+import "./weft-editor.css";
 
 const PATH_SEP_RE = /[\\/]/;
 
@@ -29,7 +31,7 @@ function fileNameOf(filePath: string): string {
   return parts[parts.length - 1] || filePath;
 }
 
-function YamlEditorViewInner({
+function WeftEditorViewInner({
   path,
   draftStore,
   dirty,
@@ -55,42 +57,31 @@ function YamlEditorViewInner({
     draftStore.getSnapshot,
   );
   const t = strings[lang];
-  const onSaveRef = useRef(onSave);
-  const dirtyRef = useRef(dirty);
+  const langRef = useRef(lang);
 
   useEffect(() => {
-    onSaveRef.current = onSave;
-  }, [onSave]);
-
-  useEffect(() => {
-    dirtyRef.current = dirty;
-  }, [dirty]);
+    langRef.current = lang;
+  }, [lang]);
 
   const extensions = useMemo(
     () => [
-      yaml(),
+      weftLanguage,
+      autocompletion({
+        override: [createWeftCompletionSource(() => langRef.current)],
+        activateOnTyping: true,
+        closeOnBlur: true,
+        maxRenderedOptions: 30,
+      }),
       EditorView.lineWrapping,
-      keymap.of([
-        {
-          key: "Mod-s",
-          preventDefault: true,
-          run: () => {
-            if (dirtyRef.current) {
-              void onSaveRef.current();
-            }
-            return true;
-          },
-        },
-      ]),
-      ...weftYamlThemeExtension,
+      ...weftThemeExtension,
     ],
     [],
   );
 
   return (
-    <div className="yaml-editor-view">
-      <div className="yaml-editor-toolbar">
-        <span className="yaml-editor-filename" title={path}>
+    <div className="weft-editor-view">
+      <div className="weft-editor-toolbar">
+        <span className="weft-editor-filename" title={path}>
           {fileNameOf(path)}
         </span>
         {dirty && (
@@ -98,7 +89,7 @@ function YamlEditorViewInner({
             {t.unsaved}
           </Badge>
         )}
-        <div className="yaml-editor-actions">
+        <div className="weft-editor-actions">
           {dirty && (
             <Button
               variant="ghost"
@@ -125,7 +116,7 @@ function YamlEditorViewInner({
       </div>
 
       {hasExternalChange && (
-        <div className="yaml-editor-banner">
+        <div className="weft-editor-banner">
           <span>{t.externalChanged}</span>
           <Button variant="outline" size="xs" onClick={onReloadFromDisk}>
             <RefreshCw className="size-3" />
@@ -134,9 +125,9 @@ function YamlEditorViewInner({
         </div>
       )}
 
-      <div className="yaml-editor-surface">
+      <div className="weft-editor-surface">
         <CodeMirror
-          className="yaml-editor-cm"
+          className="weft-editor-cm"
           value={value}
           height="100%"
           theme="none"
@@ -149,4 +140,4 @@ function YamlEditorViewInner({
   );
 }
 
-export const YamlEditorView = memo(YamlEditorViewInner);
+export const WeftEditorView = memo(WeftEditorViewInner);
