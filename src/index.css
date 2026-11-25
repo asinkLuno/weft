@@ -1,2 +1,10 @@
 @import "tailwindcss";
-@plugin "daisyui";
+@plugin "daisyui" {
+  themes: false;
+}
+@plugin "daisyui/theme" {
+  name: "lofi";
+  default: true;
+  --color-primary: #002fa7;
+  --color-primary-content: #ffffff;
+}

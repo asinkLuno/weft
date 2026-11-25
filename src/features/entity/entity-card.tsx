@@ -48,11 +48,11 @@ function entityInitials(id: string): string {
 
 function EntityCard({ data }: { data: EntityData }) {
   return (
-    <div className="card w-[280px] bg-base-100 shadow-md">
-      <div className="card-body gap-3 p-4">
-        <div className="flex items-start gap-3">
+    <div className="card card-sm w-[280px] border border-base-300 bg-base-100 shadow-xs">
+      <div className="card-body gap-2.5">
+        <div className="flex items-start gap-2.5">
           <div className="avatar avatar-placeholder shrink-0">
-            <div className="w-10 rounded-full bg-neutral text-neutral-content">
+            <div className="w-9 rounded-full bg-neutral text-neutral-content">
               {data.avatar ? (
                 <img
                   src={data.avatar}
@@ -66,12 +66,12 @@ function EntityCard({ data }: { data: EntityData }) {
               )}
             </div>
           </div>
-          <h3 className="min-w-0 self-center break-words text-base leading-6 font-semibold">
+          <h3 className="min-w-0 self-center break-words text-sm leading-5 font-semibold">
             {data.name}
           </h3>
         </div>
         {data.description && (
-          <p className="whitespace-pre-wrap break-words text-sm leading-6 text-base-content/60">
+          <p className="line-clamp-3 whitespace-pre-wrap break-words text-xs leading-5 text-base-content/70">
             {data.description}
           </p>
         )}
@@ -79,14 +79,16 @@ function EntityCard({ data }: { data: EntityData }) {
       {(data.baseTime ||
         data.extraProps.length > 0 ||
         data.parents.length > 0) && (
-        <div className="flex flex-col gap-3 border-t border-base-300 p-4">
+        <div className="flex flex-col gap-2 border-t border-base-300 px-4 py-3">
           {data.baseTime && (
-            <div className="flex items-start gap-2 text-xs text-base-content/60">
+            <div className="flex items-start gap-1.5 text-xs text-base-content/60">
               <CalendarDays
                 className="mt-0.5 size-3.5 shrink-0"
                 aria-hidden="true"
               />
-              <span className="break-words leading-5">{data.baseTime}</span>
+              <span className="break-words font-mono leading-5">
+                {data.baseTime}
+              </span>
             </div>
           )}
           {data.extraProps.map(([key, value]) => (
@@ -96,9 +98,9 @@ function EntityCard({ data }: { data: EntityData }) {
             </div>
           ))}
           {data.parents.length > 0 && (
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5">
               <p className="text-xs text-base-content/60">{data.belongLabel}</p>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-1">
                 {data.parents.map((p) => (
                   <ParentBadge key={p.id} parent={p} />
                 ))}
@@ -117,7 +119,7 @@ function ParentBadge({ parent }: { parent: EntityData["parents"][number] }) {
   const preview = parent.preview;
   if (!preview) {
     return (
-      <span className="badge badge-outline max-w-full whitespace-normal break-words">
+      <span className="badge badge-sm badge-outline max-w-full border-base-300 whitespace-normal break-words">
         {parent.name}
       </span>
     );
@@ -133,7 +135,7 @@ function ParentBadge({ parent }: { parent: EntityData["parents"][number] }) {
       <button
         type="button"
         tabIndex={0}
-        className="nodrag badge badge-outline h-auto max-w-full cursor-pointer whitespace-normal break-words"
+        className="nodrag badge badge-sm badge-outline h-auto max-w-full cursor-pointer border-base-300 whitespace-normal break-words transition-colors hover:border-primary hover:text-primary"
       >
         {parent.name}
       </button>

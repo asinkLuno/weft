@@ -32,13 +32,17 @@ function DimensionFilter({
   return (
     <details className="dropdown">
       <summary
-        className={`btn btn-outline btn-xs${count === 0 ? " btn-disabled" : ""}`}
+        className={`btn btn-sm btn-outline ${
+          active ? "border-primary text-primary" : "border-base-300"
+        }${count === 0 ? " btn-disabled" : ""}`}
       >
         {label}
-        {active && <span className="badge badge-sm">{active.label}</span>}
+        {active && (
+          <span className="badge badge-xs badge-primary">{active.label}</span>
+        )}
         <ChevronDown className="size-3.5" />
       </summary>
-      <ul className="menu dropdown-content z-10 max-h-72 w-48 overflow-auto rounded-box bg-base-100 p-1 shadow">
+      <ul className="menu menu-sm dropdown-content z-20 mt-1 max-h-72 w-48 overflow-auto rounded-box border border-base-300 bg-base-100 p-1 shadow-md">
         {sections.map((section, i) => (
           <Fragment key={section[0]?.v ?? String(i)}>
             {i > 0 && (
@@ -171,7 +175,7 @@ function EntityViewInner({
           onChoose={(v) => choose("link", v)}
         />
       </div>
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/60">
         <EntityCanvas
           key={canvasKey}
           initialNodes={nodes}

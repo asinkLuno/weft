@@ -305,9 +305,9 @@ function SectionCard({
   children: ReactNode;
 }) {
   return (
-    <section className="card card-border min-w-0 bg-base-100">
-      <div className="card-body gap-4">
-        <h2 className="card-title text-base">{title}</h2>
+    <section className="card card-sm card-border min-w-0 bg-base-100">
+      <div className="card-body gap-3">
+        <h2 className="card-title text-sm font-semibold">{title}</h2>
         {children}
       </div>
     </section>
@@ -319,7 +319,7 @@ function FieldTable({ fields, lang }: { fields: Field[]; lang: Lang }) {
   const t = copy[lang];
   return (
     <div className="overflow-x-auto">
-      <table className="table table-sm">
+      <table className="table table-xs">
         <thead>
           <tr>
             <th>{t.fieldName}</th>
@@ -331,10 +331,16 @@ function FieldTable({ fields, lang }: { fields: Field[]; lang: Lang }) {
           {fields.map((field) => (
             <tr key={field.name}>
               <td className="font-mono text-xs">{field.name}</td>
-              <td className="text-base-content/60">
-                {field.required ? t.required : "—"}
+              <td className="text-base-content/50">
+                {field.required ? (
+                  <span className="badge badge-xs badge-outline border-primary text-primary">
+                    {t.required}
+                  </span>
+                ) : (
+                  "—"
+                )}
               </td>
-              <td className="whitespace-normal text-base-content/60">
+              <td className="whitespace-normal text-xs text-base-content/70">
                 {field.desc}
               </td>
             </tr>
@@ -349,34 +355,38 @@ export const InfoView = memo(function InfoView({ lang }: { lang: Lang }) {
   const t = copy[lang];
   return (
     <div className="mx-auto w-full max-w-3xl">
-      <header className="mb-8 flex flex-col gap-3">
-        <div className="flex items-center gap-2 text-sm text-base-content/60">
-          <Info className="size-4" aria-hidden="true" />
+      <header className="mb-6 flex flex-col gap-2 border-b border-base-300 pb-5">
+        <div className="flex items-center gap-1.5 text-xs font-medium text-primary">
+          <Info className="size-3.5" aria-hidden="true" />
           <span>{strings[lang].tabInfo}</span>
         </div>
-        <h1 className="text-3xl font-bold tracking-tight">Weft DSL (.weft)</h1>
-        <p className="max-w-2xl text-sm leading-7 text-base-content/60">
+        <h1 className="text-2xl font-bold tracking-tight text-base-content">
+          Weft DSL (.weft)
+        </h1>
+        <p className="max-w-2xl text-sm leading-6 text-base-content/70">
           {t.intro}
         </p>
       </header>
 
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-4">
         <SectionCard title={t.topLevelTitle}>
           <FieldTable fields={t.topLevel} lang={lang} />
         </SectionCard>
 
         <SectionCard title={t.exampleTitle}>
-          <pre className="overflow-x-auto rounded-box bg-base-200 p-3 font-mono text-xs leading-6">
+          <pre className="overflow-x-auto rounded-box border border-base-300 bg-base-200 p-3 font-mono text-xs leading-5">
             {t.example}
           </pre>
         </SectionCard>
 
         {t.sections.map((section) => (
           <SectionCard key={section.title} title={section.title}>
-            <p className="text-sm text-base-content/60">{section.lead}</p>
+            <p className="text-xs leading-5 text-base-content/70">
+              {section.lead}
+            </p>
             <FieldTable fields={section.fields} lang={lang} />
             {section.code && (
-              <pre className="overflow-x-auto rounded-box bg-base-200 p-3 font-mono text-xs leading-6">
+              <pre className="overflow-x-auto rounded-box border border-base-300 bg-base-200 p-3 font-mono text-xs leading-5">
                 {section.code}
               </pre>
             )}
@@ -384,24 +394,24 @@ export const InfoView = memo(function InfoView({ lang }: { lang: Lang }) {
         ))}
 
         <SectionCard title={t.timeTitle}>
-          <p className="text-sm text-base-content/60">{t.timeLead}</p>
+          <p className="text-xs leading-5 text-base-content/70">{t.timeLead}</p>
           <ul className="flex flex-col gap-2">
             {t.timeRows.map((row) => (
               <li
                 key={row.code}
                 className="flex flex-wrap items-baseline gap-2"
               >
-                <code className="rounded-field bg-base-200 px-1.5 py-0.5 font-mono text-xs">
+                <code className="rounded-field border border-base-300 bg-base-200 px-1.5 py-0.5 font-mono text-xs">
                   {row.code}
                 </code>
-                <span className="text-sm text-base-content/60">{row.desc}</span>
+                <span className="text-xs text-base-content/70">{row.desc}</span>
               </li>
             ))}
           </ul>
         </SectionCard>
 
         <SectionCard title={t.rulesTitle}>
-          <ul className="list-disc pl-5 text-sm leading-6 text-base-content/60">
+          <ul className="list-disc space-y-1 pl-5 text-xs leading-5 text-base-content/70">
             {t.rules.map((rule) => (
               <li key={rule}>{rule}</li>
             ))}

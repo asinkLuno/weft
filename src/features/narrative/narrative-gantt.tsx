@@ -6,13 +6,15 @@ import type { EventItem, GanttBounds, GanttScale } from "./model";
 function EventHoverContent({ event }: { event: EventItem }) {
   return (
     <>
-      <div className="text-sm font-medium">{event.id}</div>
+      <div className="text-sm font-semibold">{event.id}</div>
       <div className="mt-0.5 font-mono text-xs text-base-content/60">
         {event.start_display}
         {event.end_display && ` – ${event.end_display}`}
       </div>
       {event.description && (
-        <p className="mt-2 text-sm whitespace-pre-wrap">{event.description}</p>
+        <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-base-content/80">
+          {event.description}
+        </p>
       )}
     </>
   );
@@ -22,12 +24,14 @@ function EventHoverContent({ event }: { event: EventItem }) {
 function EventHoverCard({
   event,
   label,
+  placement = "top",
   className,
   style,
   children,
 }: {
   event: EventItem;
   label?: string;
+  placement?: "top" | "bottom";
   className?: string;
   style?: React.CSSProperties;
   children: ReactNode;
@@ -36,7 +40,9 @@ function EventHoverCard({
   const [open, setOpen] = useState(false);
   return (
     <fieldset
-      className={`dropdown dropdown-hover dropdown-top m-0 min-w-0 border-0 p-0 ${className ?? ""}`}
+      className={`dropdown dropdown-hover ${
+        placement === "bottom" ? "dropdown-bottom" : "dropdown-top"
+      } m-0 min-w-0 border-0 p-0 ${className ?? ""}`}
       style={style}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
@@ -54,7 +60,7 @@ function EventHoverCard({
       {open && (
         <div
           role="dialog"
-          className="dropdown-content z-20 w-80 rounded-box bg-base-100 p-3 shadow"
+          className="dropdown-content z-20 w-72 rounded-box border border-base-300 bg-base-100 p-3 shadow-md"
         >
           <EventHoverContent event={event} />
         </div>
@@ -86,13 +92,13 @@ export const NarrativeGantt = memo(function NarrativeGantt({
   const originTick = bounds.start;
   return (
     <section className="min-w-0">
-      <h2 className="mb-2 text-lg font-medium">{name}</h2>
-      <div className="overflow-hidden rounded-box border border-base-300 bg-base-100">
-        <div className="grid grid-cols-[minmax(100px,220px)_minmax(140px,1fr)] border-b border-base-300 bg-base-200 text-xs text-base-content/60">
-          <div className="h-9 border-r border-base-300 px-3 leading-9">
+      <h2 className="mb-2 text-base font-semibold">{name}</h2>
+      <div className="rounded-box border border-base-300 bg-base-100">
+        <div className="grid grid-cols-[minmax(100px,220px)_minmax(140px,1fr)] rounded-t-box border-b border-base-300 bg-base-200 text-xs text-base-content/60">
+          <div className="h-8 border-r border-base-300 px-3 leading-8">
             {t.ganttEvent}
           </div>
-          <div className="relative flex h-9 items-end justify-between px-3 pb-1 font-mono">
+          <div className="relative flex h-8 items-end justify-between px-3 pb-1 font-mono">
             <span>{bounds.startDisplay}</span>
             <span>{bounds.endDisplay}</span>
             {scale.breaks.map((gap) => (
@@ -107,22 +113,27 @@ export const NarrativeGantt = memo(function NarrativeGantt({
             ))}
           </div>
         </div>
-        {events.map((event) => {
+        {events.map((event, index) => {
           const start = event.start_tick ?? originTick;
           const left = scale.position(start);
           const width = scale.position(event.end_tick ?? start) - left;
+          const placement = index === 0 ? "bottom" : "top";
           return (
             <div
               key={event.id}
-              className="grid min-h-14 grid-cols-[minmax(100px,220px)_minmax(140px,1fr)] border-b border-base-300 last:border-b-0"
+              className="grid min-h-12 grid-cols-[minmax(100px,220px)_minmax(140px,1fr)] border-b border-base-300 last:border-b-0"
             >
               <div className="min-w-0 border-r border-base-300 px-3 py-2">
-                <EventHoverCard event={event} className="dropdown-start w-full">
-                  <span className="block truncate text-sm font-medium">
+                <EventHoverCard
+                  event={event}
+                  placement={placement}
+                  className="dropdown-start w-full"
+                >
+                  <span className="block truncate text-sm font-medium transition-colors hover:text-primary">
                     {event.id}
                   </span>
                 </EventHoverCard>
-                <div className="mt-0.5 truncate text-xs text-base-content/60">
+                <div className="mt-0.5 truncate font-mono text-xs text-base-content/50">
                   {event.start_display}
                 </div>
               </div>
@@ -131,7 +142,7 @@ export const NarrativeGantt = memo(function NarrativeGantt({
                   <span
                     key={gap.start}
                     title={gap.label}
-                    className="absolute inset-y-0 border-x border-dashed border-base-300 bg-base-200/60"
+                    className="absolute inset-y-0 border-x border-dashed border-base-300 bg-base-200/70"
                     style={{
                       left: `${gap.start}%`,
                       width: `${gap.end - gap.start}%`,
@@ -142,21 +153,23 @@ export const NarrativeGantt = memo(function NarrativeGantt({
                   <EventHoverCard
                     event={event}
                     label={event.id}
+                    placement={placement}
                     className="absolute top-1/2 -translate-1/2"
                     style={{
                       left: `clamp(6px, ${left}%, calc(100% - 6px))`,
                     }}
                   >
-                    <span className="block size-3 rotate-45 rounded-[2px] bg-primary" />
+                    <span className="block size-3 rotate-45 rounded-[2px] border-2 border-primary bg-base-100 transition-colors hover:bg-primary" />
                   </EventHoverCard>
                 ) : (
                   <EventHoverCard
                     event={event}
                     label={event.id}
+                    placement={placement}
                     className="absolute top-1/2 -translate-y-1/2"
                     style={{ left: `${left}%`, width: `${width}%` }}
                   >
-                    <span className="block h-6 min-w-3 rounded-sm bg-primary/85" />
+                    <span className="block h-4 min-w-3 rounded-xs bg-primary transition-opacity hover:opacity-80" />
                   </EventHoverCard>
                 )}
               </div>

@@ -68,7 +68,7 @@ function CanvasControls({ lang }: { lang: Lang }) {
       <div className="join">
         <button
           type="button"
-          className="btn btn-square btn-sm join-item bg-base-100"
+          className="btn btn-square btn-sm join-item border-base-300 bg-base-100"
           aria-label={zh ? "放大" : "Zoom in"}
           onClick={() => zoomIn()}
         >
@@ -76,7 +76,7 @@ function CanvasControls({ lang }: { lang: Lang }) {
         </button>
         <button
           type="button"
-          className="btn btn-square btn-sm join-item bg-base-100"
+          className="btn btn-square btn-sm join-item border-base-300 bg-base-100"
           aria-label={zh ? "缩小" : "Zoom out"}
           onClick={() => zoomOut()}
         >
@@ -84,7 +84,7 @@ function CanvasControls({ lang }: { lang: Lang }) {
         </button>
         <button
           type="button"
-          className="btn btn-square btn-sm join-item bg-base-100"
+          className="btn btn-square btn-sm join-item border-base-300 bg-base-100"
           aria-label={zh ? "适应画布" : "Fit view"}
           onClick={() => fitView()}
         >

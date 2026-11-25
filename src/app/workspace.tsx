@@ -2,6 +2,7 @@ import {
   type DockviewApi,
   DockviewReact,
   type DockviewReadyEvent,
+  themeLight,
 } from "dockview-react";
 import { FileText, RotateCcw, X as XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -9,6 +10,7 @@ import type { DiskStatus, DraftStore } from "@/features/document/use-document";
 import { type CompileDiagnostic, type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 import { settings } from "@/lib/settings";
+import { DOCUMENT_TONE_STYLE, documentToneOf } from "@/lib/ui";
 import {
   WorkspaceDocContext,
   WorkspaceEditorContext,
@@ -200,7 +202,9 @@ export function Workspace({
     schedulePersistLayout(api);
   }
 
-  const statusAlert = dirty || diskStatus !== "synced";
+  const tone = documentToneOf(dirty, diskStatus);
+  const toneStyle = DOCUMENT_TONE_STYLE[tone];
+  const isBadgeStatus = tone === "modified" || tone === "deleted";
   const statusLabel =
     diskStatus === "deleted"
       ? t.statusDeleted
@@ -211,11 +215,15 @@ export function Workspace({
           : t.saved;
 
   return (
-    <div className="flex h-full flex-col" lang={lang === "zh" ? "zh-CN" : "en"}>
+    <div
+      className="flex h-full flex-col bg-base-100 text-base-content"
+      lang={lang === "zh" ? "zh-CN" : "en"}
+    >
       <main className="min-h-0 flex-1 overflow-hidden">
         <WorkspaceDocContext.Provider value={docContextValue}>
           <WorkspaceEditorContext.Provider value={editorContextValue}>
             <DockviewReact
+              theme={themeLight}
               disableDnd
               disableFloatingGroups
               components={WORKSPACE_COMPONENTS}
@@ -229,23 +237,29 @@ export function Workspace({
       </main>
 
       <footer
-        className={`flex min-h-8 items-center gap-2 border-t border-base-300 px-4 py-1 text-xs text-base-content/60 ${
+        className={`flex h-8 shrink-0 items-center gap-2 border-t border-base-300 px-3 text-xs text-base-content/60 transition-colors ${
           flash ? "bg-base-300" : "bg-base-200"
         }`}
       >
         <FileText className="size-3.5 shrink-0" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate" title={path}>
+        <span className="min-w-0 flex-1 truncate font-mono" title={path}>
           {path}
         </span>
-        <span
-          className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap ${statusAlert ? "text-error" : ""}`}
-        >
+        {isBadgeStatus ? (
+          <span className={`shrink-0 whitespace-nowrap ${toneStyle.label}`}>
+            {statusLabel}
+          </span>
+        ) : (
           <span
-            className={`size-1.5 rounded-full ${statusAlert ? "bg-error" : "bg-primary"}`}
-            aria-hidden="true"
-          />
-          {statusLabel}
-        </span>
+            className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap ${toneStyle.label}`}
+          >
+            <span
+              className={`size-1.5 rounded-full ${toneStyle.dot}`}
+              aria-hidden="true"
+            />
+            {statusLabel}
+          </span>
+        )}
         <button
           type="button"
           className="btn btn-ghost btn-xs btn-square"

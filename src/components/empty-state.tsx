@@ -9,8 +9,10 @@ export function EmptyState({
   children: ReactNode;
 }) {
   return (
-    <div className="flex h-full min-h-40 flex-col items-center justify-center gap-4 text-center text-sm text-base-content/60">
-      {Icon && <Icon className="size-8 text-primary" aria-hidden="true" />}
+    <div className="flex h-full min-h-40 flex-col items-center justify-center gap-3 text-center text-sm text-base-content/50">
+      {Icon && (
+        <Icon className="size-7 text-base-content/30" aria-hidden="true" />
+      )}
       <p>{children}</p>
     </div>
   );

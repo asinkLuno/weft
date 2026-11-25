@@ -127,16 +127,16 @@ function WeftEditorViewInner({
   const canSave = (dirty || diskStatus === "deleted") && !saving;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 border-b border-base-300 bg-base-200 px-3 py-1.5">
+    <div className="flex h-full min-h-0 flex-col bg-base-100">
+      <div className="flex h-8 shrink-0 items-center gap-2 border-b border-base-300 bg-base-200 px-3">
         <span
-          className="min-w-0 flex-1 truncate font-mono text-xs"
+          className="min-w-0 flex-1 truncate font-mono text-xs text-base-content/80"
           title={path}
         >
           {fileNameOf(path)}
         </span>
         {dirty && (
-          <span className="badge badge-neutral badge-sm shrink-0">
+          <span className="badge badge-xs badge-outline shrink-0 border-primary text-primary">
             {t.unsaved}
           </span>
         )}
@@ -169,18 +169,18 @@ function WeftEditorViewInner({
       </div>
 
       {diskStatus === "modified" && (
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warning bg-warning/15 px-3 py-2 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warning bg-warning/25 px-3 py-1.5 text-xs text-warning-content">
           <span>{t.externalChanged}</span>
           <div className="flex items-center gap-1">
             <button
               type="button"
-              className="btn btn-outline btn-xs"
+              className="btn btn-ghost btn-xs"
               disabled={saving}
               onClick={() => {
                 void onReloadFromDisk();
               }}
             >
-              <RefreshCw className="size-3" />
+              <RefreshCw className="size-3.5" />
               {t.reloadFromDisk}
             </button>
             <button
@@ -191,7 +191,7 @@ function WeftEditorViewInner({
                 void onForceSave();
               }}
             >
-              <Save className="size-3" />
+              <Save className="size-3.5" />
               {t.overwriteDisk}
             </button>
           </div>
@@ -199,7 +199,7 @@ function WeftEditorViewInner({
       )}
 
       {diskStatus === "deleted" && (
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-error bg-error/15 px-3 py-2 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-error bg-error/25 px-3 py-1.5 text-xs text-error-content">
           <span>{t.externalDeleted}</span>
           <div className="flex items-center gap-1">
             <button
@@ -210,7 +210,7 @@ function WeftEditorViewInner({
                 void onForceSave();
               }}
             >
-              <Save className="size-3" />
+              <Save className="size-3.5" />
               {t.recreateFile}
             </button>
           </div>

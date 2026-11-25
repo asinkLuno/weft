@@ -30,6 +30,7 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { StoryView } from "@/features/story/story-view";
 import { type Lang, strings } from "@/i18n";
+import { DOCUMENT_TONE_STYLE, documentToneOf } from "@/lib/ui";
 import { useWorkspaceDoc, useWorkspaceEditor } from "./workspace-context";
 
 const WeftEditorView = lazy(() =>
@@ -164,7 +165,7 @@ function StoryPanel() {
   const t = strings[lang];
 
   return (
-    <div className="h-full overflow-auto bg-base-100 p-5">
+    <div className="@container h-full overflow-auto bg-base-100 p-4">
       {doc?.story ? (
         <StoryView doc={doc} lang={lang} />
       ) : (
@@ -209,7 +210,7 @@ function EntityPanel({ api }: IDockviewPanelProps) {
 function InfoPanel() {
   const { lang } = useWorkspaceDoc();
   return (
-    <div className="h-full overflow-auto bg-base-100 p-5">
+    <div className="h-full overflow-auto bg-base-100 p-4">
       <Suspense fallback={null}>
         <InfoView lang={lang} />
       </Suspense>
@@ -240,9 +241,15 @@ export const WORKSPACE_COMPONENTS: Record<
 };
 
 function EditorDirtyDot() {
-  const { dirty } = useWorkspaceEditor();
-  if (!dirty) return null;
-  return <span className="size-1.5 rounded-full bg-error" aria-hidden="true" />;
+  const { dirty, diskStatus } = useWorkspaceEditor();
+  const tone = documentToneOf(dirty, diskStatus);
+  if (tone === "synced") return null;
+  return (
+    <span
+      className={`size-1.5 rounded-full ${DOCUMENT_TONE_STYLE[tone].dot}`}
+      aria-hidden="true"
+    />
+  );
 }
 
 export function WorkspaceTab({ api, params }: IDockviewPanelHeaderProps) {
@@ -292,8 +299,8 @@ function GroupActionMenu({
       >
         <TriggerIcon className="size-3.5" />
       </summary>
-      <ul className="menu dropdown-content z-10 mt-1 w-40 rounded-box bg-base-100 p-1 shadow">
-        <li className="menu-title">{label}</li>
+      <ul className="menu menu-xs dropdown-content z-20 mt-1 w-40 rounded-box border border-base-300 bg-base-100 p-1 shadow-md">
+        <li className="menu-title text-xs">{label}</li>
         {PANEL_IDS.map((kind) => {
           const Icon = PANEL_META[kind].icon;
           return (
@@ -367,7 +374,7 @@ export function WorkspaceWatermark({ containerApi }: IWatermarkPanelProps) {
             <button
               key={id}
               type="button"
-              className="btn btn-outline btn-sm"
+              className="btn btn-outline btn-sm border-base-300"
               onClick={() => focusOrOpenPanel(containerApi, id, lang)}
             >
               <Icon className="size-3.5" />

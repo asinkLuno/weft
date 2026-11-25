@@ -150,10 +150,6 @@ export function formatValidationError(
 // 文案多到难维护时再换 i18next，字典结构可以原样搬过去
 export const strings = {
   zh: {
-    workspace: "故事工作台",
-    welcomeTitle: "让故事的脉络\n清晰可见。",
-    welcomeDescription:
-      "打开故事文件，梳理人物与实体的关系，沿着时间线阅读每一条叙事。",
     recentDescription: "继续阅读你的故事。",
     recentEmpty: "从第一个故事开始。打开的文件会留在这里。",
     fileHint: "支持 .weft 文件，保存修改后视图自动更新。",
@@ -194,10 +190,6 @@ export const strings = {
     workspaceEmpty: "当前没有打开的面板",
   },
   en: {
-    workspace: "Story workspace",
-    welcomeTitle: "Find the threads\nof your story.",
-    welcomeDescription:
-      "Open a story file to explore its people, trace their connections, and follow each narrative through time.",
     recentDescription: "Pick up where you left off.",
     recentEmpty: "Start with your first story. Opened files will appear here.",
     fileHint: "Supports .weft files. Views update when you save changes.",

@@ -198,7 +198,16 @@ export function buildEntityView(
   const edges: Edge[] = filtered.flatMap(([id]) =>
     [...(parentsById.get(id) ?? [])]
       .filter((p) => visibleSet.has(p))
-      .map((p) => ({ id: `${p}->${id}`, source: p, target: id })),
+      .map((p) => ({
+        id: `${p}->${id}`,
+        source: p,
+        target: id,
+        style: {
+          stroke: "var(--color-base-content)",
+          strokeOpacity: 0.35,
+          strokeWidth: 1.5,
+        },
+      })),
   );
 
   // 关系对只在关系筛选视图展示；端点不在当前过滤集时整条隐藏
@@ -217,7 +226,18 @@ export function buildEntityView(
                 source: s,
                 target,
                 label: relations,
-                labelStyle: { fontSize: 12 },
+                style: { stroke: "var(--color-primary)", strokeWidth: 1.5 },
+                labelStyle: {
+                  fontSize: 11,
+                  fill: "var(--color-primary)",
+                  fontWeight: 500,
+                },
+                labelBgStyle: {
+                  fill: "var(--color-base-100)",
+                  fillOpacity: 0.92,
+                },
+                labelBgPadding: [6, 3] as [number, number],
+                labelBgBorderRadius: 4,
               },
             ]
           : [];

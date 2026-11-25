@@ -1,3 +1,4 @@
+import { GitBranch } from "lucide-react";
 import { memo, useMemo } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { type Lang, strings } from "@/i18n";
@@ -18,10 +19,10 @@ function NarrativeViewInner({
     [doc],
   );
   if (entries.length === 0) {
-    return <EmptyState>{t.narrativeEmpty}</EmptyState>;
+    return <EmptyState icon={GitBranch}>{t.narrativeEmpty}</EmptyState>;
   }
   return (
-    <div className="flex h-full flex-col gap-8 overflow-auto">
+    <div className="flex h-full flex-col gap-6 overflow-auto">
       {entries.map(([name, nar]) => (
         <NarrativeGantt
           key={name}

@@ -1,18 +1,5 @@
 import { memo } from "react";
 
-export function WeftMark() {
-  return (
-    <svg viewBox="0 0 32 32" fill="none" aria-hidden="true" className="size-8">
-      <path
-        d="M3 9h26M3 16h26M3 23h26M9 3v26M16 3v26M23 3v26"
-        stroke="currentColor"
-        strokeWidth="2.5"
-      />
-      <path d="M6 9h6m1 7h6m1 7h6" stroke="currentColor" strokeWidth="3" />
-    </svg>
-  );
-}
-
 type Vec3 = [number, number, number];
 const cross = (a: Vec3, b: Vec3): Vec3 => [
   a[1] * b[2] - a[2] * b[1],
@@ -120,14 +107,14 @@ export const WeftPrint = memo(function WeftPrint() {
         </pattern>
       </defs>
       <circle
-        className="text-error"
+        className="text-primary-content/35"
         cx="264"
         cy="218"
         r="190"
         fill="url(#weft-halftone)"
       />
       <g
-        className="fill-base-100 stroke-primary"
+        className="fill-primary-content stroke-primary"
         strokeWidth="0.65"
         strokeLinejoin="round"
       >
