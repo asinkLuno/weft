@@ -25,7 +25,6 @@ import {
 } from "@/i18n";
 import { createWeftCompletionSource } from "./weft-completion";
 import { weftLanguage } from "./weft-language";
-import { weftThemeExtension } from "./weft-theme";
 
 const PATH_SEP_RE = /[\\/]/;
 
@@ -121,7 +120,6 @@ function WeftEditorViewInner({
       lintGutter(),
       linter(null),
       EditorView.lineWrapping,
-      ...weftThemeExtension,
     ],
     [],
   );
@@ -224,7 +222,6 @@ function WeftEditorViewInner({
           className="h-full"
           value={value}
           height="100%"
-          theme="none"
           basicSetup={BASIC_SETUP}
           extensions={extensions}
           onChange={onChange}
