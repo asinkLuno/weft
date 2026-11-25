@@ -1,5 +1,3 @@
-import "./App.css";
-
 import { lazy, Suspense } from "react";
 import { useDocument } from "@/features/document/use-document";
 import { WelcomeView } from "@/features/welcome/welcome-view";

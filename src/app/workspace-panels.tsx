@@ -1,7 +1,6 @@
 import type {
   DockviewApi,
   DockviewGroupPanel,
-  DockviewTheme,
   IDockviewHeaderActionsProps,
   IDockviewPanelHeaderProps,
   IDockviewPanelProps,
@@ -28,14 +27,7 @@ import {
   useEffect,
   useState,
 } from "react";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { EmptyState } from "@/components/empty-state";
 import { StoryView } from "@/features/story/story-view";
 import { type Lang, strings } from "@/i18n";
 import { useWorkspaceDoc, useWorkspaceEditor } from "./workspace-context";
@@ -81,11 +73,6 @@ export const PANEL_META: Record<
   entity: { icon: Waypoints, labelKey: "tab2" },
   narrative: { icon: GitBranch, labelKey: "tab4" },
   info: { icon: Info, labelKey: "tabInfo" },
-};
-
-export const WEFT_DOCKVIEW_THEME: DockviewTheme = {
-  name: "weft",
-  className: "dockview-theme-weft",
 };
 
 export function isPanelId(value: string): value is PanelId {
@@ -177,14 +164,11 @@ function StoryPanel() {
   const t = strings[lang];
 
   return (
-    <div className="dock-pane-scroll">
+    <div className="h-full overflow-auto bg-base-100 p-5">
       {doc?.story ? (
         <StoryView doc={doc} lang={lang} />
       ) : (
-        <div className="view-empty">
-          <BookOpen />
-          <p>{t.storyEmpty}</p>
-        </div>
+        <EmptyState icon={BookOpen}>{t.storyEmpty}</EmptyState>
       )}
     </div>
   );
@@ -212,15 +196,9 @@ function EntityPanel({ api }: IDockviewPanelProps) {
   }, [api, mountedOnce]);
 
   return (
-    <div className="dock-pane-fill">
+    <div className="flex h-full min-h-0 flex-col bg-base-100 p-4">
       {mountedOnce ? (
-        <Suspense
-          fallback={
-            <div className="view-empty">
-              <p>{strings[lang].loading}</p>
-            </div>
-          }
-        >
+        <Suspense fallback={<EmptyState>{strings[lang].loading}</EmptyState>}>
           <EntityView doc={doc} lang={lang} path={path} />
         </Suspense>
       ) : null}
@@ -231,7 +209,7 @@ function EntityPanel({ api }: IDockviewPanelProps) {
 function InfoPanel() {
   const { lang } = useWorkspaceDoc();
   return (
-    <div className="dock-pane-scroll">
+    <div className="h-full overflow-auto bg-base-100 p-5">
       <Suspense fallback={null}>
         <InfoView lang={lang} />
       </Suspense>
@@ -242,7 +220,7 @@ function InfoPanel() {
 function NarrativePanel() {
   const { doc, lang } = useWorkspaceDoc();
   return (
-    <div className="dock-pane-fill">
+    <div className="flex h-full min-h-0 flex-col bg-base-100 p-4">
       <Suspense fallback={null}>
         <NarrativeView doc={doc} lang={lang} />
       </Suspense>
@@ -264,7 +242,7 @@ export const WORKSPACE_COMPONENTS: Record<
 function EditorDirtyDot() {
   const { dirty } = useWorkspaceEditor();
   if (!dirty) return null;
-  return <span className="dock-tab-dirty" aria-hidden="true" />;
+  return <span className="size-1.5 rounded-full bg-error" aria-hidden="true" />;
 }
 
 export function WorkspaceTab({ api, params }: IDockviewPanelHeaderProps) {
@@ -274,14 +252,13 @@ export function WorkspaceTab({ api, params }: IDockviewPanelHeaderProps) {
   const title = kind ? panelTitle(kind, lang) : (api.title ?? api.id);
 
   return (
-    <div className="dock-tab">
-      {Icon && <Icon className="dock-tab-icon" aria-hidden="true" />}
-      <span className="dock-tab-title">{title}</span>
+    <div className="inline-flex h-full items-center gap-1.5 select-none">
+      {Icon && <Icon className="size-3.5 shrink-0" aria-hidden="true" />}
+      <span className="whitespace-nowrap text-xs font-medium">{title}</span>
       {kind === "editor" && <EditorDirtyDot />}
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        className="dock-tab-close"
+      <button
+        type="button"
+        className="btn btn-ghost btn-xs btn-square"
         aria-label={`Close ${title}`}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
@@ -290,7 +267,7 @@ export function WorkspaceTab({ api, params }: IDockviewPanelHeaderProps) {
         }}
       >
         <XIcon className="size-3" />
-      </Button>
+      </button>
     </div>
   );
 }
@@ -307,31 +284,37 @@ function GroupActionMenu({
   onSelect: (kind: PanelId) => void;
 }) {
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="dock-header-action"
-          aria-label={label}
-          title={label}
-        >
-          <TriggerIcon className="size-3.5" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-40">
-        <DropdownMenuLabel>{label}</DropdownMenuLabel>
+    <details className="dropdown dropdown-end">
+      <summary
+        className="btn btn-ghost btn-xs btn-square"
+        aria-label={label}
+        title={label}
+      >
+        <TriggerIcon className="size-3.5" />
+      </summary>
+      <ul className="menu dropdown-content z-10 mt-1 w-40 rounded-box bg-base-100 p-1 shadow">
+        <li className="menu-title">{label}</li>
         {PANEL_IDS.map((kind) => {
           const Icon = PANEL_META[kind].icon;
           return (
-            <DropdownMenuItem key={kind} onSelect={() => onSelect(kind)}>
-              <Icon className="size-3.5" />
-              <span>{panelTitle(kind, lang)}</span>
-            </DropdownMenuItem>
+            <li key={kind}>
+              <button
+                type="button"
+                onClick={(event) => {
+                  onSelect(kind);
+                  event.currentTarget
+                    .closest("details")
+                    ?.removeAttribute("open");
+                }}
+              >
+                <Icon className="size-3.5" />
+                {panelTitle(kind, lang)}
+              </button>
+            </li>
           );
         })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </ul>
+    </details>
   );
 }
 
@@ -343,7 +326,7 @@ export function WorkspaceGroupActions({
   const t = strings[lang];
 
   return (
-    <div className="dock-header-actions">
+    <div className="inline-flex h-full items-center gap-0.5 px-1.5">
       <GroupActionMenu
         label={t.addTab}
         icon={Plus}
@@ -375,31 +358,31 @@ export function WorkspaceWatermark({ containerApi }: IWatermarkPanelProps) {
   const t = strings[lang];
 
   return (
-    <div className="dock-watermark">
-      <p className="text-sm text-muted-foreground">{t.workspaceEmpty}</p>
+    <div className="flex h-full flex-col items-center justify-center gap-4 bg-base-100 p-6">
+      <p className="text-sm text-base-content/60">{t.workspaceEmpty}</p>
       <div className="flex flex-wrap items-center justify-center gap-2">
         {PANEL_IDS.map((id) => {
           const Icon = PANEL_META[id].icon;
           return (
-            <Button
+            <button
               key={id}
-              variant="outline"
-              size="sm"
+              type="button"
+              className="btn btn-outline btn-sm"
               onClick={() => focusOrOpenPanel(containerApi, id, lang)}
             >
               <Icon className="size-3.5" />
               {panelTitle(id, lang)}
-            </Button>
+            </button>
           );
         })}
-        <Button
-          variant="secondary"
-          size="sm"
+        <button
+          type="button"
+          className="btn btn-neutral btn-sm"
           onClick={() => applyDefaultLayout(containerApi, lang)}
         >
           <RotateCcw className="size-3.5" />
           {t.resetLayout}
-        </Button>
+        </button>
       </div>
     </div>
   );

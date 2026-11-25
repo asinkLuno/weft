@@ -16,8 +16,6 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import type { DiskStatus, DraftStore } from "@/features/document/use-document";
 import {
   type CompileDiagnostic,
@@ -28,7 +26,6 @@ import {
 import { createWeftCompletionSource } from "./weft-completion";
 import { weftLanguage } from "./weft-language";
 import { weftThemeExtension } from "./weft-theme";
-import "./weft-editor.css";
 
 const PATH_SEP_RE = /[\\/]/;
 
@@ -132,21 +129,24 @@ function WeftEditorViewInner({
   const canSave = (dirty || diskStatus === "deleted") && !saving;
 
   return (
-    <div className="weft-editor-view">
-      <div className="weft-editor-toolbar">
-        <span className="weft-editor-filename" title={path}>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center gap-2 border-b border-base-300 bg-base-200 px-3 py-1.5">
+        <span
+          className="min-w-0 flex-1 truncate font-mono text-xs"
+          title={path}
+        >
           {fileNameOf(path)}
         </span>
         {dirty && (
-          <Badge variant="secondary" className="px-1.5 py-0 text-[11px]">
+          <span className="badge badge-neutral badge-sm shrink-0">
             {t.unsaved}
-          </Badge>
+          </span>
         )}
-        <div className="weft-editor-actions">
+        <div className="flex shrink-0 items-center gap-1">
           {dirty && diskStatus !== "deleted" && (
-            <Button
-              variant="ghost"
-              size="xs"
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs"
               disabled={saving}
               onClick={() => {
                 void onReloadFromDisk();
@@ -154,11 +154,11 @@ function WeftEditorViewInner({
             >
               <RotateCcw className="size-3.5" />
               {t.revert}
-            </Button>
+            </button>
           )}
-          <Button
-            variant="default"
-            size="xs"
+          <button
+            type="button"
+            className="btn btn-primary btn-xs"
             disabled={!canSave}
             onClick={() => {
               void onSave();
@@ -166,17 +166,17 @@ function WeftEditorViewInner({
           >
             <Save className="size-3.5" />
             {saving ? t.saving : t.save}
-          </Button>
+          </button>
         </div>
       </div>
 
       {diskStatus === "modified" && (
-        <div className="weft-editor-banner">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warning bg-warning/15 px-3 py-2 text-xs">
           <span>{t.externalChanged}</span>
-          <div className="weft-editor-banner-actions">
-            <Button
-              variant="outline"
-              size="xs"
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              className="btn btn-outline btn-xs"
               disabled={saving}
               onClick={() => {
                 void onReloadFromDisk();
@@ -184,10 +184,10 @@ function WeftEditorViewInner({
             >
               <RefreshCw className="size-3" />
               {t.reloadFromDisk}
-            </Button>
-            <Button
-              variant="destructive"
-              size="xs"
+            </button>
+            <button
+              type="button"
+              className="btn btn-error btn-xs"
               disabled={saving}
               onClick={() => {
                 void onForceSave();
@@ -195,18 +195,18 @@ function WeftEditorViewInner({
             >
               <Save className="size-3" />
               {t.overwriteDisk}
-            </Button>
+            </button>
           </div>
         </div>
       )}
 
       {diskStatus === "deleted" && (
-        <div className="weft-editor-banner">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-error bg-error/15 px-3 py-2 text-xs">
           <span>{t.externalDeleted}</span>
-          <div className="weft-editor-banner-actions">
-            <Button
-              variant="default"
-              size="xs"
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              className="btn btn-primary btn-xs"
               disabled={saving}
               onClick={() => {
                 void onForceSave();
@@ -214,14 +214,14 @@ function WeftEditorViewInner({
             >
               <Save className="size-3" />
               {t.recreateFile}
-            </Button>
+            </button>
           </div>
         </div>
       )}
 
-      <div className="weft-editor-surface">
+      <div className="min-h-0 flex-1 overflow-hidden">
         <CodeMirror
-          className="weft-editor-cm"
+          className="h-full"
           value={value}
           height="100%"
           theme="none"

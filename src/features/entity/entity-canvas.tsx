@@ -8,7 +8,6 @@ import {
 } from "@xyflow/react";
 import { Maximize, Minus, Plus } from "lucide-react";
 import { useEffect } from "react";
-import { Button } from "@/components/ui/button";
 import type { Lang } from "@/i18n";
 import { EntityNode } from "./entity-card";
 import type { EntityFlowNode } from "./model";
@@ -55,7 +54,7 @@ export function EntityCanvas({
       fitView
       minZoom={0.1}
     >
-      <Background gap={24} color="var(--border)" />
+      <Background gap={24} color="var(--color-base-300)" />
       <CanvasControls lang={lang} />
     </ReactFlow>
   );
@@ -65,31 +64,33 @@ function CanvasControls({ lang }: { lang: Lang }) {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   const zh = lang === "zh";
   return (
-    <Panel position="bottom-left" className="canvas-controls">
-      <Button
-        variant="ghost"
-        size="icon"
-        aria-label={zh ? "放大" : "Zoom in"}
-        onClick={() => zoomIn()}
-      >
-        <Plus />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        aria-label={zh ? "缩小" : "Zoom out"}
-        onClick={() => zoomOut()}
-      >
-        <Minus />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        aria-label={zh ? "适应画布" : "Fit view"}
-        onClick={() => fitView()}
-      >
-        <Maximize />
-      </Button>
+    <Panel position="bottom-left" className="m-2!">
+      <div className="join">
+        <button
+          type="button"
+          className="btn btn-square btn-sm join-item bg-base-100"
+          aria-label={zh ? "放大" : "Zoom in"}
+          onClick={() => zoomIn()}
+        >
+          <Plus className="size-4" />
+        </button>
+        <button
+          type="button"
+          className="btn btn-square btn-sm join-item bg-base-100"
+          aria-label={zh ? "缩小" : "Zoom out"}
+          onClick={() => zoomOut()}
+        >
+          <Minus className="size-4" />
+        </button>
+        <button
+          type="button"
+          className="btn btn-square btn-sm join-item bg-base-100"
+          aria-label={zh ? "适应画布" : "Fit view"}
+          onClick={() => fitView()}
+        >
+          <Maximize className="size-4" />
+        </button>
+      </div>
     </Panel>
   );
 }

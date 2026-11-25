@@ -5,7 +5,6 @@ import {
 } from "dockview-react";
 import { FileText, RotateCcw, X as XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { Button } from "@/components/ui/button";
 import type { DiskStatus, DraftStore } from "@/features/document/use-document";
 import { type CompileDiagnostic, type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
@@ -19,14 +18,12 @@ import {
   panelKindOf,
   panelTitle,
   restoreLayout,
-  WEFT_DOCKVIEW_THEME,
   WORKSPACE_COMPONENTS,
   WorkspaceGroupActions,
   WorkspaceTab,
   WorkspaceWatermark,
 } from "./workspace-panels";
-import "./dockview-theme.css";
-import "./workspace.css";
+import "dockview-react/dist/styles/dockview.css";
 
 const LAYOUT_SETTINGS_KEY = "workspaceLayout:v1";
 
@@ -211,12 +208,11 @@ export function Workspace({
           : t.saved;
 
   return (
-    <div className="app" lang={lang === "zh" ? "zh-CN" : "en"}>
-      <main className="workspace-dock">
+    <div className="flex h-full flex-col" lang={lang === "zh" ? "zh-CN" : "en"}>
+      <main className="min-h-0 flex-1 overflow-hidden">
         <WorkspaceDocContext.Provider value={docContextValue}>
           <WorkspaceEditorContext.Provider value={editorContextValue}>
             <DockviewReact
-              theme={WEFT_DOCKVIEW_THEME}
               disableDnd
               disableFloatingGroups
               components={WORKSPACE_COMPONENTS}
@@ -229,34 +225,42 @@ export function Workspace({
         </WorkspaceDocContext.Provider>
       </main>
 
-      <footer className={flash ? "statusbar flash" : "statusbar"}>
+      <footer
+        className={`flex min-h-8 items-center gap-2 border-t border-base-300 px-4 py-1 text-xs text-base-content/60 ${
+          flash ? "bg-base-300" : "bg-base-200"
+        }`}
+      >
         <FileText className="size-3.5 shrink-0" aria-hidden="true" />
-        <span className="statusbar-path" title={path}>
+        <span className="min-w-0 flex-1 truncate" title={path}>
           {path}
         </span>
-        <span className={`statusbar-state${statusAlert ? " is-dirty" : ""}`}>
+        <span
+          className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap ${statusAlert ? "text-error" : ""}`}
+        >
+          <span
+            className={`size-1.5 rounded-full ${statusAlert ? "bg-error" : "bg-primary"}`}
+            aria-hidden="true"
+          />
           {statusLabel}
         </span>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="shrink-0 text-muted-foreground"
+        <button
+          type="button"
+          className="btn btn-ghost btn-xs btn-square"
           aria-label={t.resetLayout}
           title={t.resetLayout}
           onClick={handleResetLayout}
         >
-          <RotateCcw />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="shrink-0 text-muted-foreground"
+          <RotateCcw className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-xs btn-square"
           aria-label={t.close}
           title={t.close}
           onClick={onClose}
         >
-          <XIcon />
-        </Button>
+          <XIcon className="size-3.5" />
+        </button>
       </footer>
     </div>
   );

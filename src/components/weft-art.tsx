@@ -2,13 +2,13 @@ import { memo } from "react";
 
 export function WeftMark() {
   return (
-    <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+    <svg viewBox="0 0 32 32" fill="none" aria-hidden="true" className="size-8">
       <path
         d="M3 9h26M3 16h26M3 23h26M9 3v26M16 3v26M23 3v26"
         stroke="currentColor"
         strokeWidth="2.5"
       />
-      <path d="M6 9h6m1 7h6m1 7h6" stroke="var(--riso-red)" strokeWidth="3" />
+      <path d="M6 9h6m1 7h6m1 7h6" stroke="currentColor" strokeWidth="3" />
     </svg>
   );
 }
@@ -104,7 +104,7 @@ export const WeftPrint = memo(function WeftPrint() {
   const threads = getThreads();
   return (
     <svg
-      className="weft-print"
+      className="size-full"
       viewBox="0 0 520 440"
       fill="none"
       aria-hidden="true"
@@ -120,14 +120,14 @@ export const WeftPrint = memo(function WeftPrint() {
         </pattern>
       </defs>
       <circle
-        className="weft-print-halo"
+        className="text-error"
         cx="264"
         cy="218"
         r="190"
         fill="url(#weft-halftone)"
       />
       <g
-        className="weft-print-threads"
+        className="fill-base-100 stroke-primary"
         strokeWidth="0.65"
         strokeLinejoin="round"
       >

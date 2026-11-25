@@ -1,20 +1,10 @@
 import { Info } from "lucide-react";
 import { memo, type ReactNode } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   type AttrBlockKind,
   BLOCK_FIELDS,
 } from "@/features/editor/weft-schema";
 import { type Lang, strings } from "@/i18n";
-import "./info.css";
 
 type Field = { name: string; required?: boolean; desc: string };
 type Section = { title: string; lead: string; fields: Field[]; code?: string };
@@ -309,22 +299,18 @@ const copy: Record<Lang, Copy> = {
 
 function SectionCard({
   title,
-  contentClassName,
   children,
 }: {
   title: string;
-  contentClassName?: string;
   children: ReactNode;
 }) {
   return (
-    <Card className="min-w-0 gap-4">
-      <CardHeader className="border-b">
-        <CardTitle>
-          <h2>{title}</h2>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className={contentClassName}>{children}</CardContent>
-    </Card>
+    <section className="card card-border min-w-0 bg-base-100">
+      <div className="card-body gap-4">
+        <h2 className="card-title text-base">{title}</h2>
+        {children}
+      </div>
+    </section>
   );
 }
 
@@ -332,86 +318,90 @@ function FieldTable({ fields, lang }: { fields: Field[]; lang: Lang }) {
   if (fields.length === 0) return null;
   const t = copy[lang];
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>{t.fieldName}</TableHead>
-          <TableHead>{t.required}</TableHead>
-          <TableHead>{t.fieldDesc}</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {fields.map((field) => (
-          <TableRow key={field.name}>
-            <TableCell className="font-mono text-xs">{field.name}</TableCell>
-            <TableCell className="text-muted-foreground">
-              {field.required ? t.required : "—"}
-            </TableCell>
-            <TableCell className="whitespace-normal text-muted-foreground">
-              {field.desc}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <div className="overflow-x-auto">
+      <table className="table table-sm">
+        <thead>
+          <tr>
+            <th>{t.fieldName}</th>
+            <th>{t.required}</th>
+            <th>{t.fieldDesc}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {fields.map((field) => (
+            <tr key={field.name}>
+              <td className="font-mono text-xs">{field.name}</td>
+              <td className="text-base-content/60">
+                {field.required ? t.required : "—"}
+              </td>
+              <td className="whitespace-normal text-base-content/60">
+                {field.desc}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
 export const InfoView = memo(function InfoView({ lang }: { lang: Lang }) {
   const t = copy[lang];
   return (
-    <div className="info-view @container mx-auto w-full max-w-3xl">
-      <header className="info-header mb-8 space-y-3">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+    <div className="mx-auto w-full max-w-3xl">
+      <header className="mb-8 flex flex-col gap-3">
+        <div className="flex items-center gap-2 text-sm text-base-content/60">
           <Info className="size-4" aria-hidden="true" />
           <span>{strings[lang].tabInfo}</span>
         </div>
-        <h1>Weft DSL (.weft)</h1>
-        <p className="max-w-2xl text-sm leading-7 text-muted-foreground">
+        <h1 className="text-3xl font-bold tracking-tight">Weft DSL (.weft)</h1>
+        <p className="max-w-2xl text-sm leading-7 text-base-content/60">
           {t.intro}
         </p>
       </header>
 
-      <div className="space-y-6">
+      <div className="flex flex-col gap-6">
         <SectionCard title={t.topLevelTitle}>
           <FieldTable fields={t.topLevel} lang={lang} />
         </SectionCard>
 
         <SectionCard title={t.exampleTitle}>
-          <pre className="info-code">{t.example}</pre>
+          <pre className="overflow-x-auto rounded-box bg-base-200 p-3 font-mono text-xs leading-6">
+            {t.example}
+          </pre>
         </SectionCard>
 
         {t.sections.map((section) => (
-          <SectionCard
-            key={section.title}
-            title={section.title}
-            contentClassName="space-y-4"
-          >
-            <p className="text-sm text-muted-foreground">{section.lead}</p>
+          <SectionCard key={section.title} title={section.title}>
+            <p className="text-sm text-base-content/60">{section.lead}</p>
             <FieldTable fields={section.fields} lang={lang} />
-            {section.code && <pre className="info-code">{section.code}</pre>}
+            {section.code && (
+              <pre className="overflow-x-auto rounded-box bg-base-200 p-3 font-mono text-xs leading-6">
+                {section.code}
+              </pre>
+            )}
           </SectionCard>
         ))}
 
-        <SectionCard title={t.timeTitle} contentClassName="space-y-3">
-          <p className="text-sm text-muted-foreground">{t.timeLead}</p>
-          <ul className="space-y-2">
+        <SectionCard title={t.timeTitle}>
+          <p className="text-sm text-base-content/60">{t.timeLead}</p>
+          <ul className="flex flex-col gap-2">
             {t.timeRows.map((row) => (
               <li
                 key={row.code}
                 className="flex flex-wrap items-baseline gap-2"
               >
-                <code className="info-inline-code">{row.code}</code>
-                <span className="text-sm text-muted-foreground">
-                  {row.desc}
-                </span>
+                <code className="rounded-field bg-base-200 px-1.5 py-0.5 font-mono text-xs">
+                  {row.code}
+                </code>
+                <span className="text-sm text-base-content/60">{row.desc}</span>
               </li>
             ))}
           </ul>
         </SectionCard>
 
         <SectionCard title={t.rulesTitle}>
-          <ul className="list-disc space-y-2 pl-5 text-sm leading-6 text-muted-foreground">
+          <ul className="list-disc pl-5 text-sm leading-6 text-base-content/60">
             {t.rules.map((rule) => (
               <li key={rule}>{rule}</li>
             ))}

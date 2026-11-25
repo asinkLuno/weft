@@ -1,5 +1,4 @@
 import "@xyflow/react/dist/style.css";
-import "./entity.css";
 import { ChevronDown, Waypoints } from "lucide-react";
 import {
   Fragment,
@@ -10,23 +9,14 @@ import {
   useRef,
   useState,
 } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { EmptyState } from "@/components/empty-state";
 import { type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 import { settings } from "@/lib/settings";
 import { EntityCanvas } from "./entity-canvas";
 import { buildEntityView } from "./model";
 
-// 维度筛选下拉（shadcn faceted filter 同款）：outline 按钮当触发器，选中值显示为 Badge；
-// sections 之间画分隔线，单组不画
+// 维度筛选下拉（faceted filter）：outline 按钮当触发器，选中值显示为 badge
 function DimensionFilter({
   label,
   sections,
@@ -40,40 +30,43 @@ function DimensionFilter({
 }) {
   const count = sections.reduce((n, s) => n + s.length, 0);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size="xs"
-          className="border-dashed"
-          disabled={count === 0}
-        >
-          {label}
-          {active && (
-            <Badge variant="secondary" className="rounded-sm px-1 font-normal">
-              {active.label}
-            </Badge>
-          )}
-          <ChevronDown className="text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent className="max-h-72 w-48 overflow-auto">
+    <details className="dropdown">
+      <summary
+        className={`btn btn-outline btn-xs${count === 0 ? " btn-disabled" : ""}`}
+      >
+        {label}
+        {active && <span className="badge badge-sm">{active.label}</span>}
+        <ChevronDown className="size-3.5" />
+      </summary>
+      <ul className="menu dropdown-content z-10 max-h-72 w-48 overflow-auto rounded-box bg-base-100 p-1 shadow">
         {sections.map((section, i) => (
           <Fragment key={section[0].v}>
-            {i > 0 && <DropdownMenuSeparator />}
+            {i > 0 && (
+              <li
+                aria-hidden="true"
+                className="my-1 border-t border-base-300"
+              />
+            )}
             {section.map(({ v, label: text }) => (
-              <DropdownMenuCheckboxItem
-                key={v}
-                checked={active?.value === v}
-                onCheckedChange={() => onChoose(v)}
-              >
-                {text}
-              </DropdownMenuCheckboxItem>
+              <li key={v}>
+                <button
+                  type="button"
+                  className={active?.value === v ? "menu-active" : ""}
+                  onClick={(event) => {
+                    onChoose(v);
+                    event.currentTarget
+                      .closest("details")
+                      ?.removeAttribute("open");
+                  }}
+                >
+                  {text}
+                </button>
+              </li>
             ))}
           </Fragment>
         ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </ul>
+    </details>
   );
 }
 
@@ -134,18 +127,8 @@ function EntityViewInner({
   );
 
   if (!hasEntities)
-    return (
-      <div className="view-empty">
-        <Waypoints />
-        <p>{t.entityEmpty}</p>
-      </div>
-    );
-  if (!view)
-    return (
-      <div className="view-empty">
-        <p>{t.loading}</p>
-      </div>
-    );
+    return <EmptyState icon={Waypoints}>{t.entityEmpty}</EmptyState>;
+  if (!view) return <EmptyState>{t.loading}</EmptyState>;
 
   // 再选已选中的值 = 取消筛选
   function choose(d: "belong" | "link", v: string) {
@@ -171,8 +154,8 @@ function EntityViewInner({
   const canvasKey = `${activePick ?? ""}|${activeLink ?? ""}|${filtered.map(([id]) => id).join("|")}`;
 
   return (
-    <div className="entity-view flex h-full flex-col gap-3">
-      <div className="entity-toolbar flex flex-wrap items-center gap-2">
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
         <DimensionFilter
           label={t.belongTo}
           sections={belongSections}
@@ -188,7 +171,7 @@ function EntityViewInner({
           onChoose={(v) => choose("link", v)}
         />
       </div>
-      <div className="entity-canvas min-h-0 flex-1">
+      <div className="min-h-0 flex-1">
         <EntityCanvas
           key={canvasKey}
           initialNodes={nodes}

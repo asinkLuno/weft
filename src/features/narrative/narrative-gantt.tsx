@@ -1,39 +1,59 @@
 import { memo, type ReactNode } from "react";
-import { Button } from "@/components/ui/button";
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@/components/ui/hover-card";
 import type { Lang, strings } from "@/i18n";
 import type { Narrative } from "@/lib/document";
 import type { EventItem, GanttBounds, GanttScale } from "./model";
 
-const EventHoverCard = memo(function EventHoverCard({
+function EventHoverContent({ event }: { event: EventItem }) {
+  return (
+    <>
+      <div className="text-sm font-medium">{event.id}</div>
+      <div className="mt-0.5 font-mono text-xs text-base-content/60">
+        {event.start_display}
+        {event.end_display && ` – ${event.end_display}`}
+      </div>
+      {event.description && (
+        <p className="mt-2 text-sm whitespace-pre-wrap">{event.description}</p>
+      )}
+    </>
+  );
+}
+
+// 悬浮卡：daisyUI 的 dropdown-hover，触发器与内容都带 tabindex 以支持键盘
+function EventHoverCard({
   event,
-  trigger,
+  label,
+  className,
+  style,
+  children,
 }: {
   event: EventItem;
-  trigger: ReactNode;
+  label?: string;
+  className?: string;
+  style?: React.CSSProperties;
+  children: ReactNode;
 }) {
   return (
-    <HoverCard>
-      <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
-      <HoverCardContent className="w-80">
-        <div className="text-sm font-medium">{event.id}</div>
-        <div className="mt-0.5 font-mono text-xs text-muted-foreground">
-          {event.start_display}
-          {event.end_display && ` – ${event.end_display}`}
-        </div>
-        {event.description && (
-          <p className="mt-2 text-sm whitespace-pre-wrap">
-            {event.description}
-          </p>
-        )}
-      </HoverCardContent>
-    </HoverCard>
+    <div
+      className={`dropdown dropdown-hover dropdown-top ${className ?? ""}`}
+      style={style}
+    >
+      <button
+        type="button"
+        tabIndex={0}
+        aria-label={label}
+        className="block w-full cursor-pointer text-left"
+      >
+        {children}
+      </button>
+      <div
+        role="dialog"
+        className="dropdown-content z-20 w-80 rounded-box bg-base-100 p-3 shadow"
+      >
+        <EventHoverContent event={event} />
+      </div>
+    </div>
   );
-});
+}
 
 // 所有叙事线以最早事件的 tick 为原点，共用相对时间范围。
 export const NarrativeGantt = memo(function NarrativeGantt({
@@ -57,11 +77,13 @@ export const NarrativeGantt = memo(function NarrativeGantt({
   });
   const originTick = bounds.start;
   return (
-    <section className="narrative-track min-w-0">
+    <section className="min-w-0">
       <h2 className="mb-2 text-lg font-medium">{name}</h2>
-      <div className="narrative-sheet overflow-hidden border bg-card">
-        <div className="grid grid-cols-[minmax(100px,220px)_minmax(140px,1fr)] border-b bg-muted/50 text-xs text-muted-foreground">
-          <div className="h-9 border-r px-3 leading-9">{t.ganttEvent}</div>
+      <div className="overflow-hidden rounded-box border border-base-300 bg-base-100">
+        <div className="grid grid-cols-[minmax(100px,220px)_minmax(140px,1fr)] border-b border-base-300 bg-base-200 text-xs text-base-content/60">
+          <div className="h-9 border-r border-base-300 px-3 leading-9">
+            {t.ganttEvent}
+          </div>
           <div className="relative flex h-9 items-end justify-between px-3 pb-1 font-mono">
             <span>{bounds.startDisplay}</span>
             <span>{bounds.endDisplay}</span>
@@ -69,7 +91,7 @@ export const NarrativeGantt = memo(function NarrativeGantt({
               <span
                 key={gap.start}
                 title={gap.label}
-                className="absolute top-0 -translate-x-1/2 bg-card px-1 font-bold"
+                className="absolute top-0 -translate-x-1/2 bg-base-200 px-1 font-bold"
                 style={{ left: `${(gap.start + gap.end) / 2}%` }}
               >
                 {"//"}
@@ -84,21 +106,15 @@ export const NarrativeGantt = memo(function NarrativeGantt({
           return (
             <div
               key={event.id}
-              className="grid min-h-14 grid-cols-[minmax(100px,220px)_minmax(140px,1fr)] border-b last:border-b-0"
+              className="grid min-h-14 grid-cols-[minmax(100px,220px)_minmax(140px,1fr)] border-b border-base-300 last:border-b-0"
             >
-              <div className="min-w-0 border-r px-3 py-2">
-                <EventHoverCard
-                  event={event}
-                  trigger={
-                    <Button
-                      variant="ghost"
-                      className="block w-full truncate text-left text-sm font-medium outline-none hover:underline"
-                    >
-                      {event.id}
-                    </Button>
-                  }
-                />
-                <div className="mt-0.5 truncate text-xs text-muted-foreground">
+              <div className="min-w-0 border-r border-base-300 px-3 py-2">
+                <EventHoverCard event={event} className="dropdown-start w-full">
+                  <span className="block truncate text-sm font-medium">
+                    {event.id}
+                  </span>
+                </EventHoverCard>
+                <div className="mt-0.5 truncate text-xs text-base-content/60">
                   {event.start_display}
                 </div>
               </div>
@@ -107,33 +123,34 @@ export const NarrativeGantt = memo(function NarrativeGantt({
                   <span
                     key={gap.start}
                     title={gap.label}
-                    className="absolute inset-y-0 border-x border-dashed border-border bg-muted/40"
+                    className="absolute inset-y-0 border-x border-dashed border-base-300 bg-base-200/60"
                     style={{
                       left: `${gap.start}%`,
                       width: `${gap.end - gap.start}%`,
                     }}
                   />
                 ))}
-                <EventHoverCard
-                  event={event}
-                  trigger={
-                    event.end_tick === undefined ? (
-                      <Button
-                        aria-label={event.id}
-                        className="narrative-point absolute top-1/2 min-w-3 p-0 size-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border border-primary bg-primary"
-                        style={{
-                          left: `clamp(6px, ${left}%, calc(100% - 6px))`,
-                        }}
-                      />
-                    ) : (
-                      <Button
-                        aria-label={event.id}
-                        className="narrative-bar absolute top-1/2 min-w-3 p-0 h-6 -translate-y-1/2 border border-primary/25 bg-primary/85"
-                        style={{ left: `${left}%`, width: `${width}%` }}
-                      />
-                    )
-                  }
-                />
+                {event.end_tick === undefined ? (
+                  <EventHoverCard
+                    event={event}
+                    label={event.id}
+                    className="absolute top-1/2 -translate-1/2"
+                    style={{
+                      left: `clamp(6px, ${left}%, calc(100% - 6px))`,
+                    }}
+                  >
+                    <span className="block size-3 rotate-45 rounded-[2px] bg-primary" />
+                  </EventHoverCard>
+                ) : (
+                  <EventHoverCard
+                    event={event}
+                    label={event.id}
+                    className="absolute top-1/2 -translate-y-1/2"
+                    style={{ left: `${left}%`, width: `${width}%` }}
+                  >
+                    <span className="block h-6 min-w-3 rounded-sm bg-primary/85" />
+                  </EventHoverCard>
+                )}
               </div>
             </div>
           );

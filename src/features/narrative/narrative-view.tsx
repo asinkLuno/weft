@@ -1,9 +1,9 @@
 import { memo, useMemo } from "react";
+import { EmptyState } from "@/components/empty-state";
 import { type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 import { buildNarrativeView } from "./model";
 import { NarrativeGantt } from "./narrative-gantt";
-import "./narrative.css";
 
 function NarrativeViewInner({
   doc,
@@ -18,10 +18,10 @@ function NarrativeViewInner({
     [doc],
   );
   if (entries.length === 0) {
-    return <div className="view-empty">{t.narrativeEmpty}</div>;
+    return <EmptyState>{t.narrativeEmpty}</EmptyState>;
   }
   return (
-    <div className="narrative-view flex h-full flex-col gap-8 overflow-auto">
+    <div className="flex h-full flex-col gap-8 overflow-auto">
       {entries.map(([name, nar]) => (
         <NarrativeGantt
           key={name}
