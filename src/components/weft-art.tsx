@@ -76,7 +76,7 @@ function engravedThreads() {
       const path = `${points
         .map(
           (p, k) =>
-            `${k === 0 ? "M" : "L"}${(260 + p[0] * 69).toFixed(2)},${(220 + p[1] * 69).toFixed(2)}`,
+            `${k === 0 ? "M" : "L"}${(260 + p[0] * 69).toFixed(1)},${(220 + p[1] * 69).toFixed(1)}`,
         )
         .join("")}Z`;
       const paths = bands.get(band) ?? [];
@@ -92,9 +92,16 @@ function engravedThreads() {
     }));
 }
 
-const threads = engravedThreads();
+let cachedThreads: Array<{ band: number; path: string }> | null = null;
+function getThreads() {
+  if (cachedThreads === null) {
+    cachedThreads = engravedThreads();
+  }
+  return cachedThreads;
+}
 
 export const WeftPrint = memo(function WeftPrint() {
+  const threads = getThreads();
   return (
     <svg
       className="weft-print"

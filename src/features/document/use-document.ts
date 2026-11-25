@@ -12,16 +12,56 @@ type DocumentPayload = {
   error: DocumentError | null;
 };
 
+export type DraftStore = {
+  getSnapshot: () => string;
+  subscribe: (listener: () => void) => () => void;
+};
+
+function createDraftStore() {
+  let value = "";
+  const listeners = new Set<() => void>();
+
+  return {
+    getSnapshot: () => value,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    set: (next: string) => {
+      if (next === value) return;
+      value = next;
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
 const YAML_FILTER = { name: "YAML", extensions: ["yaml", "yml"] };
 
-// 所有文档命令与事件集中在这里；绑定和解绑串行执行。
+// 所有文档命令与事件集中在这里；绑定、保存和解绑按边界校验会话代数。
+// 高频编辑文本存放在外部 DraftStore 中，仅由编辑器通过 useSyncExternalStore 订阅，
+// 避免每次敲键触发 App / Workspace / 非编辑面板重渲染。
 export function useDocument() {
   const [path, setPath] = useState<string | null>(null);
   const [doc, setDoc] = useState<WeftDoc | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [hasExternalChange, setHasExternalChange] = useState(false);
   const [activeError, setActiveError] = useState<unknown>(null);
   const [flash, setFlash] = useState(false);
+  const draftStoreRef = useRef<ReturnType<typeof createDraftStore> | null>(
+    null,
+  );
+  if (draftStoreRef.current === null) {
+    draftStoreRef.current = createDraftStore();
+  }
+  const draftStore = draftStoreRef.current;
+
   const boundGeneration = useRef<number | null>(null);
   const busy = useRef(false);
+  const savingRef = useRef(false);
+  const savedContentRef = useRef<string | null>(null);
   const pendingChange = useRef<DocumentPayload | null>(null);
   const mounted = useRef(false);
   const sessionToken = useRef(0);
@@ -31,56 +71,89 @@ export function useDocument() {
     undefined,
   );
 
-  const startListener = useCallback((resetBackend: boolean): Promise<void> => {
-    const token = ++sessionToken.current;
-    const prevUnlisten = unlistenRef.current;
-    unlistenRef.current = null;
-    prevUnlisten?.();
+  const syncDirty = useCallback(() => {
+    const saved = savedContentRef.current;
+    setDirty(saved !== null && draftStore.getSnapshot() !== saved);
+  }, [draftStore]);
 
-    const setup = (async () => {
-      if (resetBackend) {
-        // 清理页面刷新/HMR 前后端可能残留的旧 watcher
-        await invoke("unbind_document").catch(() => {});
-      }
-      if (token !== sessionToken.current) return;
-      const unlisten = await listen<DocumentPayload>(
-        "document-changed",
-        ({ payload }) => {
-          if (token !== sessionToken.current) return;
-          if (busy.current) {
-            pendingChange.current = payload;
-            return;
-          }
-          if (
-            boundGeneration.current === null ||
-            payload.generation !== boundGeneration.current
-          ) {
-            return;
-          }
-          setDoc(payload.doc);
-          setActiveError(payload.error);
-          if (payload.error) return;
-          setFlash(true);
-          clearTimeout(flashTimer.current);
-          flashTimer.current = setTimeout(() => setFlash(false), 400);
-        },
-      );
-      if (token !== sessionToken.current) {
-        unlisten();
-        return;
-      }
-      unlistenRef.current = unlisten;
-    })();
-
-    listenerReady.current = setup;
-    void setup.catch((error: unknown) => {
-      if (token === sessionToken.current) {
-        listenerReady.current = null;
-        setActiveError(error);
-      }
-    });
-    return setup;
+  const triggerFlash = useCallback(() => {
+    setFlash(true);
+    clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlash(false), 400);
   }, []);
+
+  const syncExternalContent = useCallback(
+    (nextContent: string | null) => {
+      if (nextContent === null) return;
+      const currentDraft = draftStore.getSnapshot();
+      const wasDirty =
+        savedContentRef.current !== null &&
+        currentDraft !== savedContentRef.current;
+      savedContentRef.current = nextContent;
+      if (!wasDirty || currentDraft === nextContent) {
+        draftStore.set(nextContent);
+        setDirty(false);
+        setHasExternalChange(false);
+      } else {
+        setDirty(true);
+        setHasExternalChange(true);
+      }
+    },
+    [draftStore],
+  );
+
+  const startListener = useCallback(
+    (resetBackend: boolean): Promise<void> => {
+      const token = ++sessionToken.current;
+      const prevUnlisten = unlistenRef.current;
+      unlistenRef.current = null;
+      prevUnlisten?.();
+
+      const setup = (async () => {
+        if (resetBackend) {
+          // 清理页面刷新/HMR 前后端可能残留的旧 watcher
+          await invoke("unbind_document").catch(() => {});
+        }
+        if (token !== sessionToken.current) return;
+        const unlisten = await listen<DocumentPayload>(
+          "document-changed",
+          ({ payload }) => {
+            if (token !== sessionToken.current) return;
+            if (busy.current) {
+              pendingChange.current = payload;
+              return;
+            }
+            if (
+              boundGeneration.current === null ||
+              payload.generation !== boundGeneration.current
+            ) {
+              return;
+            }
+            setDoc(payload.doc);
+            syncExternalContent(payload.content);
+            setActiveError(payload.error);
+            if (payload.error) return;
+            triggerFlash();
+          },
+        );
+        if (token !== sessionToken.current) {
+          unlisten();
+          return;
+        }
+        unlistenRef.current = unlisten;
+      })();
+
+      listenerReady.current = setup;
+      void setup.catch((error: unknown) => {
+        if (token === sessionToken.current) {
+          listenerReady.current = null;
+          setActiveError(error);
+        }
+      });
+      return setup;
+    },
+    [syncExternalContent, triggerFlash],
+  );
 
   useEffect(() => {
     mounted.current = true;
@@ -129,9 +202,14 @@ export function useDocument() {
         changed && changed.generation === payload.generation
           ? changed
           : payload;
+      const initialContent = effective.content ?? "";
       boundGeneration.current = payload.generation;
+      savedContentRef.current = effective.content;
+      draftStore.set(initialContent);
       setPath(nextPath);
       setDoc(effective.doc);
+      setDirty(false);
+      setHasExternalChange(false);
       setActiveError(effective.error);
       clearTimeout(flashTimer.current);
       setFlash(false);
@@ -144,6 +222,64 @@ export function useDocument() {
       busy.current = false;
     }
   }
+
+  const updateDraft = useCallback(
+    (next: string) => {
+      draftStore.set(next);
+      const saved = savedContentRef.current;
+      const nextDirty = saved !== null && next !== saved;
+      setDirty(nextDirty);
+      if (!nextDirty) {
+        setHasExternalChange(false);
+      }
+    },
+    [draftStore],
+  );
+
+  const save = useCallback(async (): Promise<boolean> => {
+    if (
+      busy.current ||
+      savingRef.current ||
+      boundGeneration.current === null ||
+      savedContentRef.current === null
+    ) {
+      return false;
+    }
+    const generation = boundGeneration.current;
+    const content = draftStore.getSnapshot();
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const payload = await invoke<DocumentPayload>("save_document", {
+        content,
+      });
+      if (!mounted.current || boundGeneration.current !== generation) {
+        return false;
+      }
+      setDoc(payload.doc);
+      savedContentRef.current = payload.content;
+      syncDirty();
+      setActiveError(null);
+      setHasExternalChange(false);
+      triggerFlash();
+      return true;
+    } catch (error) {
+      if (mounted.current && boundGeneration.current === generation) {
+        setActiveError(error);
+      }
+      return false;
+    } finally {
+      savingRef.current = false;
+      if (mounted.current) setSaving(false);
+    }
+  }, [draftStore, syncDirty, triggerFlash]);
+
+  const reloadFromDisk = useCallback(() => {
+    if (savedContentRef.current === null) return;
+    draftStore.set(savedContentRef.current);
+    setDirty(false);
+    setHasExternalChange(false);
+  }, [draftStore]);
 
   async function openFile(): Promise<string | null> {
     try {
@@ -163,8 +299,14 @@ export function useDocument() {
       await invoke("unbind_document");
       if (!mounted.current) return;
       boundGeneration.current = null;
+      savedContentRef.current = null;
+      draftStore.set("");
+      savingRef.current = false;
       setPath(null);
       setDoc(null);
+      setDirty(false);
+      setSaving(false);
+      setHasExternalChange(false);
       setActiveError(null);
       clearTimeout(flashTimer.current);
       setFlash(false);
@@ -175,5 +317,20 @@ export function useDocument() {
     }
   }
 
-  return { path, doc, activeError, flash, bind, openFile, close };
+  return {
+    path,
+    doc,
+    draftStore,
+    dirty,
+    saving,
+    hasExternalChange,
+    activeError,
+    flash,
+    bind,
+    updateDraft,
+    save,
+    reloadFromDisk,
+    openFile,
+    close,
+  };
 }

@@ -4,76 +4,10 @@
   height: 100%;
 }
 
-.tabbody {
+.workspace-dock {
   flex: 1;
   min-height: 0;
-  gap: 0;
-}
-
-.tabbar {
-  display: flex;
-  align-items: center;
-  min-height: 68px;
-  gap: 42px;
-  padding: 0 28px;
-  border-bottom: 1px solid var(--riso-blue);
-}
-
-.app-brand {
-  flex-shrink: 0;
-}
-
-.app-brand > svg {
-  width: 24px;
-  height: 24px;
-}
-
-.app-brand > span {
-  font-size: 30px;
-}
-
-.tabbar [data-slot="tabs-list"] {
-  align-self: stretch;
-  height: auto;
-  gap: 24px;
-  padding: 0;
-}
-
-.tabbar [data-slot="tabs-trigger"] {
-  height: 100%;
-  gap: 8px;
-  padding: 12px 4px;
-  border-radius: 0;
-  color: var(--muted-foreground);
-  font-size: 13px;
-}
-
-.tabbar [data-slot="tabs-trigger"][data-state="active"] {
-  color: var(--riso-blue);
-}
-
-.tabbar [data-slot="tabs-trigger"]::after {
-  bottom: -1px;
-  height: 3px;
-  background: var(--riso-blue);
-}
-
-.content {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.pane {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 28px;
-}
-
-.pane[data-state="inactive"] {
-  display: none;
+  overflow: hidden;
 }
 
 .statusbar {
@@ -115,6 +49,14 @@
   background: var(--riso-blue);
 }
 
+.statusbar-state.is-dirty {
+  color: var(--riso-red);
+}
+
+.statusbar-state.is-dirty::before {
+  background: var(--riso-red);
+}
+
 .statusbar-state.has-error {
   color: var(--destructive);
 }
@@ -124,32 +66,10 @@
 }
 
 @media (max-width: 760px) {
-  .tabbar {
-    min-height: 60px;
-    gap: 24px;
-    padding-inline: 16px;
-  }
-  .tabbar [data-slot="tabs-list"] {
-    flex: 1;
-    gap: 12px;
-  }
-  .app-brand {
-    gap: 6px;
-  }
-  .pane {
-    padding: 16px;
-  }
   .statusbar-state {
     display: none;
   }
-  .statusbar > [data-slot="button"] {
+  .statusbar > [data-slot="button"]:first-of-type {
     margin-left: auto;
-  }
-}
-
-@media (max-width: 420px) {
-  .app-brand > span,
-  .tabbar [data-slot="tabs-trigger"] > svg {
-    display: none;
   }
 }

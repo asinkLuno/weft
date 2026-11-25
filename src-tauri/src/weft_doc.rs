@@ -836,7 +836,7 @@ pub fn save_document(
     app: AppHandle,
     state: State<'_, Mutex<DocumentState>>,
     content: String,
-) -> Result<(), DocumentError> {
+) -> Result<DocumentPayload, DocumentError> {
     // 全程持锁：绑定路径在保存期间不能变，watcher 线程最多等这次校验和写盘
     let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
     let active = st
@@ -846,7 +846,7 @@ pub fn save_document(
     let path = active.target.path.clone();
     let parent = active.target.parent.clone();
     // 非法 YAML / 历法错误不落盘；目录取自当前绑定，保存不改路径
-    parse(&app, &content, &parent, &crate::current_lang(&app)).inspect_err(|err| {
+    let doc = parse(&app, &content, &parent, &crate::current_lang(&app)).inspect_err(|err| {
         error!("failed to validate document before saving: {err}");
     })?;
     // 原子写：先写临时文件再 rename，外部 watcher 不会读到半截内容
@@ -866,13 +866,13 @@ pub fn save_document(
         let _ = fs::remove_file(&tmp);
         return Err(DocumentError::raw(err));
     }
-    // 写成功后更新已同步快照与序号，同时同步新的脚本依赖监听目录
+    // 写成功后更新已同步快照与序号，同时同步新的脚本依赖监听目录，并将新解析结果直接返回前端
     active.seq += 1;
     active.last_synced = Some(content.clone());
     if let Some(scripts) = extract_script_paths(&content, &parent) {
         active.sync_scripts(scripts);
     }
-    Ok(())
+    Ok(DocumentPayload::ready(active.generation, doc, content))
 }
 
 #[tauri::command]

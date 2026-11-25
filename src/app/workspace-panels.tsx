@@ -1,0 +1,503 @@
+import type {
+  DockviewApi,
+  DockviewGroupPanel,
+  DockviewTheme,
+  IDockviewHeaderActionsProps,
+  IDockviewPanelHeaderProps,
+  IDockviewPanelProps,
+  IWatermarkPanelProps,
+  SerializedDockview,
+} from "dockview-react";
+import {
+  BookOpen,
+  Columns2,
+  FileCode2,
+  GitBranch,
+  type LucideIcon,
+  Plus,
+  RotateCcw,
+  Rows2,
+  Waypoints,
+  X as XIcon,
+} from "lucide-react";
+import {
+  type FunctionComponent,
+  lazy,
+  Suspense,
+  useEffect,
+  useState,
+} from "react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { StoryView } from "@/features/story/story-view";
+import { type Lang, strings } from "@/i18n";
+import { useWorkspaceDoc, useWorkspaceEditor } from "./workspace-context";
+
+const YamlEditorView = lazy(() =>
+  import("@/features/editor/yaml-editor-view").then((m) => ({
+    default: m.YamlEditorView,
+  })),
+);
+const EntityView = lazy(() =>
+  import("@/features/entity/entity-view").then((m) => ({
+    default: m.EntityView,
+  })),
+);
+const NarrativeView = lazy(() =>
+  import("@/features/narrative/narrative-view").then((m) => ({
+    default: m.NarrativeView,
+  })),
+);
+
+export const PANEL_IDS = ["editor", "story", "entity", "narrative"] as const;
+export type PanelId = (typeof PANEL_IDS)[number];
+
+type PanelLabelKey = "panelEditor" | "tab1" | "tab2" | "tab4";
+
+export const PANEL_META: Record<
+  PanelId,
+  { icon: LucideIcon; labelKey: PanelLabelKey }
+> = {
+  editor: { icon: FileCode2, labelKey: "panelEditor" },
+  story: { icon: BookOpen, labelKey: "tab1" },
+  entity: { icon: Waypoints, labelKey: "tab2" },
+  narrative: { icon: GitBranch, labelKey: "tab4" },
+};
+
+export const WEFT_DOCKVIEW_THEME: DockviewTheme = {
+  name: "weft",
+  className: "dockview-theme-weft",
+};
+
+export function isPanelId(value: string): value is PanelId {
+  return (PANEL_IDS as readonly string[]).includes(value);
+}
+
+export function panelKindOf(panel: {
+  id: string;
+  params?: Record<string, unknown>;
+}): PanelId | null {
+  const paramKind = panel.params?.kind;
+  if (typeof paramKind === "string" && isPanelId(paramKind)) {
+    return paramKind;
+  }
+  if (isPanelId(panel.id)) {
+    return panel.id;
+  }
+  const prefix = panel.id.split("-")[0];
+  return prefix && isPanelId(prefix) ? prefix : null;
+}
+
+export function panelTitle(id: PanelId, lang: Lang): string {
+  return strings[lang][PANEL_META[id].labelKey];
+}
+
+function nextPanelInstanceId(api: DockviewApi, kind: PanelId): string {
+  if (!api.getPanel(kind)) return kind;
+  let index = 2;
+  while (api.getPanel(`${kind}-${index}`)) {
+    index += 1;
+  }
+  return `${kind}-${index}`;
+}
+
+export function addPanelInGroup(
+  api: DockviewApi,
+  kind: PanelId,
+  lang: Lang,
+  group: DockviewGroupPanel,
+  direction?: "right" | "below",
+): void {
+  const id = nextPanelInstanceId(api, kind);
+  api.addPanel({
+    id,
+    component: kind,
+    title: panelTitle(kind, lang),
+    params: { kind },
+    position: direction
+      ? { referenceGroup: group, direction }
+      : { referenceGroup: group },
+  });
+}
+
+function EditorPanel() {
+  const { path, lang } = useWorkspaceDoc();
+  const {
+    draftStore,
+    dirty,
+    saving,
+    hasExternalChange,
+    onDraftChange,
+    onSave,
+    onReloadFromDisk,
+  } = useWorkspaceEditor();
+
+  return (
+    <Suspense fallback={null}>
+      <YamlEditorView
+        path={path}
+        draftStore={draftStore}
+        dirty={dirty}
+        saving={saving}
+        hasExternalChange={hasExternalChange}
+        lang={lang}
+        onChange={onDraftChange}
+        onSave={onSave}
+        onReloadFromDisk={onReloadFromDisk}
+      />
+    </Suspense>
+  );
+}
+
+function StoryPanel() {
+  const { doc, lang } = useWorkspaceDoc();
+  const t = strings[lang];
+
+  return (
+    <div className="dock-pane-scroll">
+      {doc?.story ? (
+        <StoryView doc={doc} lang={lang} />
+      ) : (
+        <div className="view-empty">
+          <BookOpen />
+          <p>{t.storyEmpty}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 实体画布需在面板首次可见时挂载才有真实宽高可取景，之后常驻保留视角与筛选状态。
+function EntityPanel({ api }: IDockviewPanelProps) {
+  const { doc, lang, path } = useWorkspaceDoc();
+  const [mountedOnce, setMountedOnce] = useState(() => api.isVisible);
+
+  useEffect(() => {
+    if (mountedOnce) return;
+    if (api.isVisible) {
+      setMountedOnce(true);
+      return;
+    }
+    const disposable = api.onDidVisibilityChange((event) => {
+      if (event.isVisible) {
+        setMountedOnce(true);
+      }
+    });
+    return () => {
+      disposable.dispose();
+    };
+  }, [api, mountedOnce]);
+
+  return (
+    <div className="dock-pane-fill">
+      {mountedOnce ? (
+        <Suspense
+          fallback={
+            <div className="view-empty">
+              <p>{strings[lang].loading}</p>
+            </div>
+          }
+        >
+          <EntityView doc={doc} lang={lang} path={path} />
+        </Suspense>
+      ) : null}
+    </div>
+  );
+}
+
+function NarrativePanel() {
+  const { doc, lang } = useWorkspaceDoc();
+  return (
+    <div className="dock-pane-fill">
+      <Suspense fallback={null}>
+        <NarrativeView doc={doc} lang={lang} />
+      </Suspense>
+    </div>
+  );
+}
+
+export const WORKSPACE_COMPONENTS: Record<
+  PanelId,
+  FunctionComponent<IDockviewPanelProps>
+> = {
+  editor: EditorPanel,
+  story: StoryPanel,
+  entity: EntityPanel,
+  narrative: NarrativePanel,
+};
+
+function EditorDirtyDot() {
+  const { dirty } = useWorkspaceEditor();
+  if (!dirty) return null;
+  return <span className="dock-tab-dirty" aria-hidden="true" />;
+}
+
+export function WorkspaceTab({ api, params }: IDockviewPanelHeaderProps) {
+  const { lang } = useWorkspaceDoc();
+  const kind = panelKindOf({ id: api.id, params });
+  const Icon = kind ? PANEL_META[kind].icon : null;
+  const title = kind ? panelTitle(kind, lang) : (api.title ?? api.id);
+
+  return (
+    <div className="dock-tab">
+      {Icon && <Icon className="dock-tab-icon" aria-hidden="true" />}
+      <span className="dock-tab-title">{title}</span>
+      {kind === "editor" && <EditorDirtyDot />}
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        className="dock-tab-close"
+        aria-label={`Close ${title}`}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          api.close();
+        }}
+      >
+        <XIcon className="size-3" />
+      </Button>
+    </div>
+  );
+}
+
+function GroupActionMenu({
+  label,
+  icon: TriggerIcon,
+  lang,
+  onSelect,
+}: {
+  label: string;
+  icon: LucideIcon;
+  lang: Lang;
+  onSelect: (kind: PanelId) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="dock-header-action"
+          aria-label={label}
+          title={label}
+        >
+          <TriggerIcon className="size-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-40">
+        <DropdownMenuLabel>{label}</DropdownMenuLabel>
+        {PANEL_IDS.map((kind) => {
+          const Icon = PANEL_META[kind].icon;
+          return (
+            <DropdownMenuItem key={kind} onSelect={() => onSelect(kind)}>
+              <Icon className="size-3.5" />
+              <span>{panelTitle(kind, lang)}</span>
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+export function WorkspaceGroupActions({
+  containerApi,
+  group,
+}: IDockviewHeaderActionsProps) {
+  const { lang } = useWorkspaceDoc();
+  const t = strings[lang];
+
+  return (
+    <div className="dock-header-actions">
+      <GroupActionMenu
+        label={t.addTab}
+        icon={Plus}
+        lang={lang}
+        onSelect={(kind) => addPanelInGroup(containerApi, kind, lang, group)}
+      />
+      <GroupActionMenu
+        label={t.splitRight}
+        icon={Columns2}
+        lang={lang}
+        onSelect={(kind) =>
+          addPanelInGroup(containerApi, kind, lang, group, "right")
+        }
+      />
+      <GroupActionMenu
+        label={t.splitDown}
+        icon={Rows2}
+        lang={lang}
+        onSelect={(kind) =>
+          addPanelInGroup(containerApi, kind, lang, group, "below")
+        }
+      />
+    </div>
+  );
+}
+
+export function WorkspaceWatermark({ containerApi }: IWatermarkPanelProps) {
+  const { lang } = useWorkspaceDoc();
+  const t = strings[lang];
+
+  return (
+    <div className="dock-watermark">
+      <p className="text-sm text-muted-foreground">{t.workspaceEmpty}</p>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        {PANEL_IDS.map((id) => {
+          const Icon = PANEL_META[id].icon;
+          return (
+            <Button
+              key={id}
+              variant="outline"
+              size="sm"
+              onClick={() => focusOrOpenPanel(containerApi, id, lang)}
+            >
+              <Icon className="size-3.5" />
+              {panelTitle(id, lang)}
+            </Button>
+          );
+        })}
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => applyDefaultLayout(containerApi, lang)}
+        >
+          <RotateCcw className="size-3.5" />
+          {t.resetLayout}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function applyDefaultLayout(api: DockviewApi, lang: Lang): void {
+  api.clear();
+  const editorPanel = api.addPanel({
+    id: "editor",
+    component: "editor",
+    title: panelTitle("editor", lang),
+    params: { kind: "editor" },
+  });
+  const storyPanel = api.addPanel({
+    id: "story",
+    component: "story",
+    title: panelTitle("story", lang),
+    params: { kind: "story" },
+    position: { referencePanel: editorPanel, direction: "right" },
+  });
+  api.addPanel({
+    id: "entity",
+    component: "entity",
+    title: panelTitle("entity", lang),
+    params: { kind: "entity" },
+    position: { referencePanel: storyPanel, direction: "within" },
+  });
+  api.addPanel({
+    id: "narrative",
+    component: "narrative",
+    title: panelTitle("narrative", lang),
+    params: { kind: "narrative" },
+    position: { referencePanel: storyPanel, direction: "within" },
+  });
+  storyPanel.api.setActive();
+  if (api.width > 0) {
+    editorPanel.group.api.setSize({
+      width: Math.max(320, Math.round(api.width * 0.42)),
+    });
+  }
+}
+
+export function focusOrOpenPanel(
+  api: DockviewApi,
+  kind: PanelId,
+  lang: Lang,
+): void {
+  const existing = api.panels.find((panel) => panelKindOf(panel) === kind);
+  if (existing) {
+    existing.api.setActive();
+    return;
+  }
+
+  const id = nextPanelInstanceId(api, kind);
+  const title = panelTitle(kind, lang);
+  const params = { kind };
+
+  if (kind === "editor") {
+    const firstOther = api.panels[0];
+    api.addPanel({
+      id,
+      component: kind,
+      title,
+      params,
+      position: firstOther
+        ? { referencePanel: firstOther, direction: "left" }
+        : undefined,
+    });
+    return;
+  }
+
+  const siblingView = api.panels.find(
+    (panel) => panelKindOf(panel) !== "editor",
+  );
+  if (siblingView) {
+    api.addPanel({
+      id,
+      component: kind,
+      title,
+      params,
+      position: { referencePanel: siblingView, direction: "within" },
+    });
+    return;
+  }
+
+  const editorPanel = api.panels.find(
+    (panel) => panelKindOf(panel) === "editor",
+  );
+  api.addPanel({
+    id,
+    component: kind,
+    title,
+    params,
+    position: editorPanel
+      ? { referencePanel: editorPanel, direction: "right" }
+      : undefined,
+  });
+}
+
+function isSerializedDockview(value: unknown): value is SerializedDockview {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<SerializedDockview>;
+  if (
+    !candidate.grid ||
+    !candidate.panels ||
+    typeof candidate.panels !== "object"
+  ) {
+    return false;
+  }
+  const entries = Object.values(candidate.panels);
+  if (entries.length === 0) return false;
+  return entries.every(
+    (panel) =>
+      panel &&
+      typeof panel === "object" &&
+      typeof panel.id === "string" &&
+      typeof panel.contentComponent === "string" &&
+      isPanelId(panel.contentComponent),
+  );
+}
+
+export function restoreLayout(api: DockviewApi, raw: unknown): boolean {
+  if (!isSerializedDockview(raw)) return false;
+  try {
+    api.fromJSON(raw);
+    return api.panels.length > 0;
+  } catch {
+    return false;
+  }
+}

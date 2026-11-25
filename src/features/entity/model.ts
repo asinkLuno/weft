@@ -88,11 +88,12 @@ export function buildEntityView(
   };
 
   // 出现过的所有归属目标；已不存在的选中项视为无效，不参与过滤
-  const targets = [
-    ...new Set([...parentsById.values()].flatMap((ids) => [...ids])),
-  ];
+  const targetSet = new Set<string>();
+  for (const ids of parentsById.values()) {
+    for (const id of ids) targetSet.add(id);
+  }
   const activePick =
-    dim === "belong" && pick && targets.includes(pick) ? pick : null;
+    dim === "belong" && pick && targetSet.has(pick) ? pick : null;
 
   // 根 = 没有上级的实体。归属目标按根分组：多棵互不相连的归属树自动拆成
   // 多个 section，无需在文档里额外声明；组内按层级深度排（根在前），组间画分隔线
@@ -103,7 +104,7 @@ export function buildEntityView(
     return roots.length ? roots : [id];
   };
   const byRoot = new Map<string, Array<{ v: string; label: string }>>();
-  for (const target of targets) {
+  for (const target of targetSet) {
     for (const root of rootsOf(target)) {
       const section = byRoot.get(root) ?? [];
       section.push({ v: target, label: nameOf(target) });
@@ -123,16 +124,21 @@ export function buildEntityView(
   // 关系组筛选同理：组在文件更新后可能消失，失效视为未选
   const groups = Object.keys(doc?.entity_link ?? {}).sort();
   const activeLink =
-    dim === "link" && pick && groups.includes(pick) ? pick : null;
+    dim === "link" && pick && doc?.entity_link && pick in doc.entity_link
+      ? pick
+      : null;
 
   // 选中组内出现过的实体（解析成 id）
-  const linkMembers = new Set(
-    activeLink
-      ? (doc?.entity_link?.[activeLink] ?? [])
-          .flatMap(({ entities: [a, b] }) => [idOf(a), idOf(b)])
-          .filter((x): x is string => x !== null)
-      : [],
-  );
+  const activeLinks = activeLink ? (doc?.entity_link?.[activeLink] ?? []) : [];
+  const linkMembers = new Set<string>();
+  for (const {
+    entities: [a, b],
+  } of activeLinks) {
+    const sa = idOf(a);
+    const sb = idOf(b);
+    if (sa) linkMembers.add(sa);
+    if (sb) linkMembers.add(sb);
+  }
 
   const filtered = entities.filter(([id]) => {
     // 选中的实体自己也算命中，层级图里当根展示
@@ -149,31 +155,43 @@ export function buildEntityView(
       : String(value);
   }
 
+  // 同一父实体常被多个子实体共享，缓存其悬浮预览数据避免重复排序与路径转换
+  const previewCache = new Map<string, EntityData>();
   const entityData = (
     id: string,
     e: EntityT,
     includePreviews = true,
-  ): EntityData => ({
-    name: nameOf(id),
-    avatar: e.avatar ? convertFileSrc(e.avatar) : undefined,
-    baseTime:
-      e.base_time_humanizer !== undefined
-        ? `${t.baseTime}: ${e.base_time_humanizer}`
-        : undefined,
-    parents: [...(parentsById.get(id) ?? [])].map((b) => ({
-      id: b,
-      name: nameOf(b),
-      preview:
-        includePreviews && doc?.entity?.[b]
-          ? entityData(b, doc.entity[b], false)
+  ): EntityData => {
+    if (!includePreviews) {
+      const cached = previewCache.get(id);
+      if (cached) return cached;
+    }
+    const built: EntityData = {
+      name: nameOf(id),
+      avatar: e.avatar ? convertFileSrc(e.avatar) : undefined,
+      baseTime:
+        e.base_time_humanizer !== undefined
+          ? `${t.baseTime}: ${e.base_time_humanizer}`
           : undefined,
-    })),
-    extraProps: Object.entries(e.extra_props ?? {})
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, value]) => [key, formatExtraValue(value)]),
-    description: e.description,
-    belongLabel: t.belongTo,
-  });
+      parents: [...(parentsById.get(id) ?? [])].map((b) => ({
+        id: b,
+        name: nameOf(b),
+        preview:
+          includePreviews && doc?.entity?.[b]
+            ? entityData(b, doc.entity[b], false)
+            : undefined,
+      })),
+      extraProps: Object.entries(e.extra_props ?? {})
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => [key, formatExtraValue(value)]),
+      description: e.description,
+      belongLabel: t.belongTo,
+    };
+    if (!includePreviews) {
+      previewCache.set(id, built);
+    }
+    return built;
+  };
 
   // 有归属筛选时按 DAG 的归属连边、dagre 分层；无筛选不连归属线、摆成网格平铺
   const visibleSet = new Set(filtered.map(([id]) => id));
@@ -184,25 +202,27 @@ export function buildEntityView(
   );
 
   // 关系对只在关系筛选视图展示；端点不在当前过滤集时整条隐藏
-  const linkEdges: Edge[] = Object.entries(doc?.entity_link ?? {})
-    .filter(([group]) => group === activeLink)
-    .flatMap(([group, links]) =>
-      links.flatMap(({ entities: [a, b], relations }, i) => {
+  const linkEdges: Edge[] = activeLink
+    ? activeLinks.flatMap(({ entities: [a, b], relations }, i) => {
         const s = idOf(a);
-        const t = idOf(b);
-        return s && t && s !== t && visibleSet.has(s) && visibleSet.has(t)
+        const target = idOf(b);
+        return s &&
+          target &&
+          s !== target &&
+          visibleSet.has(s) &&
+          visibleSet.has(target)
           ? [
               {
-                id: `link:${group}:${i}`,
+                id: `link:${activeLink}:${i}`,
                 source: s,
-                target: t,
+                target,
                 label: relations,
                 labelStyle: { fontSize: 12 },
               },
             ]
           : [];
-      }),
-    );
+      })
+    : [];
   const auto: Record<string, { x: number; y: number }> = {};
   if (activePick || activeLink) {
     // 归属筛选按归属连边分层，关系筛选按关系线分层；两个维度互斥

@@ -5,6 +5,8 @@
 .narrative-track {
   --track-ink: var(--riso-blue);
   --primary: var(--track-ink);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
 }
 
 .narrative-track:nth-child(even) {

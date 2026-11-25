@@ -1,9 +1,17 @@
 import { BookOpen, CalendarDays, UserRound } from "lucide-react";
+import { memo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 import "./story.css";
-export function StoryView({ doc, lang }: { doc: WeftDoc; lang: Lang }) {
+
+export const StoryView = memo(function StoryView({
+  doc,
+  lang,
+}: {
+  doc: WeftDoc;
+  lang: Lang;
+}) {
   const t = strings[lang];
   const story = doc.story;
   if (!story) return null;
@@ -60,4 +68,4 @@ export function StoryView({ doc, lang }: { doc: WeftDoc; lang: Lang }) {
       </div>
     </div>
   );
-}
+});

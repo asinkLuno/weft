@@ -18,16 +18,20 @@ import { WeftMark, WeftPrint } from "@/components/weft-art";
 import { type Lang, strings } from "@/i18n";
 import "./welcome.css";
 
+const PATH_SEP_RE = /[\\/]/;
+
 export function WelcomeView({
   lang,
   recents,
   onOpen,
   onRecent,
+  onPreload,
 }: {
   lang: Lang;
   recents: string[];
   onOpen: () => void;
   onRecent: (path: string) => void;
+  onPreload?: () => void;
 }) {
   return (
     <main className="welcome" lang={lang === "zh" ? "zh-CN" : "en"}>
@@ -42,7 +46,12 @@ export function WelcomeView({
         <section className="welcome-intro">
           <h1>{strings[lang].welcomeTitle}</h1>
           <p>{strings[lang].welcomeDescription}</p>
-          <Button size="lg" onClick={onOpen}>
+          <Button
+            size="lg"
+            onClick={onOpen}
+            onMouseEnter={onPreload}
+            onFocus={onPreload}
+          >
             <FolderOpen />
             {strings[lang].open}
           </Button>
@@ -82,10 +91,12 @@ export function WelcomeView({
                       variant="ghost"
                       className="recent-file"
                       onClick={() => onRecent(p)}
+                      onMouseEnter={onPreload}
+                      onFocus={onPreload}
                     >
                       <FileText className="size-5 text-primary" />
                       <span>
-                        <strong>{p.split(/[\\/]/).pop()}</strong>
+                        <strong>{p.split(PATH_SEP_RE).pop()}</strong>
                         <small>{p}</small>
                       </span>
                     </Button>

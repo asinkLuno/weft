@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 import { buildNarrativeView } from "./model";
@@ -13,7 +13,10 @@ function NarrativeViewInner({
   lang: Lang;
 }) {
   const t = strings[lang];
-  const { byId, bounds, scale, entries } = buildNarrativeView(doc);
+  const { byId, bounds, scale, entries } = useMemo(
+    () => buildNarrativeView(doc),
+    [doc],
+  );
   if (entries.length === 0) {
     return <div className="view-empty">{t.narrativeEmpty}</div>;
   }

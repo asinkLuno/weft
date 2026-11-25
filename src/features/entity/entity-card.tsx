@@ -1,5 +1,6 @@
 import { Handle, Position } from "@xyflow/react";
 import { CalendarDays } from "lucide-react";
+import { memo } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,8 +17,15 @@ import {
   HoverCardTrigger,
 } from "@/components/ui/hover-card";
 import type { EntityData } from "./model";
-// 入参只要 data：既当 React Flow 节点，也能当普通卡片用
-export function EntityNode({ data }: { data: EntityData }) {
+
+const INITIALS_SPLIT_RE = /[\s·._-]+/u;
+
+// 入参只要 data：既当 React Flow 节点，也能当普通卡片用；memo 避免拖动单个节点时重渲染其余卡片
+export const EntityNode = memo(function EntityNode({
+  data,
+}: {
+  data: EntityData;
+}) {
   return (
     <>
       {/* 连线锚点：父级从底部出、子级从顶部入；藏掉但保留挂点，且不许用户拖出新连线 */}
@@ -36,13 +44,10 @@ export function EntityNode({ data }: { data: EntityData }) {
       <EntityCard data={data} />
     </>
   );
-}
+});
 
 function entityInitials(id: string): string {
-  const parts = id
-    .trim()
-    .split(/[\s·._-]+/u)
-    .filter(Boolean);
+  const parts = id.trim().split(INITIALS_SPLIT_RE).filter(Boolean);
   if (parts.length > 1) {
     return parts
       .slice(0, 2)

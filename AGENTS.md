@@ -1,6 +1,5 @@
 # 基本约定
 
-- 需要查库/框架文档时，用 Context7。
 - 处于快速开发阶段，可以破坏性重构；不要写任何测试用例。
 - 增删 Rust 依赖用 `cargo add` / `cargo remove`；永远不要手工修改 Cargo.lock。
 - 前端组件用 shadcn/ui，增删组件用命令行（`npx shadcn add <component>`），不要手工拷贝。

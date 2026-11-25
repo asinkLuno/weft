@@ -1,7 +1,15 @@
 import "@xyflow/react/dist/style.css";
 import "./entity.css";
 import { ChevronDown, Waypoints } from "lucide-react";
-import { Fragment, memo, useEffect, useState } from "react";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -83,34 +91,56 @@ function EntityViewInner({
   // 两级筛选：先选维度（归属/关系），再选值；dim 为 null 即无筛选
   const [dim, setDim] = useState<"belong" | "link" | null>(null);
   const [pick, setPick] = useState<string | null>(null);
-  // 节点摆放松存 settings.json（按文件隔离），不写进用户的 YAML
+  // 节点摆放松存 settings.json（按文件隔离），不写进用户的 YAML；
+  // 拖动落位写入 ref + store，不触发整个实体图重建（React Flow 内部已持有最新位置）。
   const layoutKey = `layout:${path}`;
-  const [saved, setSaved] = useState<Record<
-    string,
-    { x: number; y: number }
-  > | null>(null);
+  const savedPositionsRef = useRef<Record<string, { x: number; y: number }>>(
+    {},
+  );
+  const [loadedLayoutKey, setLoadedLayoutKey] = useState<string | null>(null);
 
   useEffect(() => {
-    setSaved(null);
     let cancelled = false;
     settings
       .get<Record<string, { x: number; y: number }>>(layoutKey)
       .then((v) => {
-        if (!cancelled) setSaved(v ?? {});
+        if (cancelled) return;
+        savedPositionsRef.current = v ?? {};
+        setLoadedLayoutKey(layoutKey);
       });
     return () => {
       cancelled = true;
     };
   }, [layoutKey]);
 
-  if (Object.keys(doc?.entity ?? {}).length === 0)
+  const savedReady = loadedLayoutKey === layoutKey;
+  const hasEntities = Object.keys(doc?.entity ?? {}).length > 0;
+
+  const view = useMemo(
+    () =>
+      hasEntities && savedReady
+        ? buildEntityView(doc, lang, dim, pick, savedPositionsRef.current)
+        : null,
+    [doc, lang, dim, pick, hasEntities, savedReady],
+  );
+
+  const handlePersist = useCallback(
+    (id: string, pos: { x: number; y: number }) => {
+      const next = { ...savedPositionsRef.current, [id]: pos };
+      savedPositionsRef.current = next;
+      void settings.set(layoutKey, next);
+    },
+    [layoutKey],
+  );
+
+  if (!hasEntities)
     return (
       <div className="view-empty">
         <Waypoints />
         <p>{t.entityEmpty}</p>
       </div>
     );
-  if (!saved)
+  if (!view)
     return (
       <div className="view-empty">
         <p>{t.loading}</p>
@@ -136,7 +166,7 @@ function EntityViewInner({
     groups,
     filtered,
     nameOf,
-  } = buildEntityView(doc, lang, dim, pick, saved);
+  } = view;
   // 过滤集或筛选形态变化时重挂载画布：重新取景，筛选模式才能重排
   const canvasKey = `${activePick ?? ""}|${activeLink ?? ""}|${filtered.map(([id]) => id).join("|")}`;
 
@@ -165,15 +195,7 @@ function EntityViewInner({
           lang={lang}
           // 归属筛选只连归属线，关系筛选只连关系线，无筛选不连线，两个维度互斥
           edges={edges}
-          onPersist={
-            activePick || activeLink
-              ? undefined
-              : (id, pos) => {
-                  const next = { ...saved, [id]: pos };
-                  setSaved(next);
-                  settings.set(layoutKey, next);
-                }
-          }
+          onPersist={activePick || activeLink ? undefined : handlePersist}
         />
       </div>
     </div>

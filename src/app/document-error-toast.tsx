@@ -1,8 +1,8 @@
-import { useEffect } from "react";
+import { memo, useEffect } from "react";
 import { toast } from "sonner";
 import { formatDocumentError, type Lang } from "@/i18n";
 
-export function DocumentErrorToast({
+export const DocumentErrorToast = memo(function DocumentErrorToast({
   error,
   lang,
 }: {
@@ -22,4 +22,4 @@ export function DocumentErrorToast({
     };
   }, [error, lang]);
   return null;
-}
+});
