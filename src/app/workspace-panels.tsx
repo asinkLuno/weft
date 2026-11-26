@@ -149,6 +149,7 @@ function EditorPanel() {
     dirty,
     saving,
     diskStatus,
+    revealRequest,
     onDraftChange,
     onSave,
     onForceSave,
@@ -164,6 +165,7 @@ function EditorPanel() {
         dirty={dirty}
         saving={saving}
         diskStatus={diskStatus}
+        revealRequest={revealRequest}
         lang={lang}
         onChange={onDraftChange}
         onSave={onSave}
@@ -213,14 +215,19 @@ function useMountWhenVisible(api: IDockviewPanelProps["api"]): boolean {
 }
 
 function EntityPanel({ api }: IDockviewPanelProps) {
-  const { doc, lang, path } = useWorkspaceDoc();
+  const { doc, lang, path, revealInEditor } = useWorkspaceDoc();
   const mountedOnce = useMountWhenVisible(api);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-base-100 p-4">
       {mountedOnce ? (
         <Suspense fallback={<EmptyState>{strings[lang].loading}</EmptyState>}>
-          <EntityView doc={doc} lang={lang} path={path} />
+          <EntityView
+            doc={doc}
+            lang={lang}
+            path={path}
+            onRevealInEditor={revealInEditor}
+          />
         </Suspense>
       ) : null}
     </div>
@@ -239,14 +246,14 @@ function InfoPanel() {
 }
 
 function EventsPanel({ api }: IDockviewPanelProps) {
-  const { doc, lang } = useWorkspaceDoc();
+  const { doc, lang, revealInEditor } = useWorkspaceDoc();
   const mountedOnce = useMountWhenVisible(api);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-base-100 p-4">
       {mountedOnce ? (
         <Suspense fallback={null}>
-          <EventsView doc={doc} lang={lang} />
+          <EventsView doc={doc} lang={lang} onRevealInEditor={revealInEditor} />
         </Suspense>
       ) : null}
     </div>

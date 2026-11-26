@@ -1,21 +1,71 @@
-import dagre from "@dagrejs/dagre";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Edge, Node } from "@xyflow/react";
 import { type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
-// 实体卡片节点：数据在 EntityView 里解析好，这里只管展示
+import { formatTimeRange } from "@/lib/ui";
+import {
+  computeEntityLayout,
+  type EntityLayoutMode,
+  type NodeSize,
+  type Point,
+} from "./layout";
+
 export type EntityT = NonNullable<WeftDoc["entity"]>[string];
+
+export type EntityParentRef = {
+  id: string;
+  name: string;
+  preview?: EntityData;
+};
+
 export type EntityData = {
+  id: string;
   name: string;
   avatar?: string;
   baseTime?: string;
-  parents: Array<{ id: string; name: string; preview?: EntityData }>;
-  // extra_props 展开成排好序的键值对；值已转成展示文本
+  parents: EntityParentRef[];
   extraProps: Array<[string, string]>;
   description?: string;
   belongLabel: string;
 };
+
 export type EntityFlowNode = Node<EntityData, "entity">;
+
+export type FloatingEdgeData = {
+  label: string;
+  pairIndex: number;
+  pairTotal: number;
+  canonicalForward: boolean;
+};
+
+export type EntityLinkEntry = {
+  key: string;
+  group: string;
+  relation: string;
+  peerId: string;
+  peerName: string;
+};
+
+export type EntityEventEntry = {
+  id: string;
+  time?: string;
+  description?: string;
+};
+
+export type EntityDetail = {
+  id: string;
+  name: string;
+  avatar?: string;
+  baseTime?: string;
+  description?: string;
+  extraProps: Array<[string, string]>;
+  parents: Array<{ id: string; name: string }>;
+  children: Array<{ id: string; name: string }>;
+  links: EntityLinkEntry[];
+  events: EntityEventEntry[];
+};
+
+const EMPTY_SIZES: ReadonlyMap<string, NodeSize> = new Map();
 
 // 从归属 DAG 收集直接归属；后端已保证 ID 合法且无环。
 export function entityParents(
@@ -30,50 +80,22 @@ export function entityParents(
   return parents;
 }
 
-// 卡片实际高度随内容变化，dagre 按这个估值布点，特别高的卡片可能轻微重叠
-export const ENTITY_W = 280;
-export const ENTITY_H = 170;
-
-// 没有用户拖放过位置的节点用 dagre 自动分层；返回各节点左上角坐标
-export function dagreLayout(
-  entries: Array<[string, EntityT]>,
-  edges: Edge[],
-): Record<string, { x: number; y: number }> {
-  const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: "TB", nodesep: 48, ranksep: 64 });
-  g.setDefaultEdgeLabel(() => ({}));
-  for (const [id] of entries) {
-    g.setNode(id, { width: ENTITY_W, height: ENTITY_H });
-  }
-  for (const edge of edges) g.setEdge(edge.source, edge.target);
-  dagre.layout(g);
-  const out: Record<string, { x: number; y: number }> = {};
-  for (const [id] of entries) {
-    const { x, y } = g.node(id);
-    out[id] = { x: x - ENTITY_W / 2, y: y - ENTITY_H / 2 };
-  }
-  return out;
+function formatExtraProps(
+  extraProps?: Record<string, unknown>,
+): Array<[string, string]> {
+  return Object.entries(extraProps ?? {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => [
+      key,
+      typeof value === "object" && value !== null
+        ? JSON.stringify(value)
+        : String(value),
+    ]);
 }
 
-export function buildEntityView(
-  doc: WeftDoc | null,
-  lang: Lang,
-  dim: "belong" | "link" | null,
-  pick: string | null,
-  saved: Record<string, { x: number; y: number }>,
-) {
-  const t = strings[lang];
-  const entities = Object.entries(doc?.entity ?? {}).sort(([a], [b]) =>
-    a.localeCompare(b),
-  );
-  const nameOf = (id: string) => doc?.entity?.[id]?.id ?? id;
-
-  // entity_link 的引用按 id 对回实体；未知引用取 null 丢弃（后端已校验，防御手滑）
-  const idOf = (r: string) => (doc?.entity && r in doc.entity ? r : null);
-
-  const parentsById = entityParents(doc?.belong_dag);
-
-  // id 的全部上层归属（跨多级）；后端已保证无环，先占位只是防手滑自环
+function createAncestorsLookup(
+  parentsById: ReadonlyMap<string, Set<string>>,
+): (id: string) => Set<string> {
   const cache = new Map<string, Set<string>>();
   const ancestorsOf = (id: string): Set<string> => {
     const hit = cache.get(id);
@@ -86,23 +108,26 @@ export function buildEntityView(
     }
     return set;
   };
+  return ancestorsOf;
+}
 
-  // 出现过的所有归属目标；已不存在的选中项视为无效，不参与过滤
+function buildBelongSections(
+  parentsById: ReadonlyMap<string, Set<string>>,
+  ancestorsOf: (id: string) => Set<string>,
+  nameOf: (id: string) => string,
+) {
   const targetSet = new Set<string>();
   for (const ids of parentsById.values()) {
     for (const id of ids) targetSet.add(id);
   }
-  const activePick =
-    dim === "belong" && pick && targetSet.has(pick) ? pick : null;
 
-  // 根 = 没有上级的实体。归属目标按根分组：多棵互不相连的归属树自动拆成
-  // 多个 section，无需在文档里额外声明；组内按层级深度排（根在前），组间画分隔线
   const rootsOf = (id: string) => {
     const roots = [...ancestorsOf(id)].filter(
       (ancestor) => (parentsById.get(ancestor)?.size ?? 0) === 0,
     );
     return roots.length ? roots : [id];
   };
+
   const byRoot = new Map<string, Array<{ v: string; label: string }>>();
   for (const target of targetSet) {
     for (const root of rootsOf(target)) {
@@ -111,6 +136,7 @@ export function buildEntityView(
       byRoot.set(root, section);
     }
   }
+
   const belongSections = [...byRoot.entries()]
     .sort(([a], [b]) => nameOf(a).localeCompare(nameOf(b)))
     .map(([, section]) =>
@@ -121,81 +147,15 @@ export function buildEntityView(
       ),
     );
 
-  // 关系组筛选同理：组在文件更新后可能消失，失效视为未选
-  const groups = Object.keys(doc?.entity_link ?? {}).sort();
-  const activeLink =
-    dim === "link" && pick && doc?.entity_link && pick in doc.entity_link
-      ? pick
-      : null;
+  return { targetSet, belongSections };
+}
 
-  // 选中组内出现过的实体（解析成 id）
-  const activeLinks = activeLink ? (doc?.entity_link?.[activeLink] ?? []) : [];
-  const linkMembers = new Set<string>();
-  for (const {
-    entities: [a, b],
-  } of activeLinks) {
-    const sa = idOf(a);
-    const sb = idOf(b);
-    if (sa) linkMembers.add(sa);
-    if (sb) linkMembers.add(sb);
-  }
-
-  const filtered = entities.filter(([id]) => {
-    // 选中的实体自己也算命中，层级图里当根展示
-    if (activePick && id !== activePick && !ancestorsOf(id).has(activePick))
-      return false;
-    if (activeLink && !linkMembers.has(id)) return false;
-    return true;
-  });
-
-  // extra_props 的展示：标量直接转字符串，复合值落成 JSON 文本
-  function formatExtraValue(value: unknown): string {
-    return typeof value === "object" && value !== null
-      ? JSON.stringify(value)
-      : String(value);
-  }
-
-  // 同一父实体常被多个子实体共享，缓存其悬浮预览数据避免重复排序与路径转换
-  const previewCache = new Map<string, EntityData>();
-  const entityData = (
-    id: string,
-    e: EntityT,
-    includePreviews = true,
-  ): EntityData => {
-    if (!includePreviews) {
-      const cached = previewCache.get(id);
-      if (cached) return cached;
-    }
-    const built: EntityData = {
-      name: nameOf(id),
-      avatar: e.avatar ? convertFileSrc(e.avatar) : undefined,
-      baseTime:
-        e.base_time_humanizer !== undefined
-          ? `${t.baseTime}: ${e.base_time_humanizer}`
-          : undefined,
-      parents: [...(parentsById.get(id) ?? [])].map((b) => ({
-        id: b,
-        name: nameOf(b),
-        preview:
-          includePreviews && doc?.entity?.[b]
-            ? entityData(b, doc.entity[b], false)
-            : undefined,
-      })),
-      extraProps: Object.entries(e.extra_props ?? {})
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, value]) => [key, formatExtraValue(value)]),
-      description: e.description,
-      belongLabel: t.belongTo,
-    };
-    if (!includePreviews) {
-      previewCache.set(id, built);
-    }
-    return built;
-  };
-
-  // 有归属筛选时按 DAG 的归属连边、dagre 分层；无筛选不连归属线、摆成网格平铺
-  const visibleSet = new Set(filtered.map(([id]) => id));
-  const edges: Edge[] = filtered.flatMap(([id]) =>
+function buildBelongEdges(
+  filtered: ReadonlyArray<[string, EntityT]>,
+  parentsById: ReadonlyMap<string, Set<string>>,
+  visibleSet: ReadonlySet<string>,
+): Edge[] {
+  return filtered.flatMap(([id]) =>
     [...(parentsById.get(id) ?? [])]
       .filter((p) => visibleSet.has(p))
       .map((p) => ({
@@ -209,69 +169,312 @@ export function buildEntityView(
         },
       })),
   );
+}
 
-  // 关系对只在关系筛选视图展示；端点不在当前过滤集时整条隐藏
-  const linkEdges: Edge[] = activeLink
-    ? activeLinks.flatMap(({ entities: [a, b], relations }, i) => {
-        const s = idOf(a);
-        const target = idOf(b);
-        return s &&
-          target &&
-          s !== target &&
-          visibleSet.has(s) &&
-          visibleSet.has(target)
-          ? [
-              {
-                id: `link:${activeLink}:${i}`,
-                source: s,
-                target,
-                label: relations,
-                style: { stroke: "var(--color-primary)", strokeWidth: 1.5 },
-                labelStyle: {
-                  fontSize: 11,
-                  fill: "var(--color-primary)",
-                  fontWeight: 500,
-                },
-                labelBgStyle: {
-                  fill: "var(--color-base-100)",
-                  fillOpacity: 0.92,
-                },
-                labelBgPadding: [6, 3] as [number, number],
-                labelBgBorderRadius: 4,
-              },
-            ]
-          : [];
-      })
-    : [];
-  const auto: Record<string, { x: number; y: number }> = {};
-  if (activePick || activeLink) {
-    // 归属筛选按归属连边分层，关系筛选按关系线分层；两个维度互斥
-    Object.assign(auto, dagreLayout(filtered, activePick ? edges : linkEdges));
-  } else {
-    const cols = Math.ceil(Math.sqrt(filtered.length));
-    filtered.forEach(([id], i) => {
-      auto[id] = {
-        x: (i % cols) * (ENTITY_W + 24),
-        y: Math.floor(i / cols) * (ENTITY_H + 24),
-      };
+type LinkEdgeRecord = {
+  index: number;
+  source: string;
+  target: string;
+  relation: string;
+  pairKey: string;
+  canonicalForward: boolean;
+};
+
+function collectValidLinks(
+  activeLinks: ReadonlyArray<{ entities: [string, string]; relations: string }>,
+  visibleSet: ReadonlySet<string>,
+): LinkEdgeRecord[] {
+  const valid: LinkEdgeRecord[] = [];
+  for (let i = 0; i < activeLinks.length; i++) {
+    const {
+      entities: [source, target],
+      relations,
+    } = activeLinks[i];
+    if (source === target || !visibleSet.has(source) || !visibleSet.has(target))
+      continue;
+    const canonicalForward = source < target;
+    const pairKey = canonicalForward
+      ? `${source}\0${target}`
+      : `${target}\0${source}`;
+    valid.push({
+      index: i,
+      source,
+      target,
+      relation: relations,
+      pairKey,
+      canonicalForward,
     });
   }
-  // 筛选视图始终按 dagre 全量重排（不读、不存用户摆位）；平铺/搜索视图尊重拖过的位置
+  return valid;
+}
+
+function buildLinkEdges(
+  activeLink: string,
+  activeLinks: ReadonlyArray<{ entities: [string, string]; relations: string }>,
+  visibleSet: ReadonlySet<string>,
+): Edge[] {
+  const valid = collectValidLinks(activeLinks, visibleSet);
+  const pairCounts = new Map<string, number>();
+  for (const item of valid) {
+    pairCounts.set(item.pairKey, (pairCounts.get(item.pairKey) ?? 0) + 1);
+  }
+
+  const pairSeen = new Map<string, number>();
+  return valid.map((item) => {
+    const pairIndex = pairSeen.get(item.pairKey) ?? 0;
+    pairSeen.set(item.pairKey, pairIndex + 1);
+    const data: FloatingEdgeData = {
+      label: item.relation,
+      pairIndex,
+      pairTotal: pairCounts.get(item.pairKey) ?? 1,
+      canonicalForward: item.canonicalForward,
+    };
+    return {
+      id: `link:${activeLink}:${item.index}`,
+      type: "floating",
+      source: item.source,
+      target: item.target,
+      data,
+    };
+  });
+}
+
+function collectEntityChildren(
+  entityId: string,
+  parentsById: ReadonlyMap<string, Set<string>>,
+  entityMap: Readonly<Record<string, EntityT>>,
+): Array<{ id: string; name: string }> {
+  const children: Array<{ id: string; name: string }> = [];
+  for (const [childId, pSet] of parentsById.entries()) {
+    const child = entityMap[childId];
+    if (child && pSet.has(entityId)) {
+      children.push({ id: childId, name: child.id });
+    }
+  }
+  return children.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function collectEntityLinks(
+  entityId: string,
+  entityLinks: WeftDoc["entity_link"],
+  entityMap: Readonly<Record<string, EntityT>>,
+): EntityLinkEntry[] {
+  const links: EntityLinkEntry[] = [];
+  const groups = Object.entries(entityLinks ?? {}).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  for (const [group, entries] of groups) {
+    for (let i = 0; i < entries.length; i++) {
+      const {
+        entities: [a, b],
+        relations,
+      } = entries[i];
+      const peerId = a === entityId ? b : b === entityId ? a : null;
+      const peer = peerId ? entityMap[peerId] : undefined;
+      if (peerId && peer) {
+        links.push({
+          key: `${group}:${i}:${a === entityId ? "a" : "b"}`,
+          group,
+          relation: relations,
+          peerId,
+          peerName: peer.id,
+        });
+      }
+    }
+  }
+  return links;
+}
+
+function collectEntityEvents(
+  entityId: string,
+  eventMap: WeftDoc["event"],
+): EntityEventEntry[] {
+  const events: Array<EntityEventEntry & { tick: number }> = [];
+  for (const [id, ev] of Object.entries(eventMap ?? {})) {
+    if (!ev.entities?.includes(entityId)) continue;
+    events.push({
+      id,
+      time: formatTimeRange(ev.start_display, ev.end_display),
+      description: ev.description,
+      tick: ev.start_tick ?? Number.MAX_SAFE_INTEGER,
+    });
+  }
+  events.sort((a, b) => a.tick - b.tick || a.id.localeCompare(b.id));
+  return events.map(({ id, time, description }) => ({ id, time, description }));
+}
+
+export function buildEntityDetail(
+  doc: WeftDoc | null,
+  lang: Lang,
+  entityId: string,
+): EntityDetail | null {
+  const entityMap = doc?.entity;
+  const entity = entityMap?.[entityId];
+  if (!entity || !entityMap) return null;
+
+  const t = strings[lang];
+  const parentsById = entityParents(doc?.belong_dag);
+  const parents = [...(parentsById.get(entityId) ?? [])]
+    .map((id) => ({ id, name: entityMap[id]?.id ?? id }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return {
+    id: entityId,
+    name: entity.id,
+    avatar: entity.avatar ? convertFileSrc(entity.avatar) : undefined,
+    baseTime:
+      entity.base_time_humanizer !== undefined
+        ? `${t.baseTime}: ${entity.base_time_humanizer}`
+        : undefined,
+    description: entity.description,
+    extraProps: formatExtraProps(entity.extra_props),
+    parents,
+    children: collectEntityChildren(entityId, parentsById, entityMap),
+    links: collectEntityLinks(entityId, doc?.entity_link, entityMap),
+    events: collectEntityEvents(entityId, doc?.event),
+  };
+}
+
+function createEntityDataBuilder(
+  entityMap: Readonly<Record<string, EntityT>>,
+  parentsById: ReadonlyMap<string, Set<string>>,
+  t: (typeof strings)[Lang],
+) {
+  const previewCache = new Map<string, EntityData>();
+  const build = (
+    id: string,
+    e: EntityT,
+    includePreviews = true,
+  ): EntityData => {
+    if (!includePreviews) {
+      const cached = previewCache.get(id);
+      if (cached) return cached;
+    }
+    const built: EntityData = {
+      id,
+      name: e.id,
+      avatar: e.avatar ? convertFileSrc(e.avatar) : undefined,
+      baseTime:
+        e.base_time_humanizer !== undefined
+          ? `${t.baseTime}: ${e.base_time_humanizer}`
+          : undefined,
+      parents: [...(parentsById.get(id) ?? [])].map((b) => ({
+        id: b,
+        name: entityMap[b]?.id ?? b,
+        preview:
+          includePreviews && entityMap[b]
+            ? build(b, entityMap[b], false)
+            : undefined,
+      })),
+      extraProps: formatExtraProps(e.extra_props),
+      description: e.description,
+      belongLabel: t.belongTo,
+    };
+    if (!includePreviews) previewCache.set(id, built);
+    return built;
+  };
+  return build;
+}
+
+function collectLinkMembers(
+  activeLinks: ReadonlyArray<{ entities: [string, string] }>,
+  entityMap: Readonly<Record<string, EntityT>>,
+): Set<string> {
+  const members = new Set<string>();
+  for (const {
+    entities: [a, b],
+  } of activeLinks) {
+    if (a in entityMap) members.add(a);
+    if (b in entityMap) members.add(b);
+  }
+  return members;
+}
+
+function filterEntities(
+  entities: ReadonlyArray<[string, EntityT]>,
+  activePick: string | null,
+  activeLink: string | null,
+  ancestorsOf: (id: string) => Set<string>,
+  linkMembers: ReadonlySet<string>,
+): Array<[string, EntityT]> {
+  if (activePick) {
+    return entities.filter(
+      ([id]) => id === activePick || ancestorsOf(id).has(activePick),
+    );
+  }
+  if (activeLink) {
+    return entities.filter(([id]) => linkMembers.has(id));
+  }
+  return [...entities];
+}
+
+export function buildEntityView(
+  doc: WeftDoc | null,
+  lang: Lang,
+  dim: "belong" | "link" | null,
+  pick: string | null,
+  saved: Record<string, Point>,
+) {
+  const t = strings[lang];
+  const entityMap = doc?.entity ?? {};
+  const entities = Object.entries(entityMap).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  const nameOf = (id: string) => entityMap[id]?.id ?? id;
+  const parentsById = entityParents(doc?.belong_dag);
+  const ancestorsOf = createAncestorsLookup(parentsById);
+  const { targetSet, belongSections } = buildBelongSections(
+    parentsById,
+    ancestorsOf,
+    nameOf,
+  );
+
+  const activePick =
+    dim === "belong" && pick && targetSet.has(pick) ? pick : null;
+  const linkGroups = doc?.entity_link ?? {};
+  const groups = Object.keys(linkGroups).sort();
+  const activeLink = dim === "link" && pick && pick in linkGroups ? pick : null;
+  const activeLinks = activeLink ? (linkGroups[activeLink] ?? []) : [];
+
+  const filtered = filterEntities(
+    entities,
+    activePick,
+    activeLink,
+    ancestorsOf,
+    collectLinkMembers(activeLinks, entityMap),
+  );
+
+  const layoutMode: EntityLayoutMode = activePick
+    ? "hierarchy"
+    : activeLink
+      ? "network"
+      : "grid";
+
+  const visibleIds = filtered.map(([id]) => id);
+  const visibleSet = new Set(visibleIds);
+  const edges = activePick
+    ? buildBelongEdges(filtered, parentsById, visibleSet)
+    : activeLink
+      ? buildLinkEdges(activeLink, activeLinks, visibleSet)
+      : [];
+
+  const entityData = createEntityDataBuilder(entityMap, parentsById, t);
+  const auto = computeEntityLayout(layoutMode, visibleIds, edges, EMPTY_SIZES);
   const nodes: EntityFlowNode[] = filtered.map(([id, e]) => ({
     id,
     type: "entity",
-    position: activePick || activeLink ? auto[id] : (saved[id] ?? auto[id]),
+    position: layoutMode === "grid" ? (saved[id] ?? auto[id]) : auto[id],
     data: entityData(id, e),
   }));
 
   return {
     nodes,
-    edges: activePick ? edges : activeLink ? linkEdges : [],
+    edges,
+    layoutMode,
     activePick,
     activeLink,
     belongSections,
     groups,
-    filtered,
     nameOf,
   };
 }

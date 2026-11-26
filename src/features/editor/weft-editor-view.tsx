@@ -16,6 +16,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import type { EditorRevealRequest } from "@/app/workspace-context";
 import type { DiskStatus, DraftStore } from "@/features/document/use-document";
 import {
   type CompileDiagnostic,
@@ -23,7 +24,10 @@ import {
   type Lang,
   strings,
 } from "@/i18n";
-import { createWeftCompletionSource } from "./weft-completion";
+import {
+  createWeftCompletionSource,
+  findDeclarationRange,
+} from "./weft-completion";
 import { weftLanguage } from "./weft-language";
 
 const PATH_SEP_RE = /[\\/]/;
@@ -73,6 +77,7 @@ function WeftEditorViewInner({
   dirty,
   saving,
   diskStatus,
+  revealRequest,
   lang,
   onChange,
   onSave,
@@ -85,6 +90,7 @@ function WeftEditorViewInner({
   dirty: boolean;
   saving: boolean;
   diskStatus: DiskStatus;
+  revealRequest: EditorRevealRequest | null;
   lang: Lang;
   onChange: (next: string) => void;
   onSave: () => Promise<boolean>;
@@ -99,6 +105,7 @@ function WeftEditorViewInner({
   const langRef = useRef(lang);
   langRef.current = lang;
   const [editorView, setEditorView] = useState<EditorView | null>(null);
+  const handledRevealSeqRef = useRef(0);
 
   useEffect(() => {
     if (!editorView) return;
@@ -107,6 +114,26 @@ function WeftEditorViewInner({
       : [];
     editorView.dispatch(setDiagnostics(editorView.state, diagnostics));
   }, [editorView, diagnostic, lang]);
+
+  useEffect(() => {
+    if (!editorView || !revealRequest) return;
+    if (revealRequest.seq === handledRevealSeqRef.current) return;
+    handledRevealSeqRef.current = revealRequest.seq;
+    const range = findDeclarationRange(
+      editorView.state.doc.toString(),
+      revealRequest.kind,
+      revealRequest.name,
+    );
+    if (!range) return;
+    const docLen = editorView.state.doc.length;
+    const from = Math.min(range.from, docLen);
+    const to = Math.min(range.to, docLen);
+    editorView.dispatch({
+      selection: { anchor: from, head: to },
+      effects: EditorView.scrollIntoView(from, { y: "center" }),
+    });
+    editorView.focus();
+  }, [editorView, revealRequest]);
 
   const extensions = useMemo(
     () => [

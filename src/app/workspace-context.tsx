@@ -1,12 +1,20 @@
 import { createContext, useContext } from "react";
 import type { DiskStatus, DraftStore } from "@/features/document/use-document";
+import type { WeftDeclKind } from "@/features/editor/weft-completion";
 import type { CompileDiagnostic, Lang } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
+
+export type EditorRevealRequest = {
+  kind: WeftDeclKind;
+  name: string;
+  seq: number;
+};
 
 export type WorkspaceDocState = {
   path: string;
   doc: WeftDoc | null;
   lang: Lang;
+  revealInEditor: (kind: WeftDeclKind, name: string) => void;
 };
 
 export type WorkspaceEditorState = {
@@ -15,6 +23,7 @@ export type WorkspaceEditorState = {
   dirty: boolean;
   saving: boolean;
   diskStatus: DiskStatus;
+  revealRequest: EditorRevealRequest | null;
   onDraftChange: (next: string) => void;
   onSave: () => Promise<boolean>;
   onForceSave: () => Promise<boolean>;

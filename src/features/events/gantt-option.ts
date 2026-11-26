@@ -424,6 +424,7 @@ export function buildGanttOption({
     yAxis: {
       type: "category",
       inverse: true,
+      triggerEvent: true,
       data: model.events.map((event) => event.id),
       axisLine: {
         show: true,

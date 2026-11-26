@@ -71,16 +71,20 @@ export const EventsGantt = memo(function EventsGantt({
   byId,
   calendarKey,
   t,
+  onSelectEvent,
 }: {
   name: string;
   ids: Events;
   byId: Map<string, EventItem>;
   calendarKey: string;
   t: (typeof strings)[Lang];
+  onSelectEvent: (eventId: string, listName: string) => void;
 }) {
   const model = useMemo(() => buildGanttChartModel(ids, byId), [ids, byId]);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
+  const onSelectEventRef = useRef(onSelectEvent);
+  onSelectEventRef.current = onSelectEvent;
   const expandedBreaksRef = useRef<Set<string>>(new Set());
   const viewRangeRef = useRef<{ min: number; max: number }>({
     min: model.minTick,
@@ -269,12 +273,34 @@ export const EventsGantt = memo(function EventsGantt({
       );
     };
 
+    const handleClick = (params: unknown) => {
+      const click = params as {
+        componentType?: string;
+        dataIndex?: number;
+        value?: unknown;
+      };
+      if (
+        click.componentType === "series" &&
+        typeof click.dataIndex === "number"
+      ) {
+        const event = model.events[click.dataIndex];
+        if (event) onSelectEventRef.current(event.id, name);
+      } else if (
+        click.componentType === "yAxis" &&
+        typeof click.value === "string"
+      ) {
+        onSelectEventRef.current(click.value, name);
+      }
+    };
+
     chart.on("datazoom", handleDataZoom);
     chart.on("axisbreakchanged", handleBreakChanged);
+    chart.on("click", handleClick);
 
     return () => {
       chart?.off("datazoom", handleDataZoom);
       chart?.off("axisbreakchanged", handleBreakChanged);
+      chart?.off("click", handleClick);
       cancelPendingRefresh();
     };
   }, [

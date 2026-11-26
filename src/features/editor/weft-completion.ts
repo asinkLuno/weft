@@ -1007,3 +1007,42 @@ export function createWeftCompletionSource(getLang: () => Lang) {
     };
   };
 }
+
+export type WeftDeclKind = "entity" | "event" | "events" | "link";
+
+/** 定位顶层 `entity` / `event` / `events` / `link` 声明的名称区间（UTF-16 偏移，可直接用于 CodeMirror）。 */
+export function findDeclarationRange(
+  src: string,
+  kind: WeftDeclKind,
+  name: string,
+): { from: number; to: number } | null {
+  const { tokens } = tokenizeWeft(src, 0);
+  let braceDepth = 0;
+  let bracketDepth = 0;
+
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (
+      braceDepth === 0 &&
+      bracketDepth === 0 &&
+      tok.kind === "ident" &&
+      tok.value === kind
+    ) {
+      const nameTok = tokens[i + 1];
+      const followKind = kind === "events" ? "eq" : "lbrace";
+      if (
+        isNameTok(nameTok) &&
+        nameTok.value === name &&
+        tokens[i + 2]?.kind === followKind
+      ) {
+        return { from: nameTok.from, to: nameTok.to };
+      }
+    }
+    if (tok.kind === "lbrace") braceDepth += 1;
+    else if (tok.kind === "rbrace") braceDepth = Math.max(0, braceDepth - 1);
+    else if (tok.kind === "lbracket") bracketDepth += 1;
+    else if (tok.kind === "rbracket")
+      bracketDepth = Math.max(0, bracketDepth - 1);
+  }
+  return null;
+}

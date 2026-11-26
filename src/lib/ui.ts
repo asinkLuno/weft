@@ -33,3 +33,30 @@ export const DOCUMENT_TONE_STYLE: Record<
     label: "badge badge-xs badge-error",
   },
 };
+
+const INITIALS_SPLIT_RE = /[\s·._-]+/u;
+
+export function entityInitials(id: string): string {
+  const parts = id.trim().split(INITIALS_SPLIT_RE).filter(Boolean);
+  if (parts.length > 1) {
+    return parts
+      .slice(0, 2)
+      .map((part) => Array.from(part)[0])
+      .join("")
+      .toLocaleUpperCase();
+  }
+  return Array.from(parts[0] ?? "?")
+    .slice(0, 2)
+    .join("")
+    .toLocaleUpperCase();
+}
+
+export function formatTimeRange(
+  startDisplay?: string,
+  endDisplay?: string,
+): string | undefined {
+  if (startDisplay && endDisplay && endDisplay !== startDisplay) {
+    return `${startDisplay} — ${endDisplay}`;
+  }
+  return startDisplay ?? endDisplay;
+}

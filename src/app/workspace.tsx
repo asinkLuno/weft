@@ -5,18 +5,21 @@ import {
   themeLight,
 } from "dockview-react";
 import { FileText, RotateCcw, X as XIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DiskStatus, DraftStore } from "@/features/document/use-document";
+import type { WeftDeclKind } from "@/features/editor/weft-completion";
 import { type CompileDiagnostic, type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 import { settings } from "@/lib/settings";
 import { DOCUMENT_TONE_STYLE, documentToneOf } from "@/lib/ui";
 import {
+  type EditorRevealRequest,
   WorkspaceDocContext,
   WorkspaceEditorContext,
 } from "./workspace-context";
 import {
   applyDefaultLayout,
+  focusOrOpenPanel,
   panelKindOf,
   panelTitle,
   restoreLayout,
@@ -166,9 +169,22 @@ export function Workspace({
     [schedulePersistLayout],
   );
 
+  const [revealRequest, setRevealRequest] =
+    useState<EditorRevealRequest | null>(null);
+  const revealSeqRef = useRef(0);
+
+  const revealInEditor = useCallback((kind: WeftDeclKind, name: string) => {
+    revealSeqRef.current += 1;
+    setRevealRequest({ kind, name, seq: revealSeqRef.current });
+    const api = apiRef.current;
+    if (api) {
+      focusOrOpenPanel(api, "editor", langRef.current);
+    }
+  }, []);
+
   const docContextValue = useMemo(
-    () => ({ path, doc, lang }),
-    [path, doc, lang],
+    () => ({ path, doc, lang, revealInEditor }),
+    [path, doc, lang, revealInEditor],
   );
 
   const editorContextValue = useMemo(
@@ -178,6 +194,7 @@ export function Workspace({
       dirty,
       saving,
       diskStatus,
+      revealRequest,
       onDraftChange,
       onSave,
       onForceSave,
@@ -189,6 +206,7 @@ export function Workspace({
       dirty,
       saving,
       diskStatus,
+      revealRequest,
       onDraftChange,
       onSave,
       onForceSave,

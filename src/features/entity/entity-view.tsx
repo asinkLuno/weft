@@ -3,6 +3,7 @@ import { ChevronDown, Waypoints } from "lucide-react";
 import {
   Fragment,
   memo,
+  type RefObject,
   useCallback,
   useEffect,
   useMemo,
@@ -10,13 +11,43 @@ import {
   useState,
 } from "react";
 import { EmptyState } from "@/components/empty-state";
+import type { WeftDeclKind } from "@/features/editor/weft-completion";
 import { type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 import { settings } from "@/lib/settings";
 import { EntityCanvas } from "./entity-canvas";
-import { buildEntityView } from "./model";
+import { EntityDetailPanel } from "./entity-detail";
+import type { Point } from "./layout";
+import { buildEntityDetail, buildEntityView } from "./model";
 
-// 维度筛选下拉（faceted filter）：outline 按钮当触发器，选中值显示为 badge
+function useDismissDetails(
+  ref: RefObject<HTMLDetailsElement | null>,
+  open: boolean,
+) {
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(event: PointerEvent) {
+      const el = ref.current;
+      if (el && event.target instanceof Node && !el.contains(event.target)) {
+        el.open = false;
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && ref.current?.open) {
+        ref.current.open = false;
+        event.stopImmediatePropagation();
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [ref, open]);
+}
+
+// 维度筛选下拉（faceted filter）：点击画布/外部或按 Esc 自动收起
 function DimensionFilter({
   label,
   sections,
@@ -28,14 +59,22 @@ function DimensionFilter({
   active: { value: string; label: string } | null;
   onChoose: (v: string) => void;
 }) {
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
+  useDismissDetails(detailsRef, open);
+
   const count = sections.reduce((n, s) => n + s.length, 0);
+  const summaryClass = `btn btn-sm btn-outline ${
+    active ? "border-primary text-primary" : "border-base-300"
+  }${count === 0 ? " btn-disabled" : ""}`;
+
   return (
-    <details className="dropdown">
-      <summary
-        className={`btn btn-sm btn-outline ${
-          active ? "border-primary text-primary" : "border-base-300"
-        }${count === 0 ? " btn-disabled" : ""}`}
-      >
+    <details
+      ref={detailsRef}
+      className="dropdown"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className={summaryClass}>
         {label}
         {active && (
           <span className="badge badge-xs badge-primary">{active.label}</span>
@@ -56,11 +95,9 @@ function DimensionFilter({
                 <button
                   type="button"
                   className={active?.value === v ? "menu-active" : ""}
-                  onClick={(event) => {
+                  onClick={() => {
                     onChoose(v);
-                    event.currentTarget
-                      .closest("details")
-                      ?.removeAttribute("open");
+                    if (detailsRef.current) detailsRef.current.open = false;
                   }}
                 >
                   {text}
@@ -74,88 +111,114 @@ function DimensionFilter({
   );
 }
 
-// memo：flash 等无关状态变化时不重跑排序/布局/建节点
-function EntityViewInner({
-  doc,
-  lang,
-  path,
-}: {
-  doc: WeftDoc | null;
-  lang: Lang;
-  path: string;
-}) {
-  const t = strings[lang];
-  // 两级筛选：先选维度（归属/关系），再选值；dim 为 null 即无筛选
-  const [dim, setDim] = useState<"belong" | "link" | null>(null);
-  const [pick, setPick] = useState<string | null>(null);
-  // 节点摆放松存 settings.json（按文件隔离），不写进用户的 .weft；
-  // 拖动落位写入 ref + store，不触发整个实体图重建（React Flow 内部已持有最新位置）。
+function useSavedLayoutPositions(path: string) {
   const layoutKey = `layout:${path}`;
-  const savedPositionsRef = useRef<Record<string, { x: number; y: number }>>(
-    {},
-  );
-  const [loadedLayoutKey, setLoadedLayoutKey] = useState<string | null>(null);
+  const savedRef = useRef<Record<string, Point>>({});
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    settings
-      .get<Record<string, { x: number; y: number }>>(layoutKey)
-      .then((v) => {
-        if (cancelled) return;
-        savedPositionsRef.current = v ?? {};
-        setLoadedLayoutKey(layoutKey);
-      });
+    settings.get<Record<string, Point>>(layoutKey).then((v) => {
+      if (cancelled) return;
+      savedRef.current = v ?? {};
+      setLoadedKey(layoutKey);
+    });
     return () => {
       cancelled = true;
     };
   }, [layoutKey]);
 
-  const savedReady = loadedLayoutKey === layoutKey;
-  const hasEntities = Object.keys(doc?.entity ?? {}).length > 0;
-
-  const view = useMemo(
-    () =>
-      hasEntities && savedReady
-        ? buildEntityView(doc, lang, dim, pick, savedPositionsRef.current)
-        : null,
-    [doc, lang, dim, pick, hasEntities, savedReady],
-  );
-
-  const handlePersist = useCallback(
-    (id: string, pos: { x: number; y: number }) => {
-      const next = { ...savedPositionsRef.current, [id]: pos };
-      savedPositionsRef.current = next;
+  const persist = useCallback(
+    (id: string, pos: Point) => {
+      const next = { ...savedRef.current, [id]: pos };
+      savedRef.current = next;
       void settings.set(layoutKey, next);
     },
     [layoutKey],
   );
 
+  return {
+    ready: loadedKey === layoutKey,
+    positions: savedRef.current,
+    persist,
+  };
+}
+
+// memo：flash 等无关状态变化时不重跑排序/布局/建节点
+function EntityViewInner({
+  doc,
+  lang,
+  path,
+  onRevealInEditor,
+}: {
+  doc: WeftDoc | null;
+  lang: Lang;
+  path: string;
+  onRevealInEditor: (kind: WeftDeclKind, name: string) => void;
+}) {
+  const t = strings[lang];
+  const [filter, setFilter] = useState<{
+    dim: "belong" | "link";
+    pick: string;
+  } | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [focusTarget, setFocusTarget] = useState<{
+    id: string;
+    seq: number;
+  } | null>(null);
+  const focusSeqRef = useRef(0);
+
+  const savedLayout = useSavedLayoutPositions(path);
+  const hasEntities = Object.keys(doc?.entity ?? {}).length > 0;
+
+  const view = useMemo(
+    () =>
+      hasEntities && savedLayout.ready
+        ? buildEntityView(
+            doc,
+            lang,
+            filter?.dim ?? null,
+            filter?.pick ?? null,
+            savedLayout.positions,
+          )
+        : null,
+    [doc, lang, filter, hasEntities, savedLayout.ready, savedLayout.positions],
+  );
+
+  const selectedDetail = useMemo(
+    () => (selectedId ? buildEntityDetail(doc, lang, selectedId) : null),
+    [doc, lang, selectedId],
+  );
+
+  const handleJumpToEntity = useCallback((id: string) => {
+    setSelectedId(id);
+    focusSeqRef.current += 1;
+    setFocusTarget({ id, seq: focusSeqRef.current });
+  }, []);
+
+  const handleCloseDetail = useCallback(() => setSelectedId(null), []);
+
   if (!hasEntities)
     return <EmptyState icon={Waypoints}>{t.entityEmpty}</EmptyState>;
   if (!view) return <EmptyState>{t.loading}</EmptyState>;
 
-  // 再选已选中的值 = 取消筛选
-  function choose(d: "belong" | "link", v: string) {
-    if (dim === d && pick === v) {
-      setDim(null);
-      setPick(null);
-    } else {
-      setDim(d);
-      setPick(v);
-    }
+  function choose(dim: "belong" | "link", pick: string) {
+    setFilter((prev) =>
+      prev?.dim === dim && prev.pick === pick ? null : { dim, pick },
+    );
   }
+
   const {
     nodes,
     edges,
+    layoutMode,
     activePick,
     activeLink,
     belongSections,
     groups,
-    filtered,
     nameOf,
   } = view;
-  // 过滤集或筛选形态变化时重挂载画布：重新取景，筛选模式才能重排
-  const canvasKey = `${activePick ?? ""}|${activeLink ?? ""}|${filtered.map(([id]) => id).join("|")}`;
+  const canvasKey = `${path}|${activePick ?? ""}|${activeLink ?? ""}`;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
@@ -175,15 +238,31 @@ function EntityViewInner({
           onChoose={(v) => choose("link", v)}
         />
       </div>
-      <div className="min-h-0 flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/60">
-        <EntityCanvas
-          key={canvasKey}
-          initialNodes={nodes}
-          lang={lang}
-          // 归属筛选只连归属线，关系筛选只连关系线，无筛选不连线，两个维度互斥
-          edges={edges}
-          onPersist={activePick || activeLink ? undefined : handlePersist}
-        />
+      <div className="flex min-h-0 flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/60">
+        <div className="min-h-0 min-w-0 flex-1">
+          <EntityCanvas
+            key={canvasKey}
+            initialNodes={nodes}
+            edges={edges}
+            layoutMode={layoutMode}
+            savedPositions={savedLayout.positions}
+            selectedId={selectedDetail?.id ?? null}
+            focusTarget={focusTarget}
+            lang={lang}
+            onSelect={setSelectedId}
+            onJumpToEntity={handleJumpToEntity}
+            onPersist={layoutMode === "grid" ? savedLayout.persist : undefined}
+          />
+        </div>
+        {selectedDetail && (
+          <EntityDetailPanel
+            detail={selectedDetail}
+            lang={lang}
+            onClose={handleCloseDetail}
+            onSelectEntity={handleJumpToEntity}
+            onRevealInEditor={onRevealInEditor}
+          />
+        )}
       </div>
     </div>
   );

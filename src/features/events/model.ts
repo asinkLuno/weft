@@ -1,6 +1,25 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Event, Events, WeftDoc } from "@/lib/document";
+import { formatTimeRange } from "@/lib/ui";
 
 export type EventItem = Event & { id: string };
+
+export type EventEntityRef = {
+  id: string;
+  name: string;
+  avatar?: string;
+  description?: string;
+};
+
+export type EventDetail = {
+  id: string;
+  time?: string;
+  description?: string;
+  entities: EventEntityRef[];
+  lists: string[];
+  prevId?: string;
+  nextId?: string;
+};
 
 export type GanttBreak = {
   start: number;
@@ -40,6 +59,67 @@ export function buildEventsView(doc: WeftDoc | null) {
     .sort(([a], [b]) => a.localeCompare(b));
   const calendarId = doc?.story?.date.id ?? "gregorian";
   return { byId, entries, calendarId };
+}
+
+function resolveEventNeighbors(
+  eventsMap: WeftDoc["events"],
+  eventId: string,
+  activeListName: string | null,
+  lists: readonly string[],
+): { prevId?: string; nextId?: string } {
+  const navListName =
+    activeListName && eventsMap?.[activeListName]?.includes(eventId)
+      ? activeListName
+      : lists[0];
+  const navIds = navListName ? (eventsMap?.[navListName] ?? []) : [];
+  const idx = navIds.indexOf(eventId);
+  if (idx < 0) return {};
+  return {
+    prevId: navIds[idx - 1],
+    nextId: navIds[idx + 1],
+  };
+}
+
+export function buildEventDetail(
+  doc: WeftDoc | null,
+  eventId: string,
+  activeListName: string | null,
+): EventDetail | null {
+  const event = doc?.event?.[eventId];
+  if (!event) return null;
+
+  const entityMap = doc?.entity ?? {};
+  const entities: EventEntityRef[] = (event.entities ?? []).map((id) => {
+    const entity = entityMap[id];
+    return {
+      id,
+      name: entity?.id ?? id,
+      avatar: entity?.avatar ? convertFileSrc(entity.avatar) : undefined,
+      description: entity?.description,
+    };
+  });
+
+  const lists = Object.entries(doc?.events ?? {})
+    .filter(([, ids]) => ids.includes(eventId))
+    .map(([name]) => name)
+    .sort((a, b) => a.localeCompare(b));
+
+  const { prevId, nextId } = resolveEventNeighbors(
+    doc?.events,
+    eventId,
+    activeListName,
+    lists,
+  );
+
+  return {
+    id: eventId,
+    time: formatTimeRange(event.start_display, event.end_display),
+    description: event.description,
+    entities,
+    lists,
+    prevId,
+    nextId,
+  };
 }
 
 /**
