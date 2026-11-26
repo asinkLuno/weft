@@ -8,7 +8,7 @@ pub mod errors;
 pub mod event;
 pub mod format;
 pub mod lint;
-pub mod narrative;
+pub mod events;
 pub mod parser;
 pub mod phase;
 pub mod plugin_loader;

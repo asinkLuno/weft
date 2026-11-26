@@ -181,8 +181,8 @@ pub enum ValidationError {
     DuplicateEntity { entity: String },
     #[error("duplicate event `{event}`")]
     DuplicateEvent { event: String },
-    #[error("duplicate narrative `{narrative}`")]
-    DuplicateNarrative { narrative: String },
+    #[error("duplicate events `{events}`")]
+    DuplicateEvents { events: String },
     #[error("duplicate time anchor `{name}`")]
     DuplicateTimeAnchor { name: String },
     #[error("missing required field `{field}` in {section}")]
@@ -203,8 +203,8 @@ pub enum ValidationError {
     UnknownLinkEntity { group: String, entity: String },
     #[error("event {event} refers to unknown entity {entity}")]
     UnknownEventEntity { event: String, entity: String },
-    #[error("narrative {narrative} refers to unknown event {event}")]
-    UnknownNarrativeEvent { narrative: String, event: String },
+    #[error("events {events} includes unknown event {event}")]
+    UnknownEventsEvent { events: String, event: String },
     #[error("entity {entity} refers to unknown parent {target}")]
     EntityUnknownParent { entity: String, target: String },
     #[error("entity {entity} has a parent cycle")]
@@ -308,7 +308,7 @@ impl ValidationError {
             Self::DuplicateStory => "duplicate-story",
             Self::DuplicateEntity { .. } => "duplicate-entity",
             Self::DuplicateEvent { .. } => "duplicate-event",
-            Self::DuplicateNarrative { .. } => "duplicate-narrative",
+            Self::DuplicateEvents { .. } => "duplicate-events",
             Self::DuplicateTimeAnchor { .. } => "duplicate-time-anchor",
             Self::MissingField { .. } => "missing-field",
             Self::InvalidField { .. } => "invalid-field",
@@ -317,7 +317,7 @@ impl ValidationError {
             Self::TimeCycle { .. } => "time-cycle",
             Self::UnknownLinkEntity { .. } => "unknown-link-entity",
             Self::UnknownEventEntity { .. } => "unknown-event-entity",
-            Self::UnknownNarrativeEvent { .. } => "unknown-narrative-event",
+            Self::UnknownEventsEvent { .. } => "unknown-events-event",
             Self::EntityUnknownParent { .. } => "entity-unknown-parent",
             Self::EntityCycle { .. } => "entity-cycle",
             Self::InvalidAvatarPath { .. } => "invalid-avatar-path",

@@ -16,7 +16,7 @@ export const TOP_KEYWORDS = new Set([
   "entity",
   "link",
   "event",
-  "narrative",
+  "events",
 ]);
 
 export const NAMED_DECL_KEYWORDS = new Set([
@@ -24,7 +24,7 @@ export const NAMED_DECL_KEYWORDS = new Set([
   "entity",
   "link",
   "event",
-  "narrative",
+  "events",
 ]);
 
 // ---- 块与内置字段定义（高亮、补全与格式说明页的单一事实来源） ----

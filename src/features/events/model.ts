@@ -105,7 +105,7 @@ export function ganttScale(events: EventItem[], origin: number): GanttScale {
   };
 }
 
-export function buildNarrativeView(doc: WeftDoc | null) {
+export function buildEventsView(doc: WeftDoc | null) {
   // 事件索引：id → 展示数据
   const events = eventItems(doc);
   const byId = new Map(events.map((event) => [event.id, event]));
@@ -124,8 +124,8 @@ export function buildNarrativeView(doc: WeftDoc | null) {
     endDisplay: last?.end_display ?? last?.start_display,
   };
   const scale = ganttScale(events, bounds.start);
-  const entries = Object.entries(doc?.narrative ?? {})
-    .filter(([, nar]) => nar.length > 0)
+  const entries = Object.entries(doc?.events ?? {})
+    .filter(([, ids]) => ids.length > 0)
     .sort(([a], [b]) => a.localeCompare(b));
   return { byId, bounds, scale, entries };
 }

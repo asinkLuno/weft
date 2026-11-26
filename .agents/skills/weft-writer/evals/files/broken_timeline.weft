@@ -56,4 +56,4 @@ event 回归验收 {
   description = "切流后执行全链路压测与核心指标巡检。"
 }
 
-narrative 迁移主线 = [停机割接]
+events 迁移主线 = [停机割接]

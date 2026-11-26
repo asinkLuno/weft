@@ -1,6 +1,6 @@
 import { memo, type ReactNode, useState } from "react";
 import type { Lang, strings } from "@/i18n";
-import type { Narrative } from "@/lib/document";
+import type { Events } from "@/lib/document";
 import type { EventItem, GanttBounds, GanttScale } from "./model";
 
 function EventHoverContent({ event }: { event: EventItem }) {
@@ -69,23 +69,23 @@ function EventHoverCard({
   );
 }
 
-// 所有叙事线以最早事件的 tick 为原点，共用相对时间范围。
-export const NarrativeGantt = memo(function NarrativeGantt({
+// 所有事件列表以最早事件的 tick 为原点，共用相对时间范围。
+export const EventsGantt = memo(function EventsGantt({
   name,
-  nar,
+  ids,
   byId,
   bounds,
   scale,
   t,
 }: {
   name: string;
-  nar: Narrative;
+  ids: Events;
   byId: Map<string, EventItem>;
   bounds: GanttBounds;
   scale: GanttScale;
   t: (typeof strings)[Lang];
 }) {
-  const events = nar.flatMap((id) => {
+  const events = ids.flatMap((id) => {
     const event = byId.get(id);
     return event ? [event] : [];
   });

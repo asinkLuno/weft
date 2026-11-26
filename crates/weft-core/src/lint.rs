@@ -26,14 +26,14 @@ pub(crate) struct LintContext<'a> {
     pub links: &'a BTreeMap<String, Vec<RawEntityLink>>,
     pub link_group_spans: &'a HashMap<String, ByteSpan>,
     pub events: &'a BTreeMap<String, RawEvent>,
-    pub narratives: &'a BTreeMap<String, (ByteSpan, Vec<(String, ByteSpan)>)>,
+    pub event_lists: &'a BTreeMap<String, (ByteSpan, Vec<(String, ByteSpan)>)>,
 }
 
 pub(crate) fn run_lints(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
     lint_unused_anchors(ctx, diagnostics);
     lint_links(ctx, diagnostics);
     lint_unused_entities(ctx, diagnostics);
-    lint_narratives_and_events(ctx, diagnostics);
+    lint_event_lists_and_events(ctx, diagnostics);
 }
 
 fn lint_unused_anchors(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
@@ -126,13 +126,13 @@ fn lint_unused_entities(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>
     }
 }
 
-fn lint_narratives_and_events(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
+fn lint_event_lists_and_events(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
     let mut referenced_events: HashSet<&str> = HashSet::new();
-    for (name, (name_span, refs)) in ctx.narratives {
+    for (name, (name_span, refs)) in ctx.event_lists {
         if refs.is_empty() {
             diagnostics.push(Diagnostic::warning(
                 "empty-block",
-                format!("narrative `{name}` has no events"),
+                format!("events `{name}` is empty"),
                 Some(*name_span),
             ));
         }
@@ -141,14 +141,14 @@ fn lint_narratives_and_events(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagn
         }
     }
 
-    if ctx.narratives.is_empty() {
+    if ctx.event_lists.is_empty() {
         return;
     }
     for (id, raw) in ctx.events {
         if !referenced_events.contains(id.as_str()) {
             diagnostics.push(Diagnostic::warning(
                 "unreferenced-event",
-                format!("event `{id}` is not included in any narrative"),
+                format!("event `{id}` is not included in any events"),
                 Some(raw.name_span),
             ));
         }

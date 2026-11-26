@@ -3,7 +3,7 @@
 //! 语法为类 HCL 的声明式块语言：
 //! - 顶层声明：`story { ... }`、`time <name> = <expr>`、`entity <name> { ... }`、
 //!   `link <group> { a -- "rel" -- b }`、`event <name> { ... }`、
-//!   `narrative <name> = [...]`
+//!   `events <name> = [...]`
 //! - 标识符支持中文与中点（如 `哈利·波特`），含空格/特殊符号/数字开头时用双引号（如 `"9又3/4站台"`）。
 //! - 表达式支持标量、列表、对象、成员访问（`事件.start`）与 `+` / `-` 时间偏移运算。
 
@@ -46,7 +46,7 @@ pub enum TopItem {
         name: Spanned<String>,
         attrs: Vec<Spanned<Attr>>,
     },
-    Narrative {
+    Events {
         name: Spanned<String>,
         events: Vec<Spanned<String>>,
     },
@@ -460,7 +460,7 @@ where
         kw("entity"),
         kw("link"),
         kw("event"),
-        kw("narrative"),
+        kw("events"),
     ))
 }
 
@@ -671,13 +671,13 @@ where
             |_| Vec::new(),
         )));
 
-    let narrative_decl = kw("narrative")
+    let events_decl = kw("events")
         .ignore_then(name)
         .then_ignore(just(Token::Eq))
         .then(name_list)
         .then_ignore(opt_sep())
-        .map(|(name, events)| TopItem::Narrative { name, events })
-        .labelled("narrative declaration");
+        .map(|(name, events)| TopItem::Events { name, events })
+        .labelled("events declaration");
 
     let top_item = choice((
         story_decl,
@@ -685,7 +685,7 @@ where
         entity_decl,
         link_decl,
         event_decl,
-        narrative_decl,
+        events_decl,
     ))
     .map_with(|item, e| Some((item, e.span())))
     .recover_with(via_parser(

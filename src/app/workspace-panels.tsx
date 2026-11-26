@@ -43,9 +43,9 @@ const EntityView = lazy(() =>
     default: m.EntityView,
   })),
 );
-const NarrativeView = lazy(() =>
-  import("@/features/narrative/narrative-view").then((m) => ({
-    default: m.NarrativeView,
+const EventsView = lazy(() =>
+  import("@/features/events/events-view").then((m) => ({
+    default: m.EventsView,
   })),
 );
 const InfoView = lazy(() =>
@@ -58,7 +58,7 @@ export const PANEL_IDS = [
   "editor",
   "story",
   "entity",
-  "narrative",
+  "events",
   "info",
 ] as const;
 export type PanelId = (typeof PANEL_IDS)[number];
@@ -72,7 +72,7 @@ export const PANEL_META: Record<
   editor: { icon: FileCode2, labelKey: "panelEditor" },
   story: { icon: BookOpen, labelKey: "tab1" },
   entity: { icon: Waypoints, labelKey: "tab2" },
-  narrative: { icon: GitBranch, labelKey: "tab4" },
+  events: { icon: GitBranch, labelKey: "tab4" },
   info: { icon: Info, labelKey: "tabInfo" },
 };
 
@@ -218,12 +218,12 @@ function InfoPanel() {
   );
 }
 
-function NarrativePanel() {
+function EventsPanel() {
   const { doc, lang } = useWorkspaceDoc();
   return (
     <div className="flex h-full min-h-0 flex-col bg-base-100 p-4">
       <Suspense fallback={null}>
-        <NarrativeView doc={doc} lang={lang} />
+        <EventsView doc={doc} lang={lang} />
       </Suspense>
     </div>
   );
@@ -236,7 +236,7 @@ export const WORKSPACE_COMPONENTS: Record<
   editor: EditorPanel,
   story: StoryPanel,
   entity: EntityPanel,
-  narrative: NarrativePanel,
+  events: EventsPanel,
   info: InfoPanel,
 };
 
@@ -440,7 +440,7 @@ export function applyDefaultLayout(api: DockviewApi, lang: Lang): void {
     params: { kind: "story" },
     position: { referencePanel: editorPanel, direction: "right" },
   });
-  for (const kind of ["entity", "narrative", "info"] as const) {
+  for (const kind of ["entity", "events", "info"] as const) {
     api.addPanel({
       id: kind,
       component: kind,

@@ -10,7 +10,7 @@ export type ValidationError =
   | { code: "duplicate_story" }
   | { code: "duplicate_entity"; params: { entity: string } }
   | { code: "duplicate_event"; params: { event: string } }
-  | { code: "duplicate_narrative"; params: { narrative: string } }
+  | { code: "duplicate_events"; params: { events: string } }
   | { code: "duplicate_time_anchor"; params: { name: string } }
   | { code: "missing_field"; params: { section: string; field: string } }
   | {
@@ -22,10 +22,7 @@ export type ValidationError =
   | { code: "time_cycle"; params: { target: string } }
   | { code: "unknown_link_entity"; params: { group: string; entity: string } }
   | { code: "unknown_event_entity"; params: { event: string; entity: string } }
-  | {
-      code: "unknown_narrative_event";
-      params: { narrative: string; event: string };
-    }
+  | { code: "unknown_events_event"; params: { events: string; event: string } }
   | {
       code: "entity_unknown_parent";
       params: { entity: string; target: string };

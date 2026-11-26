@@ -17,7 +17,7 @@ use crate::event::{
     Event, RawEvent, build_events_collecting, check_collecting as check_events_collecting,
 };
 use crate::lint::{LintContext, run_lints};
-use crate::narrative::{Narrative, check_collecting as check_narratives_collecting};
+use crate::events::{Events, check_collecting as check_event_lists_collecting};
 use crate::parser::{
     Attr, Expr, Span, Spanned, TopItem, WeftAst, parse_weft_recover, to_byte_span,
 };
@@ -32,7 +32,7 @@ pub struct WeftDoc {
     pub belong_dag: Vec<BelongNode>,
     pub entity_link: HashMap<String, Vec<EntityLink>>,
     pub event: BTreeMap<String, Event>,
-    pub narrative: BTreeMap<String, Narrative>,
+    pub events: BTreeMap<String, Events>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub calendar_components: Option<usize>,
 }
@@ -182,7 +182,7 @@ fn analyze_ast(
     let mut link_groups: BTreeMap<String, Vec<RawEntityLink>> = BTreeMap::new();
     let mut link_group_spans: HashMap<String, ByteSpan> = HashMap::new();
     let mut event_blocks: BTreeMap<String, (ByteSpan, Vec<Spanned<Attr>>, Span)> = BTreeMap::new();
-    let mut raw_narratives: BTreeMap<String, (ByteSpan, Vec<(String, ByteSpan)>)> =
+    let mut raw_event_lists: BTreeMap<String, (ByteSpan, Vec<(String, ByteSpan)>)> =
         BTreeMap::new();
 
     for (item, item_span) in ast.items {
@@ -257,12 +257,12 @@ fn analyze_ast(
                     event_blocks.insert(name.0, (name_span, attrs, item_span));
                 }
             }
-            TopItem::Narrative { name, events } => {
+            TopItem::Events { name, events } => {
                 let name_span = to_byte_span(name.1);
-                if let Some((first_span, _)) = raw_narratives.get(&name.0) {
+                if let Some((first_span, _)) = raw_event_lists.get(&name.0) {
                     diagnostics.push(
                         Diagnostic::from_validation(
-                            ValidationError::DuplicateNarrative { narrative: name.0 },
+                            ValidationError::DuplicateEvents { events: name.0 },
                             Some(name_span),
                         )
                         .with_related(*first_span, "first defined here"),
@@ -272,7 +272,7 @@ fn analyze_ast(
                         .into_iter()
                         .map(|(ev, sp)| (ev, to_byte_span(sp)))
                         .collect();
-                    raw_narratives.insert(name.0, (name_span, refs));
+                    raw_event_lists.insert(name.0, (name_span, refs));
                 }
             }
         }
@@ -375,7 +375,7 @@ fn analyze_ast(
         diagnostics,
     );
     check_events_collecting(&raw_events, &raw_entities, diagnostics);
-    check_narratives_collecting(&raw_narratives, &raw_events, diagnostics);
+    check_event_lists_collecting(&raw_event_lists, &raw_events, diagnostics);
 
     // 静态 Lint 告警（unused / self-link / duplicate-link / empty-block）。
     run_lints(
@@ -386,7 +386,7 @@ fn analyze_ast(
             links: &link_groups,
             link_group_spans: &link_group_spans,
             events: &raw_events,
-            narratives: &raw_narratives,
+            event_lists: &raw_event_lists,
         },
         diagnostics,
     );
@@ -418,7 +418,7 @@ fn analyze_ast(
         diagnostics,
     );
     let event = build_events_collecting(raw_events, &story.calendar, diagnostics);
-    let narrative: BTreeMap<String, Narrative> = raw_narratives
+    let events: BTreeMap<String, Events> = raw_event_lists
         .into_iter()
         .map(|(name, (_, refs))| (name, refs.into_iter().map(|(id, _)| id).collect()))
         .collect();
@@ -430,7 +430,7 @@ fn analyze_ast(
         belong_dag,
         entity_link,
         event,
-        narrative,
+        events,
         calendar_components,
     })
 }

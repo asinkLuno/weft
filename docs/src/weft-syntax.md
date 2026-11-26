@@ -1,6 +1,6 @@
 # Weft 语言指南
 
-Weft（`.weft`）是故事文档的领域语言。一个文件描述故事的元信息、实体与归属、实体关系、事件和叙事线，由 `weft-core` 编译成 JSON 交给前端。
+Weft（`.weft`）是故事文档的领域语言。一个文件描述故事的元信息、实体与归属、实体关系、事件和事件列表，由 `weft-core` 编译成 JSON 交给前端。
 
 语法是类 HCL 的声明式块语言：顶层声明 + `key = value` 属性 + 注释。不需要分号，属性之间用换行分隔，可选逗号/分号。写完后用 [`weft check` / `weft fmt`](weft-cli.md) 检查与格式化。
 
@@ -20,7 +20,7 @@ event 开场 {
   entities = [主角]
 }
 
-narrative 主线 = [开场]
+events 主线 = [开场]
 ```
 
 `story` 和事件的 `start` 是必填项，其余都可省略。下面的章节按“怎么读源码”的顺序展开。
@@ -33,7 +33,7 @@ narrative 主线 = [开场]
 - **数字**：整数与浮点（`42`、`3.14`）；负号写在表达式里（`-1`），时间分量本身不接受负数。
 - **字面量**：`true`、`false`、`null`。
 - **列表与对象**：`[a, b]`、`{ key = "value" }`。元素间可以用逗号或分号，允许尾逗号。嵌套任意层。
-- **字符串字段必须加引号**：`description`、`avatar`、`date_mode` 只接受字符串字面量，裸标识符会报 `invalid-field: expected a string`。名字列表（`belong_to`、`entities`、`calculable_props`、`narrative`）里的裸标识符才按名字处理。
+- **字符串字段必须加引号**：`description`、`avatar`、`date_mode` 只接受字符串字面量，裸标识符会报 `invalid-field: expected a string`。名字列表（`belong_to`、`entities`、`calculable_props`、`events`）里的裸标识符才按名字处理。
 - **名字不是变量**：裸标识符出现在普通属性里就是字符串，只有时间字段里的名字才按时间引用解析。
 
 ## 顶层声明
@@ -45,7 +45,7 @@ narrative 主线 = [开场]
 | `entity <name> { ... }`           | 实体：人物、团体、地点、道具都算     |
 | `link <group> { ... }`            | 一组实体关系                         |
 | `event <name> { ... }`            | 事件                                 |
-| `narrative <name> = [event, ...]` | 叙事线：有序的事件列表               |
+| `events <name> = [event, ...]`    | 事件列表：有序的事件列表             |
 
 ### story
 
@@ -142,17 +142,17 @@ event 开学宴分院 {
 
 出现表外字段是错误（不像 `entity` 会收进 `extra_props`）。事件名全局唯一。
 
-### narrative
+### events
 
 ```weft
-narrative 哈利的第一学年 = [
+events 哈利的第一学年 = [
   开学宴分院,
   万圣节巨怪入侵,
   地牢最终对决,
 ]
 ```
 
-事件必须已声明；列表顺序就是展示顺序；重复引用同一事件不会报错，但顺序照写。空叙事线是 `empty-block` 警告；如果有叙事线，却没有被任何叙事线引用的事件，会产生 `unreferenced-event` 警告。
+事件必须已声明；列表顺序就是展示顺序；重复引用同一事件不会报错，但顺序照写。空事件列表是 `empty-block` 警告；如果声明了事件列表，却没有被任何事件列表引用的事件，会产生 `unreferenced-event` 警告。
 
 ## 时间表达式
 
@@ -196,10 +196,10 @@ event 后续 {
 | `duplicate-attr`     | 同一块里重复写同一个键                      |
 | `unused-time-anchor` | `time` 锚点声明了但没人用                   |
 | `unused-entity`      | 实体没有被任何事件、关系或 `belong_to` 引用 |
-| `unreferenced-event` | 有叙事线，但事件不在任何叙事线里            |
+| `unreferenced-event` | 声明了事件列表，但事件不在任何事件列表里            |
 | `self-link`          | 关系边两端是同一个实体                      |
 | `duplicate-link`     | 同一组里重复声明同一条边                    |
-| `empty-block`        | 空的 `link` 或 `narrative`                  |
+| `empty-block`        | 空的 `link` 或 `events`                  |
 
 `weft rules` 会打印当前规则清单。
 
@@ -210,7 +210,7 @@ event 后续 {
 - 2 空格缩进；顶层声明之间、属性组之间最多保留一个空行。
 - 同一组属性的 `=` 按显示宽度对齐；空行或独立注释行会把对齐切成新组。行内注释不打断对齐。
 - 列表能放进 88 列就写单行（`[a, b]`），否则每个元素一行并补尾逗号；列表内有注释时强制多行。
-- `narrative` 在不超过 4 个事件且能放进 88 列时写单行，否则多行。
+- `events` 在不超过 4 个事件且能放进 88 列时写单行，否则多行。
 - 含换行的字符串写成 `"""..."""`；单行字符串统一转义。
 - 名字只在必要时加引号；`link` 的关系一律加双引号。
 - 注释（含行尾注释）原样保留；无法无损表达的布局不会被强行改写。
@@ -228,7 +228,7 @@ event 后续 {
 | `unknown-time-ref`                                                         | 时间引用拼错，或引用了不存在的事件/实体/锚点                        |
 | `time-cycle`                                                               | 两个事件互相 `start = 对方.start + ...`                             |
 | `entity-cycle`                                                             | `belong_to` 成环；归属必须是有向无环图                              |
-| `unknown-link-entity` / `unknown-event-entity` / `unknown-narrative-event` | 引用了未声明的名字，诊断通常会给 `did you mean` 建议                |
+| `unknown-link-entity` / `unknown-event-entity` / `unknown-events-event` | 引用了未声明的名字，诊断通常会给 `did you mean` 建议                |
 | `invalid-avatar-path`                                                      | 头像不存在或扩展名不支持                                            |
 | `unknown-calculable-prop`                                                  | 实体用了没在 `story.calculable_props` 注册的 ID                     |
 

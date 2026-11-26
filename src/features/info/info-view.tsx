@@ -73,7 +73,7 @@ event 分院帽晚宴 {
   entities = [哈利·波特]
 }
 
-narrative 第一学年 = [分院帽晚宴]`,
+events 第一学年 = [分院帽晚宴]`,
   en: `story {
   title  = "Harry Potter and the Philosopher's Stone"
   author = "J.K. Rowling"
@@ -108,13 +108,13 @@ event sorting_feast {
   entities = [harry]
 }
 
-narrative year_one = [sorting_feast]`,
+events year_one = [sorting_feast]`,
 };
 
 const copy: Record<Lang, Copy> = {
   zh: {
     intro:
-      "Weft 使用类 HCL 的 .weft 声明式语言描述故事：元信息、时间锚点、实体、实体关系、事件与叙事线。除 story 外其余声明均可省略；保存后视图自动更新。",
+      "Weft 使用类 HCL 的 .weft 声明式语言描述故事：元信息、时间锚点、实体、实体关系、事件与事件列表。除 story 外其余声明均可省略；保存后视图自动更新。",
     topLevelTitle: "顶层声明",
     topLevel: [
       {
@@ -130,8 +130,8 @@ const copy: Record<Lang, Copy> = {
       { name: "link <组名> { ... }", desc: "实体关系组，按图边简写组织" },
       { name: "event <名称> { ... }", desc: "事件定义，支持跨事件时间偏移" },
       {
-        name: "narrative <名称> = [...]",
-        desc: "叙事线：按展示顺序排列的事件 ID 列表",
+        name: "events <名称> = [...]",
+        desc: "事件列表：按展示顺序排列的事件 ID 列表",
       },
     ],
     exampleTitle: "完整示例",
@@ -195,16 +195,16 @@ const copy: Record<Lang, Copy> = {
 }`,
       },
       {
-        title: "narrative",
+        title: "events",
         lead: "有序事件 id 列表，顺序即展示顺序。",
         fields: [],
-        code: "narrative 哈利的第一学年 = [分院帽晚宴, 厄里斯魔镜]",
+        code: "events 哈利的第一学年 = [分院帽晚宴, 厄里斯魔镜]",
       },
     ],
   },
   en: {
     intro:
-      "Weft describes a story in a single HCL-style .weft file: story metadata, time anchors, entities, links, events and narratives. Every declaration except story is optional; views refresh when the file is saved.",
+      "Weft describes a story in a single HCL-style .weft file: story metadata, time anchors, entities, links, events and event lists. Every declaration except story is optional; views refresh when the file is saved.",
     topLevelTitle: "Top-level declarations",
     topLevel: [
       {
@@ -223,8 +223,8 @@ const copy: Record<Lang, Copy> = {
         desc: "Event definition with relative time expressions",
       },
       {
-        name: "narrative <name> = [...]",
-        desc: "Narrative: ordered list of event ids",
+        name: "events <name> = [...]",
+        desc: "Events: ordered list of event ids",
       },
     ],
     exampleTitle: "Full example",
@@ -288,10 +288,10 @@ const copy: Record<Lang, Copy> = {
 }`,
       },
       {
-        title: "narrative",
+        title: "events",
         lead: "Ordered event ids in display order.",
         fields: [],
-        code: "narrative year_one = [sorting_feast, mirror_of_erised]",
+        code: "events year_one = [sorting_feast, mirror_of_erised]",
       },
     ],
   },

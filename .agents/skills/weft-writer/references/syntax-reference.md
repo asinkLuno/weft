@@ -23,25 +23,25 @@ Complete language reference for authoring, debugging, and formatting `.weft` fil
   - **Bare name**: starts with a Unicode alphabetic character or `_`; continues with Unicode alphanumeric characters, `_`, `·`, or `・`. Cannot be `true`, `false`, or `null`.
     - Valid bare: `平台组`, `node_1`, `亚历山大·弗莱明`, `T0`
     - Must be double-quoted: `"api/v2"`, `"2026-Q1"`, `"Phase 1"`, `"502-网关"`, `"true"`
-  - Anywhere a `<name>` is expected (`entity`, `link` group/endpoints/relation, `event`, `narrative`, attribute keys, member access base), either a bare name or a double-quoted string is parsed—**except** referencing a `time` anchor inside a time expression, which only resolves bare identifiers (`Expr::Ident`). Always declare `time` anchors with bare names.
+  - Anywhere a `<name>` is expected (`entity`, `link` group/endpoints/relation, `event`, `events`, attribute keys, member access base), either a bare name or a double-quoted string is parsed—**except** referencing a `time` anchor inside a time expression, which only resolves bare identifiers (`Expr::Ident`). Always declare `time` anchors with bare names.
 - **Strings**:
   - Single-line `"..."` supports escapes `\\`, `\"`, `\n`, `\r`, `\t`.
   - Multi-line `"""..."""` strips the opening/closing boundary newlines and removes common leading indentation across non-empty lines. Ideal for multi-line `description` blocks.
 - **Numbers & literals**:
   - Signed integers (`42`, `-44`), signed floats (`3.14`, `-0.5`), booleans (`true`, `false`), `null`.
 - **Collections & separators**:
-  - **Lists** `[e1, e2, ...]` and **`narrative` lists** `[ev1, ev2, ...]`: elements **must** be separated by `,` (trailing comma allowed).
+  - **Lists** `[e1, e2, ...]` and **`events` lists** `[ev1, ev2, ...]`: elements **must** be separated by `,` (trailing comma allowed).
   - **Attribute blocks / objects** `{ k = v ... }`: attributes are separated by newlines, spaces, or optional `,` / `;`. Keys can be bare or quoted names.
 - **Bare identifier vs quoted string semantics**:
   - Typed string fields (`story.title`, `story.author`, `story.description`, `story.date_mode`, `entity.description`, `entity.avatar`, `event.description`) strictly require string literals (`"..."` / `"""..."""`). Bare identifiers fail with `invalid-field`.
-  - Name lists (`belong_to`, `entities`, `calculable_props`, `narrative`) resolve both bare and quoted names as symbol references.
+  - Name lists (`belong_to`, `entities`, `calculable_props`, `events`) resolve both bare and quoted names as symbol references.
   - In `entity` extra fields (`extra_props`), a bare identifier evaluates to a string value, though quoting strings explicitly is clearer.
 
 ---
 
 ## Top-Level Declarations
 
-Top-level items may appear in any order; forward references across `time`, `entity`, `link`, `event`, and `narrative` are resolved during compilation.
+Top-level items may appear in any order; forward references across `time`, `entity`, `link`, `event`, and `events` are resolved during compilation.
 
 ### `story { ... }` (required, exactly one)
 
@@ -109,13 +109,13 @@ Models a point-in-time occurrence or time interval on the timeline. Names must b
 | `entities` | No | List of entity names | Entities participating in or affected by the event |
 | `description` | No | String | Event details |
 
-### `narrative <name> = [event1, event2, ...]`
+### `events <name> = [event1, event2, ...]`
 
 Declares an ordered list of event names representing a track, reading order, causal slice, or filtered view.
 
-- All listed events must be declared (`unknown-narrative-event`).
-- Repeating an event in a `narrative` is valid.
-- When at least one `narrative` exists in the file, any declared `event` absent from every `narrative` triggers `unreferenced-event`.
+- All listed events must be declared (`unknown-events-event`).
+- Repeating an event inside an `events` list is valid.
+- When at least one `events` declaration exists, any declared `event` absent from every `events` list triggers `unreferenced-event`.
 
 ---
 
@@ -159,7 +159,7 @@ Time expressions are valid only in `time`, `entity.base_time`, `event.start`, an
 
 Because the grammar provides general graph + timeline primitives, any time-indexed domain maps cleanly without changing syntax:
 
-| Domain | `entity` (+ `belong_to` DAG) | `link` | `event` | `narrative` | Optional `.rn` plugin |
+| Domain | `entity` (+ `belong_to` DAG) | `link` | `event` | `events` | Optional `.rn` plugin |
 | --- | --- | --- | --- | --- | --- |
 | **Incident postmortem** | Services, infra clusters, teams, on-call roles | Traffic/data dependencies, escalation paths | Alerts, mitigations, rollbacks, recovery windows | Full timeline, root-cause chain, customer impact | Elapsed incident clock `[Hour, Min, Sec]` |
 | **Project / product roadmap** | Teams, workstreams, modules, deliverables | Blocking / upstream dependencies | Sprints, launches, freezes, milestones | Release track, per-team track, critical path | `[Year, Quarter, Week]` or `[Release, Sprint, Day]` |
@@ -179,7 +179,7 @@ Tip: When an `entity` set mixes heterogeneous types (e.g. teams, services, and r
 | --- | --- |
 | `syntax-error` | Missing `}`/`]`/`=`/`,` in a list, unclosed string, or invalid bare name (quote names with spaces, `/`, `-`, punctuation, or leading digits). |
 | `missing-story` / `duplicate-story` | Ensure exactly one `story { ... }` block exists. |
-| `duplicate-entity` / `duplicate-event` / `duplicate-narrative` / `duplicate-time-anchor` | Rename colliding top-level declarations. |
+| `duplicate-entity` / `duplicate-event` / `duplicate-events` / `duplicate-time-anchor` | Rename colliding top-level declarations. |
 | `missing-field` | Add required `story.title` or `event.start`. |
 | `unknown-field` | Remove unsupported key from `story` or `event` (only `entity` accepts arbitrary extra keys). |
 | `invalid-field` | Wrong value type (most commonly an unquoted bare identifier in a string field, or a time expression in `entity` extra props). |
@@ -187,7 +187,7 @@ Tip: When an `entity` set mixes heterogeneous types (e.g. teams, services, and r
 | `time-cycle` / `time-nesting-too-deep` | Break cyclic time references; keep offset/ref depth `<= 64`. |
 | `event-end-before-start` | Ensure `end` resolves to a tick `>= start`. |
 | `time-nonempty-list` / `time-integer-component` / `too-many-time-components` / `time-component-below-minimum` / `time-offset-out-of-range` | Fix empty/malformed time list, non-integer elements, excess components, values `< minimums[i]` (for `i > 0`), or integer negation overflow. |
-| `unknown-link-entity` / `unknown-event-entity` / `unknown-narrative-event` / `entity-unknown-parent` | Declare the referenced entity/event or fix typo (CLI prints `did you mean` hints). |
+| `unknown-link-entity` / `unknown-event-entity` / `unknown-events-event` / `entity-unknown-parent` | Declare the referenced entity/event or fix typo (CLI prints `did you mean` hints). |
 | `entity-cycle` | Break cycles in `belong_to` chains. |
 | `invalid-avatar-path` | Check relative path from the `.weft` file and image extension (`bmp/gif/ico/jpeg/jpg/png/svg/webp`). |
 | `invalid-calendar-path` / `invalid-calculable-prop-path` / `unknown-calculable-prop` | Verify `.rn` file exists relative to `.weft`, ends with `.rn`, and ID is registered in `story.calculable_props`. |
@@ -200,10 +200,10 @@ Tip: When an `entity` set mixes heterogeneous types (e.g. teams, services, and r
 | `duplicate-attr` | Same key repeated in one block -> remove duplicate. |
 | `unused-time-anchor` | Declared `time` anchor never referenced -> use or delete it. |
 | `unused-entity` | Entity unreferenced by any `event`, `link`, or `belong_to` (checked when the file has `>= 1` event or link) -> connect or remove it. |
-| `unreferenced-event` | File has `>= 1` `narrative`, but this event is in none -> add to a `narrative`. |
+| `unreferenced-event` | File has `>= 1` `events`, but this event is in none -> add it to an `events` list. |
 | `self-link` | `A -- "rel" -- A` -> remove or fix target entity. |
 | `duplicate-link` | Same `(left, relation, right)` edge repeated within a `link` group -> deduplicate. |
-| `empty-block` | Empty `link` block or empty `narrative` list -> populate or delete. |
+| `empty-block` | Empty `link` block or empty `events` list -> populate or delete. |
 
 ---
 
@@ -214,7 +214,7 @@ Tip: When an `entity` set mixes heterogeneous types (e.g. teams, services, and r
 - 2-space indentation; at most one blank line between top-level declarations or attribute groups.
 - Aligns `=` by display width within each contiguous attribute group (blank lines or standalone comment lines start a new group; trailing inline comments do not break alignment).
 - Lists stay single-line if `<= 88` columns and comment-free; otherwise expand one element per line with trailing commas.
-- `narrative` stays single-line when `<= 4` events and `<= 88` columns; otherwise multiline.
+- `events` stays single-line when `<= 4` events and `<= 88` columns; otherwise multiline.
 - Multi-line strings format as `"""..."""`; single-line strings normalize escapes.
 - Names are quoted only when required; `link` relations are always double-quoted.
 - Comments (header, standalone, inline) are preserved.

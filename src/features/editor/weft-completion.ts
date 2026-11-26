@@ -330,7 +330,7 @@ type CursorSnapshot = {
   activeAttr: string | null;
   activeAttrLine: number;
   topTimeAssignLine: number;
-  inNarrativeList: boolean;
+  inEventsList: boolean;
   existingKeys: Set<string>;
   listItems: Set<string>;
   last: Tok | undefined;
@@ -361,7 +361,7 @@ function scanDocument(
   let activeAttr: string | null = null;
   let activeAttrLine = -1;
   let topTimeAssignLine = -1;
-  let inNarrativeList = false;
+  let inEventsList = false;
   const existingKeys = new Set<string>();
   const listItems = new Set<string>();
 
@@ -380,7 +380,7 @@ function scanDocument(
       activeAttr,
       activeAttrLine,
       topTimeAssignLine,
-      inNarrativeList,
+      inEventsList,
       existingKeys: new Set(existingKeys),
       listItems: new Set(listItems),
       last,
@@ -432,7 +432,7 @@ function scanDocument(
         continue;
       }
       if (
-        tok.value === "narrative" &&
+        tok.value === "events" &&
         isNameTok(tokens[i + 1]) &&
         tokens[i + 2]?.kind === "eq" &&
         tokens[i + 3]?.kind === "lbracket"
@@ -440,7 +440,7 @@ function scanDocument(
         consume(tokens[i + 1]);
         consume(tokens[i + 2]);
         consume(tokens[i + 3]);
-        inNarrativeList = true;
+        inEventsList = true;
         listItems.clear();
         bracketDepth = 1;
         i += 3;
@@ -495,7 +495,7 @@ function scanDocument(
     if (tok.kind === "rbracket") {
       bracketDepth = Math.max(0, bracketDepth - 1);
       if (bracketDepth === 0) {
-        inNarrativeList = false;
+        inEventsList = false;
         listItems.clear();
       }
       continue;
@@ -588,8 +588,8 @@ function resolveCursorContext(
       ? { kind: "member", base: s.prev.value }
       : null;
 
-  // 顶层 narrative 列表：`narrative X = [...]`
-  if (s.inNarrativeList && s.bracketDepth === 1) {
+  // 顶层 events 列表：`events X = [...]`
+  if (s.inEventsList && s.bracketDepth === 1) {
     return { kind: "eventRef", exclude: s.listItems };
   }
 
@@ -676,7 +676,7 @@ const COPY = {
     entity: "实体块（人物/团体/地点/道具）",
     link: "实体关系组块",
     event: "事件块",
-    narrative: "叙事线声明",
+    events: "事件列表声明",
     entityType: "实体",
     eventType: "事件",
     anchorType: "时间锚点",
@@ -694,7 +694,7 @@ const COPY = {
       event:
         "event #{1:事件名} {\n  start    = [#{2:1991}, #{3:9}, #{4:1}]\n  entities = [#{0}]\n}",
       link: 'link #{关系组} {\n  #{实体A} -- "#{关系}" -- #{实体B}\n}',
-      narrative: "narrative #{叙事线} = [#{}]",
+      events: "events #{事件列表} = [#{}]",
       time: "time #{1:锚点名} = [#{2:1991}, #{3:9}, #{4:1}]",
     },
   },
@@ -704,7 +704,7 @@ const COPY = {
     entity: "Entity block (person/group/place/item)",
     link: "Grouped entity links",
     event: "Event block",
-    narrative: "Narrative declaration",
+    events: "Events declaration",
     entityType: "entity",
     eventType: "event",
     anchorType: "time anchor",
@@ -722,7 +722,7 @@ const COPY = {
       event:
         "event #{1:event_name} {\n  start    = [#{2:1991}, #{3:9}, #{4:1}]\n  entities = [#{0}]\n}",
       link: 'link #{group} {\n  #{entity_a} -- "#{relation}" -- #{entity_b}\n}',
-      narrative: "narrative #{name} = [#{}]",
+      events: "events #{name} = [#{}]",
       time: "time #{1:anchor_name} = [#{2:1991}, #{3:9}, #{4:1}]",
     },
   },
@@ -756,10 +756,10 @@ function topCompletions(symbols: WeftSymbols, lang: Lang): Completion[] {
       detail: t.link,
       boost: 1,
     }),
-    snippetCompletion(s.narrative, {
-      label: "narrative",
+    snippetCompletion(s.events, {
+      label: "events",
       type: "keyword",
-      detail: t.narrative,
+      detail: t.events,
       boost: 1,
     }),
     snippetCompletion(s.time, {

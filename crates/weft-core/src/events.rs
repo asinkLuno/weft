@@ -1,4 +1,4 @@
-//! 叙事线名称映射到事件 ID 列表，保留文档中的顺序。
+//! 事件列表名称映射到事件 ID 列表，保留文档中的顺序。
 
 use std::collections::BTreeMap;
 
@@ -6,20 +6,20 @@ use crate::errors::{ByteSpan, Diagnostic, ValidationError};
 use crate::event::RawEvent;
 use crate::lint::suggest_similar;
 
-pub type Narrative = Vec<String>;
+pub type Events = Vec<String>;
 
 pub(crate) fn check_collecting(
-    narratives: &BTreeMap<String, (ByteSpan, Vec<(String, ByteSpan)>)>,
-    events: &BTreeMap<String, RawEvent>,
+    event_lists: &BTreeMap<String, (ByteSpan, Vec<(String, ByteSpan)>)>,
+    event_defs: &BTreeMap<String, RawEvent>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let event_names: Vec<&str> = events.keys().map(String::as_str).collect();
-    for (name, (_, refs)) in narratives {
+    let event_names: Vec<&str> = event_defs.keys().map(String::as_str).collect();
+    for (name, (_, refs)) in event_lists {
         for (id, span) in refs {
-            if !events.contains_key(id) {
+            if !event_defs.contains_key(id) {
                 let mut diag = Diagnostic::from_validation(
-                    ValidationError::UnknownNarrativeEvent {
-                        narrative: name.clone(),
+                    ValidationError::UnknownEventsEvent {
+                        events: name.clone(),
                         event: id.clone(),
                     },
                     Some(*span),

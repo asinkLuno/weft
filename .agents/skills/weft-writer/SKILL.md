@@ -16,7 +16,7 @@ description: >
 
 Write syntactically and semantically valid `.weft` documents (and optional `.rn` Rune plugins), then verify and format them with the `weft` CLI until both `check --deny-warnings` and `fmt --check` pass.
 
-Weft is a general declarative HCL-like language for **anything expressible on a timeline**—entities, hierarchical membership (DAG), typed relationships, reusable time coordinates, timestamped point/interval events, and ordered event tracks. Two top-level keywords are named `story` and `narrative` in the grammar; treat them strictly as structural primitives (`story` = document header & plugin registry, `narrative` = named ordered view over events), applicable to any domain.
+Weft is a general declarative HCL-like language for **anything expressible on a timeline**—entities, hierarchical membership (DAG), typed relationships, reusable time coordinates, timestamped point/interval events, and ordered event tracks. Two top-level keywords are named `story` and `events` in the grammar; treat them strictly as structural primitives (`story` = document header & plugin registry, `events` = named ordered view over events), applicable to any domain.
 
 ## Grammar Quick Reference
 
@@ -29,7 +29,7 @@ A `.weft` file is a sequence of top-level declarations in any order, separated b
 | `entity` | `entity <name> { ... }` | **Opt**: `description` (str), `base_time` (time_expr), `avatar` (str image path), `belong_to` (`[entity, ...]`), `calculable_props` (`[prop_id, ...]`), **plus any custom key** | Globally unique name. `belong_to` must be a DAG (multi-parent OK, cycles fail). Arbitrary extra keys pass into `extra_props` (scalars/lists/objects only; no time refs or `+/-`). |
 | `link` | `link <group> { ... }` | Edges: `<entity> -- "<relation>" -- <entity>` | Both endpoints must be declared entities. Same `<group>` across multiple blocks merges edges. |
 | `event` | `event <name> { ... }` | **Req**: `start` (time_expr). **Opt**: `end` (time_expr), `entities` (`[entity, ...]`), `description` (str) | Globally unique name. Must satisfy `end >= start`. Unknown keys fail (`unknown-field`). |
-| `narrative` | `narrative <name> = [ev1, ev2]` | Ordered list of declared event names | Defines an ordered track/view. Repeating an event is allowed. |
+| `events` | `events <name> = [ev1, ev2]` | Ordered list of declared event names | Defines an ordered track/view. Repeating an event is allowed. |
 
 **Time expressions** (valid in `time`, `entity.base_time`, `event.start`, `event.end`):
 - **Absolute**: integer (`2026` == `[2026]`) or non-empty integer list (`[2026, 3, 15, 14, 30, 0]`). Omitted trailing components default to the calendar's `minimums`.
@@ -87,12 +87,12 @@ event 全量切换 {
   description = "确认无异常后完成全量切流。"
 }
 
-narrative 发布主线 = [灰度放量, 全量切换]
+events 发布主线 = [灰度放量, 全量切换]
 ```
 
 ## Workflow & CLI Usage
 
-1. **Map the domain to the 6 primitives**: decide what serves as `entity` (nodes, actors, systems, places, milestones, groups via `belong_to` DAG), `link` (typed relations), `time` (shared coordinate anchors), `event` (timestamped points/intervals), and `narrative` (ordered views/tracks).
+1. **Map the domain to the 6 primitives**: decide what serves as `entity` (nodes, actors, systems, places, milestones, groups via `belong_to` DAG), `link` (typed relations), `time` (shared coordinate anchors), `event` (timestamped points/intervals), and `events` (ordered views/tracks).
 2. **Author `.weft` (and `.rn` plugins if needed)**:
    - When the timeline needs a non-Gregorian coordinate system (fiscal quarters, sprint cycles, elapsed mission/experiment time, historical or custom calendars) or derived entity fields, read [`references/rune-plugins.md`](references/rune-plugins.md) before writing `.rn` scripts so exported signatures, `ctx` shapes, and round-trip invariants match the Rust host.
    - For complete lexical rules, edge cases, time math, domain mappings, formatting rules, or diagnostic codes, read [`references/syntax-reference.md`](references/syntax-reference.md).
@@ -120,14 +120,14 @@ Always run the full check (without `--syntax-only`) before finishing—`--syntax
 
 - **Quote typed string fields**: `title`, `author`, `description`, `avatar`, and `date_mode` strictly require `"..."` or `"""..."""`. Bare identifiers fail with `invalid-field`.
 - **Identifier quoting vs time-anchor refs**: Bare names start with a Unicode letter or `_` and continue with letters, digits, `_`, `·`, `・` (cannot be `true`/`false`/`null`). Names with spaces, `/`, `-`, punctuation, or leading digits must be double-quoted (`entity "api/v2"`, `"api/v2".base_time`). **Exception for `time` anchors**: anchor references only parse bare identifiers, so always give `time` anchors valid bare names (not quoted names).
-- **List vs block separators**: Lists (`[...]`) and `narrative` require commas `,` between items (trailing comma allowed). Attributes inside `{ ... }` separate by newlines or optional `,`/`;`.
+- **List vs block separators**: Lists (`[...]`) and `events` require commas `,` between items (trailing comma allowed). Attributes inside `{ ... }` separate by newlines or optional `,`/`;`.
 - **Extra fields only on `entity`**: Arbitrary keys are allowed on `entity` (merged into `extra_props`, cannot contain time refs or `+`/`-`), whereas `story` and `event` reject any unknown key (`unknown-field`).
 - **Calendar bounds & negative roots**: Built-in Gregorian uses 6 components `[year, month, day, hour, minute, second]` with `minimums = [0, 1, 1, 0, 0, 0]`. The first component has no lower bound (negative values like `[-44, 3, 15]` are valid), while components `i > 0` must be `>= minimums[i]` (`[2026, 0, 1]` fails with `time-component-below-minimum`). Keep `end >= start` and avoid time cycles.
 - **Keep all 7 lint rules clean**:
   - `unused-entity`: When the file has any `event` or `link`, every `entity` must appear in at least one `event.entities`, `link`, or another entity's `belong_to`.
-  - `unreferenced-event`: When any `narrative` exists, include every `event` in at least one `narrative`.
+  - `unreferenced-event`: When any `events` declaration exists, include every `event` in at least one `events` list.
   - `unused-time-anchor`: Only declare `time` anchors that are actually referenced.
-  - `self-link`, `duplicate-link`, `duplicate-attr`, `empty-block`: Avoid self-edges, duplicate edges in a `link` group, repeated keys in a block, and empty `link` or `narrative` declarations.
+  - `self-link`, `duplicate-link`, `duplicate-attr`, `empty-block`: Avoid self-edges, duplicate edges in a `link` group, repeated keys in a block, and empty `link` or `events` declarations.
 
 ## Reference Guides
 

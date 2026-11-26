@@ -215,8 +215,8 @@ impl<'a> Formatter<'a> {
                 self.out.push(' ');
                 self.format_attr_block(attrs, span, 0);
             }
-            TopItem::Narrative { name, events } => {
-                self.out.push_str("narrative ");
+            TopItem::Events { name, events } => {
+                self.out.push_str("events ");
                 self.out.push_str(&format_name(&name.0));
                 self.out.push_str(" = ");
                 self.format_name_list(events, span, 0);

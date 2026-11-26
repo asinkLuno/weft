@@ -32,11 +32,11 @@ export type WeftDoc = {
   >;
   // 事件 ID → 事件定义
   event?: Record<string, Event>;
-  // 叙事线名称 → 事件 ID 列表
-  narrative?: Record<string, Narrative>;
+  // 事件列表名称 → 事件 ID 列表
+  events?: Record<string, Events>;
 };
 
-export type Narrative = string[];
+export type Events = string[];
 
 export type Event = {
   start_time: Phase;
