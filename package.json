@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "yarn generate:errors && vite",
     "build": "yarn generate:errors && tsc && vite build",
+    "prepare:cli": "node scripts/prepare-cli.mjs",
     "generate:errors": "cargo run --quiet -p weft-core --example export_errors && biome format --write src/generated/validation-error.ts",
     "preview": "vite preview",
     "tauri": "tauri",

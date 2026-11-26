@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.guozr.weft",
   "build": {
-    "beforeDevCommand": "yarn dev",
+    "beforeDevCommand": "yarn prepare:cli && yarn dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "yarn build",
+    "beforeBuildCommand": "yarn prepare:cli && yarn build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -28,12 +28,28 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": [
+      "binaries/weft"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/installer-hooks.nsh"
+      },
+      "wix": {
+        "fragmentPaths": [
+          "./windows/cli-path.wxs"
+        ],
+        "componentRefs": [
+          "WeftCliPath"
+        ]
+      }
+    }
   }
 }

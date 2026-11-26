@@ -13,6 +13,7 @@ dist
 dist-ssr
 docs/book
 *.local
+/src-tauri/binaries/
 
 # Editor directories and files
 .vscode/*

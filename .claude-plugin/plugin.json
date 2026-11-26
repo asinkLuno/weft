@@ -6,7 +6,5 @@
     "name": "asinkLuno"
   },
   "repository": "https://github.com/asinkLuno/weft",
-  "skills": [
-    "./.agents/skills/weft-writer"
-  ]
+  "skills": ["./.agents/skills/weft-writer"]
 }

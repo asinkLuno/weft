@@ -5442,22 +5442,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "weft"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sys-locale",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-log",
- "tauri-plugin-opener",
- "tauri-plugin-store",
- "weft-core",
-]
-
-[[package]]
 name = "weft-cli"
 version = "0.1.0"
 dependencies = [
@@ -5482,6 +5466,22 @@ dependencies = [
  "thiserror 2.0.21",
  "ts-rs",
  "unicode-width 0.2.3",
+]
+
+[[package]]
+name = "weft-desktop"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sys-locale",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-log",
+ "tauri-plugin-opener",
+ "tauri-plugin-store",
+ "weft-core",
 ]
 
 [[package]]

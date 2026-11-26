@@ -1,7 +1,11 @@
+#[cfg(unix)]
+mod cli_install;
 mod weft_doc;
 
 use serde_json::json;
 use std::sync::Mutex;
+#[cfg(unix)]
+use tauri::menu::MenuItem;
 use tauri::menu::{CheckMenuItem, Menu, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Wry};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, log::LevelFilter};
@@ -21,9 +25,19 @@ fn build_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<Wry>> {
         .item(&item_zh)
         .item(&item_en)
         .build()?;
-    let settings = SubmenuBuilder::new(app, settings_label)
-        .item(&language)
-        .build()?;
+    let mut settings_builder = SubmenuBuilder::new(app, settings_label).item(&language);
+    #[cfg(unix)]
+    if cli_install::should_show_menu() {
+        let install_cli_label = if zh {
+            "安装 weft 命令行工具…"
+        } else {
+            "Install 'weft' CLI in PATH…"
+        };
+        let item_install_cli =
+            MenuItem::with_id(app, "install-cli", install_cli_label, true, None::<&str>)?;
+        settings_builder = settings_builder.separator().item(&item_install_cli);
+    }
+    let settings = settings_builder.build()?;
     let menu = Menu::default(app)?;
     menu.append(&settings)?;
     Ok(menu)
@@ -90,13 +104,15 @@ pub fn run() {
             app.set_menu(build_menu(app.handle(), &lang)?)?;
             Ok(())
         })
-        .on_menu_event(|app, event| {
-            let lang = match event.id().0.as_str() {
-                "lang-zh" => "zh",
-                "lang-en" => "en",
-                _ => return,
-            };
-            apply_lang(app, lang);
+        .on_menu_event(|app, event| match event.id().0.as_str() {
+            "lang-zh" => apply_lang(app, "zh"),
+            "lang-en" => apply_lang(app, "en"),
+            #[cfg(unix)]
+            "install-cli" => {
+                let lang = current_lang(app);
+                cli_install::trigger_install(app.clone(), lang);
+            }
+            _ => {}
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

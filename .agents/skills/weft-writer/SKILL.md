@@ -31,7 +31,7 @@ Write clean, semantically valid `.weft` story documents (and optional `.rn` Rune
 
 ## Calling the `weft` CLI
 
-Use the bundled wrapper script `scripts/run_weft.sh` (relative to this skill directory). It automatically resolves `weft` in priority order: global `weft` on `PATH` -> `<repo>/target/release/weft` -> `<repo>/target/debug/weft` -> `cargo run -p weft-cli -q --`.
+Use the bundled wrapper script `scripts/run_weft.sh` (relative to this skill directory). It automatically resolves `weft` in priority order: global `weft` on `PATH` -> installed Weft desktop app bundled CLI -> `<repo>/target/release/weft` -> `<repo>/target/debug/weft` -> `cargo run -p weft-cli -q --`.
 
 ```bash
 WEFT="<path-to-this-skill>/scripts/run_weft.sh"

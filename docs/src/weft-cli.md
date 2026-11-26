@@ -4,6 +4,16 @@
 
 ## 安装与调用
 
+### 方式一：随 Weft 桌面端自动附带（推荐）
+
+安装 Weft 桌面端安装包时会自动附带独立的 `weft` CLI 二进制：
+
+- **Windows（`.exe` / `.msi`）**：安装程序会自动将 `weft` 所在目录加入 `PATH`，重开终端即可直接运行 `weft check` / `weft fmt`。
+- **Linux（`.deb` / `.rpm`）**：安装后直接提供 `/usr/bin/weft`。如使用 **AppImage**，在应用菜单点击 **设置 → 安装 weft 命令行工具…**（会复制到 `~/.local/bin/weft`）。
+- **macOS（`.dmg`）**：拖入 `/Applications` 后，在应用菜单点击 **设置 → 安装 weft 命令行工具…**（软链到 `/usr/local/bin/weft`）。
+
+### 方式二：从源码安装或开发期调用
+
 仓库里已经把它设为 workspace 的默认成员，所以在根目录直接跑：
 
 ```bash
@@ -12,7 +22,7 @@ cargo run -- fmt .            # 原地格式化
 cargo run -- rules            # 列出 lint 规则
 ```
 
-也可以装成全局命令：
+也可以用 Cargo 单独装成全局命令（适合 CI 或无桌面环境）：
 
 ```bash
 cargo install --path crates/weft-cli

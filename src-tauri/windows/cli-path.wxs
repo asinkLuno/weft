@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="WeftCliPath" Guid="b7e3c5a2-9d4f-4a1e-8c6b-3f2a1d9e4b7c">
+        <CreateFolder />
+        <Environment
+          Id="WeftCliPathEnv"
+          Name="PATH"
+          Value="[INSTALLDIR]"
+          Permanent="no"
+          Part="last"
+          Action="set"
+          System="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

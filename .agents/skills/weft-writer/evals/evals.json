@@ -31,9 +31,7 @@
       "id": 3,
       "prompt": "附件 `broken_story.weft` 是同事手写的 Weft 草稿，里面有语法错误、语义冲突、lint 警告和格式混乱。请用 weft 工具定位所有问题，把文件修复干净并格式化保存为 `fixed_story.weft`，要求保留原有故事设定和注释，同时做到 `weft check --deny-warnings` 零诊断且 `weft fmt --check` 通过。",
       "expected_output": "A repaired and formatted `fixed_story.weft` preserving the original story setting and comments while passing `weft check --deny-warnings` and `weft fmt --check` with zero diagnostics.",
-      "files": [
-        "evals/files/broken_story.weft"
-      ],
+      "files": ["evals/files/broken_story.weft"],
       "expectations": [
         "`fixed_story.weft` exists and passes `weft check --deny-warnings` with exit code 0 (0 errors, 0 warnings)",
         "`fixed_story.weft` passes `weft fmt --check` with exit code 0",
