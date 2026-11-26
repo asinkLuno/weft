@@ -1,0 +1,59 @@
+# 边境哨站草稿（包含多处待修问题）
+
+story {
+  title = "雪线警报"
+  author = 林雾
+  version = 1
+}
+
+time 暴风雪降临 = [2042, 12, 20, 18]
+time 废弃锚点 = [2042, 1, 1]
+
+entity 9号哨站 {
+  description = "极北冰原前哨站"
+  belong_to = [北方防线]
+}
+
+entity 北方防线 {
+  description = "极北联合防务指挥部"
+  belong_to = [9号哨站]
+}
+
+entity 陈默 {
+  description = "哨站值班通讯官"
+  base_time = [2015, 0, 14]
+  belong_to = [9号哨站]
+  rank = "中尉"
+}
+
+entity 苏岚 {
+  description = "巡逻队领队"
+  belong_to = [9号哨站]
+}
+
+entity 闲置路人 {
+  description = "顺手写上的角色，没在事件和关系里用"
+}
+
+link 哨站关系 {
+  陈默 -- 搭档 -- 苏岚
+  陈默 -- "搭档" -- 苏岚
+  陈默 -- "自问" -- 陈默
+}
+
+event 通讯中断 {
+  start = 暴风雪降临
+  end = 暴风雪降临 - [0, 0, 0, 2]
+  location = "电台室"
+  entities = [陈默, 苏岚, 9号哨站]
+  description = "强磁暴切断了哨站与总部的联络。"
+}
+
+event 紧急出动 {
+  start = 通讯中断.start + [0, 0, 0, 1]
+  end = start + [0, 0, 0, 3]
+  entities = [苏岚, 9号哨站]
+  description = "苏岚带队顶着风雪修复外围中继塔。"
+}
+
+narrative 主线 = [通讯中断]

@@ -3,6 +3,11 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "pi": {
+    "skills": [
+      "./.agents/skills/weft-writer"
+    ]
+  },
   "scripts": {
     "dev": "yarn generate:errors && vite",
     "build": "yarn generate:errors && tsc && vite build",

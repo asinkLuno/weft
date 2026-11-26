@@ -57,6 +57,27 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
+  generate-checksums:
+    needs: publish-tauri
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate and upload SHA256SUMS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION=$(jq -r .version src-tauri/tauri.conf.json)
+          TAG="weft-v${VERSION}"
+          mkdir -p assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -D assets
+          rm -f assets/SHA256SUMS
+          (cd assets && LC_ALL=C sha256sum -- * | sort -k2) > SHA256SUMS
+          gh release upload "$TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+
   deploy-docs:
     needs: publish-tauri
     runs-on: ubuntu-latest

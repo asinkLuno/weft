@@ -1,0 +1,46 @@
+{
+  "skill_name": "weft-writer",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "请用 Weft 语言写一个短篇科幻悬疑故事文档 `story.weft`，背景是 2089 年深海科研站「海渊7号」发生能源中断事故：包含科研站与两个分部（反应堆组、深潜组）的归属结构、4 位科研人员（带出生日期和自定义职位字段，名字中请包含一个带斜杠或数字开头的实体如「7号反应堆」）、人物关系网、1 个基准时间锚点、至少 4 个按相对时间串联的事件（其中至少 2 个带持续时间 `end`），以及 1 条主线叙事线和 1 条调查视角叙事线。确保零错误、零 lint 警告并且格式规范。",
+      "expected_output": "A formatted `story.weft` passing `weft check --deny-warnings` and `weft fmt --check` with all requested entities, DAG belong_to, quoted special-character entity, extra_props, links, time anchor, >=4 chained events (>=2 with end), and 2 narratives.",
+      "files": [],
+      "expectations": [
+        "`story.weft` exists and passes `weft check --deny-warnings` with exit code 0 (0 errors, 0 warnings)",
+        "`story.weft` passes `weft fmt --check` with exit code 0",
+        "Models station, 2 departments (反应堆组, 深潜组), and >=4 researchers with `base_time`, custom role/position `extra_props`, and `belong_to` hierarchy",
+        "Includes a properly double-quoted entity name starting with a digit or containing a slash (e.g. \"7号反应堆\")",
+        "Includes >=1 `time` anchor, >=1 `link` block, >=4 `event` blocks using relative time offsets (>=2 with `end`), and >=2 `narrative` blocks"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "帮我做一个奇幻世界观的 Weft 样例，包含三个文件：1) 自定义历法脚本 `star_calendar.rn`（星历，每年 12 个月，每月固定 25 天，共 300 天，分量 `[年, 月, 日]`，支持中英文格式化）；2) 可计算属性脚本 `generation.rn`，根据实体 `base_time` 的年份判断世代（100年以前为「旧纪元」/Old Era，100-199年为「新纪元」/New Era，200年及以后为「星海纪元」/Star Era；没有 `base_time` 时不写入）；3) `chronicle.weft` 故事文档，启用这个历法和可计算属性，包含至少 3 个实体（其中 1 个刻意不写 `base_time`）、1 组关系、2 个带跨月偏移（如 `+ [0, 0, 40]`）的事件和 1 条叙事线。用 weft 工具跑通中英文校验且零警告、已格式化。",
+      "expected_output": "Three working files (`star_calendar.rn`, `generation.rn`, `chronicle.weft`) that pass `weft check --deny-warnings --lang zh`, `weft check --deny-warnings --lang en`, and `weft fmt --check`, demonstrating calendar round-trip carry/borrow and unit return for missing `base_time`.",
+      "files": [],
+      "expectations": [
+        "`star_calendar.rn`, `generation.rn`, and `chronicle.weft` all exist in outputs",
+        "`chronicle.weft` passes both `weft check --deny-warnings --lang zh` and `weft check --deny-warnings --lang en` with exit code 0",
+        "`chronicle.weft` passes `weft fmt --check` with exit code 0",
+        "`star_calendar.rn` implements a 3-component 12x25=300-day calendar (`meta`, `to_tick`, `from_tick`, bilingual `humanizer`) and `chronicle.weft` has >=2 events with cross-month offsets",
+        "`generation.rn` implements bilingual `<100` / `100-199` / `>=200` classification returning `()` when `base_time` is absent, and `chronicle.weft` has >=3 entities (>=1 without `base_time`), >=1 `link`, and >=1 `narrative`"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "附件 `broken_story.weft` 是同事手写的 Weft 草稿，里面有语法错误、语义冲突、lint 警告和格式混乱。请用 weft 工具定位所有问题，把文件修复干净并格式化保存为 `fixed_story.weft`，要求保留原有故事设定和注释，同时做到 `weft check --deny-warnings` 零诊断且 `weft fmt --check` 通过。",
+      "expected_output": "A repaired and formatted `fixed_story.weft` preserving the original story setting and comments while passing `weft check --deny-warnings` and `weft fmt --check` with zero diagnostics.",
+      "files": [
+        "evals/files/broken_story.weft"
+      ],
+      "expectations": [
+        "`fixed_story.weft` exists and passes `weft check --deny-warnings` with exit code 0 (0 errors, 0 warnings)",
+        "`fixed_story.weft` passes `weft fmt --check` with exit code 0",
+        "Fixes all syntax and semantic errors (quoted \"9号哨站\", quoted `author`, removed `story.version` & `event.location`, broke `belong_to` cycle, fixed `陈默.base_time` month 0, fixed `通讯中断` `end >= start`)",
+        "Resolves all lint warnings (`废弃锚点`, `闲置路人`, duplicate & self links in `哨站关系`, and `紧急出动` added to a `narrative`)",
+        "Preserves original story setting (`雪线警报`, core entities and events) and keeps header comment"
+      ]
+    }
+  ]
+}
