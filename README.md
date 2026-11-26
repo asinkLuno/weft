@@ -4,6 +4,7 @@
 
 - [Weft 语言指南](docs/src/weft-syntax.md)：`.weft` 怎么写。
 - [weft CLI](docs/src/weft-cli.md)：`weft check` 检查、`weft fmt` 格式化。
+- [AI 客户端安装 skill](docs/src/skills.md)：Claude Code / pi 等客户端接入 `weft-writer`。
 
 在仓库根目录运行 `mdbook serve docs` 可本地阅读。
 
