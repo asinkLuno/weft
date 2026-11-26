@@ -2,11 +2,12 @@
 
 `weft-writer` 是一个 [Agent Skills](https://agentskills.io/specification) 技能：模型识别到你要写、改、检查 `.weft` 文档时会自动加载它，按其中的流程调用 `weft check` / `weft fmt`。各客户端复用同一份技能，区别只在于安装方式。
 
-| 客户端      | 安装方式                         |
-| ----------- | -------------------------------- |
-| Claude Code | 插件市场，两行命令               |
-| pi          | `pi install` 装成一个包          |
-| 其他客户端  | 把技能目录放进客户端的技能目录里 |
+| 客户端      | 安装方式                                         |
+| ----------- | ------------------------------------------------ |
+| Claude Code | 插件市场，两行命令                               |
+| pi          | `pi install` 装成一个包                          |
+| Antigravity | `agy plugin install`，本仓库内免安装 |
+| 其他客户端  | 把技能目录放进客户端的技能目录里                 |
 
 ## 前置条件：装好 `weft` 命令
 
@@ -37,6 +38,24 @@ pi remove git:github.com/asinkLuno/weft         # 卸载
 ```
 
 `pi install` 会克隆仓库并装一遍仓库依赖，约 1 分钟。装好后技能随包生效，可用 `/skill:weft-writer` 强制加载，或让模型自行路由。
+
+## Antigravity
+
+Antigravity（App / CLI / IDE）原生支持 [Agent Skills](https://antigravity.google/docs/skills)，技能目录就是本仓库用的 `.agents/skills/`：在本仓库里打开工作区时 `weft-writer` 直接生效，不需要任何安装步骤。
+
+其他项目里用，装成插件（仓库自带 `.antigravity-plugin/plugin.json`，根目录的 `skills/weft-writer` 指向 `.agents/skills/weft-writer`）：
+
+```bash
+agy plugin install https://github.com/asinkLuno/weft
+agy plugin uninstall weft-writer   # 卸载
+```
+
+装好后技能在任意工作区可用，CLI 里还能用 `/weft-writer` 斜杠命令手动触发。不想装插件，也可以只复制技能目录到全局（App、CLI、IDE 共用）：
+
+```bash
+mkdir -p ~/.gemini/config/skills
+cp -r .agents/skills/weft-writer ~/.gemini/config/skills/
+```
 
 ## 其他客户端
 

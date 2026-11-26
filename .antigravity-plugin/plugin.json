@@ -1,0 +1,16 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "weft-writer",
+  "displayName": "Weft Writer",
+  "version": "0.1.0",
+  "description": "Author, validate, and format .weft timeline documents and .rn Rune time-axis/calculable-prop plugins with the weft CLI.",
+  "suggestedPrompts": [
+    "Write a .weft timeline document for my project roadmap",
+    "Run weft check on the current .weft file and fix every diagnostic",
+    "Write a .rn calendar plugin with a custom date_mode"
+  ],
+  "author": {
+    "name": "asinkLuno"
+  },
+  "repository": "https://github.com/asinkLuno/weft"
+}
