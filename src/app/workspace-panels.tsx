@@ -25,6 +25,7 @@ import {
   lazy,
   Suspense,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { EmptyState } from "@/components/empty-state";
@@ -33,26 +34,39 @@ import { type Lang, strings } from "@/i18n";
 import { DOCUMENT_TONE_STYLE, documentToneOf } from "@/lib/ui";
 import { useWorkspaceDoc, useWorkspaceEditor } from "./workspace-context";
 
-const WeftEditorView = lazy(() =>
+const loadWeftEditorView = () =>
   import("@/features/editor/weft-editor-view").then((m) => ({
     default: m.WeftEditorView,
-  })),
-);
-const EntityView = lazy(() =>
+  }));
+const loadEntityView = () =>
   import("@/features/entity/entity-view").then((m) => ({
     default: m.EntityView,
-  })),
-);
-const EventsView = lazy(() =>
+  }));
+const loadEventsView = () =>
   import("@/features/events/events-view").then((m) => ({
     default: m.EventsView,
-  })),
-);
-const InfoView = lazy(() =>
+  }));
+const loadInfoView = () =>
   import("@/features/info/info-view").then((m) => ({
     default: m.InfoView,
-  })),
-);
+  }));
+
+const WeftEditorView = lazy(loadWeftEditorView);
+const EntityView = lazy(loadEntityView);
+const EventsView = lazy(loadEventsView);
+const InfoView = lazy(loadInfoView);
+
+const PANEL_PRELOADERS: Partial<Record<PanelId, () => Promise<unknown>>> = {
+  editor: loadWeftEditorView,
+  entity: loadEntityView,
+  events: loadEventsView,
+  info: loadInfoView,
+};
+
+function preloadPanel(kind: PanelId | null): void {
+  if (!kind) return;
+  void PANEL_PRELOADERS[kind]?.();
+}
 
 export const PANEL_IDS = [
   "editor",
@@ -175,9 +189,8 @@ function StoryPanel() {
   );
 }
 
-// 实体画布需在面板首次可见时挂载才有真实宽高可取景，之后常驻保留视角与筛选状态。
-function EntityPanel({ api }: IDockviewPanelProps) {
-  const { doc, lang, path } = useWorkspaceDoc();
+// 画布类视图（实体图/甘特图）需在面板首次可见时挂载才有真实宽高，之后常驻保留视角与交互状态。
+function useMountWhenVisible(api: IDockviewPanelProps["api"]): boolean {
   const [mountedOnce, setMountedOnce] = useState(() => api.isVisible);
 
   useEffect(() => {
@@ -195,6 +208,13 @@ function EntityPanel({ api }: IDockviewPanelProps) {
       disposable.dispose();
     };
   }, [api, mountedOnce]);
+
+  return mountedOnce;
+}
+
+function EntityPanel({ api }: IDockviewPanelProps) {
+  const { doc, lang, path } = useWorkspaceDoc();
+  const mountedOnce = useMountWhenVisible(api);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-base-100 p-4">
@@ -218,13 +238,17 @@ function InfoPanel() {
   );
 }
 
-function EventsPanel() {
+function EventsPanel({ api }: IDockviewPanelProps) {
   const { doc, lang } = useWorkspaceDoc();
+  const mountedOnce = useMountWhenVisible(api);
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-base-100 p-4">
-      <Suspense fallback={null}>
-        <EventsView doc={doc} lang={lang} />
-      </Suspense>
+      {mountedOnce ? (
+        <Suspense fallback={null}>
+          <EventsView doc={doc} lang={lang} />
+        </Suspense>
+      ) : null}
     </div>
   );
 }
@@ -257,9 +281,25 @@ export function WorkspaceTab({ api, params }: IDockviewPanelHeaderProps) {
   const kind = panelKindOf({ id: api.id, params });
   const Icon = kind ? PANEL_META[kind].icon : null;
   const title = kind ? panelTitle(kind, lang) : (api.title ?? api.id);
+  const tabRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const target = tabRef.current?.parentElement;
+    if (!target || !kind) return;
+    const warm = () => preloadPanel(kind);
+    target.addEventListener("pointerenter", warm, { passive: true });
+    target.addEventListener("focusin", warm, { passive: true });
+    return () => {
+      target.removeEventListener("pointerenter", warm);
+      target.removeEventListener("focusin", warm);
+    };
+  }, [kind]);
 
   return (
-    <div className="inline-flex h-full items-center gap-1.5 select-none">
+    <div
+      ref={tabRef}
+      className="inline-flex h-full items-center gap-1.5 select-none"
+    >
       {Icon && <Icon className="size-3.5 shrink-0" aria-hidden="true" />}
       <span className="whitespace-nowrap text-xs font-medium">{title}</span>
       {kind === "editor" && <EditorDirtyDot />}
@@ -323,6 +363,8 @@ function GroupActionMenu({
             <li key={kind}>
               <button
                 type="button"
+                onPointerEnter={() => preloadPanel(kind)}
+                onFocus={() => preloadPanel(kind)}
                 onClick={(event) => {
                   onSelect(kind);
                   event.currentTarget

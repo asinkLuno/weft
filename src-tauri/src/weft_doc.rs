@@ -7,13 +7,14 @@ use std::{
     hash::{Hash, Hasher},
     io,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_log::log::error;
+use weft_core::calendar::{Calendar, CalendarTick};
 use weft_core::compiler::{self, StoryScriptRefs};
 use weft_core::errors::{CompileDiagnostic, DocumentError};
 use weft_core::plugin_loader::MAX_SCRIPT_BYTES;
@@ -33,6 +34,15 @@ struct DocumentSession {
     disk_base: String,
     // 最近一次编译提取到的外部 .rn 脚本指纹，用于在窗口回到焦点时检测脚本改动。
     script_fingerprints: BTreeMap<PathBuf, ScriptFingerprint>,
+    // 最近一次成功编译的历法实例，供甘特图按需生成非公历刻度与展示文案。
+    calendar: Option<Arc<Calendar>>,
+}
+
+#[derive(Deserialize)]
+pub struct TickSegmentRequest {
+    start: i64,
+    end: i64,
+    count: usize,
 }
 
 #[derive(Default)]
@@ -156,15 +166,17 @@ fn snapshot_script_refs(refs: StoryScriptRefs, base: &Path) -> BTreeMap<PathBuf,
     fingerprints
 }
 
-fn compile_text(
-    app: &AppHandle,
-    content: &str,
-    base: &Path,
-) -> (Option<BTreeMap<PathBuf, ScriptFingerprint>>, CompileResult) {
+type CompiledOutcome = (
+    Option<BTreeMap<PathBuf, ScriptFingerprint>>,
+    Option<Arc<Calendar>>,
+    CompileResult,
+);
+
+fn compile_text(app: &AppHandle, content: &str, base: &Path) -> CompiledOutcome {
     let lang = crate::current_lang(app);
     let (refs, compiled) = compiler::compile_with_scripts(content, base, &lang);
     let scripts = refs.map(|r| snapshot_script_refs(r, base));
-    let result = match compiled {
+    match compiled {
         Ok(doc) => {
             for entity in doc.entity.values() {
                 if let Some(avatar) = &entity.avatar
@@ -173,31 +185,43 @@ fn compile_text(
                     error!("failed to allow avatar {avatar}: {err}");
                     return (
                         scripts,
+                        None,
                         CompileResult::Failed {
                             message: err.to_string(),
                         },
                     );
                 }
             }
-            match serde_json::to_value(doc) {
-                Ok(value) => CompileResult::Ok { doc: value },
+            match serde_json::to_value(&doc) {
+                Ok(value) => (
+                    scripts,
+                    Some(Arc::new(doc.story.calendar)),
+                    CompileResult::Ok { doc: value },
+                ),
                 Err(err) => {
                     error!("failed to serialize compiled document: {err}");
-                    CompileResult::Failed {
-                        message: err.to_string(),
-                    }
+                    (
+                        scripts,
+                        None,
+                        CompileResult::Failed {
+                            message: err.to_string(),
+                        },
+                    )
                 }
             }
         }
-        Err(DocumentError::Validation { error, span }) => CompileResult::Invalid {
-            diagnostic: CompileDiagnostic { error, span },
-        },
+        Err(DocumentError::Validation { error, span }) => (
+            scripts,
+            None,
+            CompileResult::Invalid {
+                diagnostic: CompileDiagnostic { error, span },
+            },
+        ),
         Err(DocumentError::Raw { message }) => {
             error!("document compilation failed: {message}");
-            CompileResult::Failed { message }
+            (scripts, None, CompileResult::Failed { message })
         }
-    };
-    (scripts, result)
+    }
 }
 
 fn write_atomic(path: &Path, content: &str) -> Result<(), DocumentError> {
@@ -220,17 +244,20 @@ fn write_atomic(path: &Path, content: &str) -> Result<(), DocumentError> {
     Ok(())
 }
 
-fn update_script_fingerprints(
+fn update_session_artifacts(
     state: &Mutex<DocumentState>,
     expected_path: &Path,
     scripts: Option<BTreeMap<PathBuf, ScriptFingerprint>>,
+    calendar: Option<Arc<Calendar>>,
 ) {
-    let Some(scripts) = scripts else {
-        return;
-    };
     let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(active) = st.active.as_mut().filter(|s| s.path == expected_path) {
-        active.script_fingerprints = scripts;
+        if let Some(scripts) = scripts {
+            active.script_fingerprints = scripts;
+        }
+        if let Some(calendar) = calendar {
+            active.calendar = Some(calendar);
+        }
     }
 }
 
@@ -250,13 +277,14 @@ pub fn open_document(
         );
         DocumentError::raw(err)
     })?;
-    let (scripts, compile) = compile_text(&app, &content, &parent);
+    let (scripts, calendar, compile) = compile_text(&app, &content, &parent);
     let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
     st.active = Some(DocumentSession {
         path: resolved_path,
         parent,
         disk_base: content.clone(),
         script_fingerprints: scripts.unwrap_or_default(),
+        calendar,
     });
     Ok(OpenDocumentResult { content, compile })
 }
@@ -276,8 +304,8 @@ pub fn compile_document(
             .ok_or_else(|| DocumentError::raw("no document is open"))?;
         (active.path.clone(), active.parent.clone())
     };
-    let (scripts, compile) = compile_text(&app, &content, &parent);
-    update_script_fingerprints(state.inner(), &path, scripts);
+    let (scripts, calendar, compile) = compile_text(&app, &content, &parent);
+    update_session_artifacts(state.inner(), &path, scripts, calendar);
     Ok(compile)
 }
 
@@ -365,14 +393,14 @@ pub fn reload_document(
         error!("failed to reload document {}: {err}", path.display());
         DocumentError::raw(err)
     })?;
-    let (scripts, compile) = compile_text(&app, &content, &parent);
-    let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(active) = st.active.as_mut().filter(|s| s.path == path) {
-        active.disk_base = content.clone();
-        if let Some(scripts) = scripts {
-            active.script_fingerprints = scripts;
+    let (scripts, calendar, compile) = compile_text(&app, &content, &parent);
+    {
+        let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(active) = st.active.as_mut().filter(|s| s.path == path) {
+            active.disk_base = content.clone();
         }
     }
+    update_session_artifacts(state.inner(), &path, scripts, calendar);
     Ok(OpenDocumentResult { content, compile })
 }
 
@@ -417,9 +445,46 @@ pub fn save_document(
         (active.path.clone(), active.parent.clone())
     };
 
-    let (scripts, compile) = compile_text(&app, &content, &parent);
-    update_script_fingerprints(state.inner(), &path, scripts);
+    let (scripts, calendar, compile) = compile_text(&app, &content, &parent);
+    update_session_artifacts(state.inner(), &path, scripts, calendar);
     Ok(SaveResult::Saved { content, compile })
+}
+
+/// 为前端甘特图批量生成非公历时间轴刻度及任意额外 tick 的展示文案。
+#[tauri::command]
+pub fn calendar_axis_ticks(
+    state: State<'_, Mutex<DocumentState>>,
+    segments: Vec<TickSegmentRequest>,
+    extra_ticks: Vec<i64>,
+) -> Result<Vec<CalendarTick>, DocumentError> {
+    const MAX_SEGMENTS: usize = 32;
+    const MAX_EXTRA_TICKS: usize = 128;
+
+    let calendar = {
+        let st = state.lock().unwrap_or_else(|p| p.into_inner());
+        st.active.as_ref().and_then(|s| s.calendar.clone())
+    };
+    let Some(calendar) = calendar else {
+        return Ok(Vec::new());
+    };
+    let mut by_tick: BTreeMap<i64, String> = BTreeMap::new();
+    for seg in segments.into_iter().take(MAX_SEGMENTS) {
+        for item in calendar.axis_ticks(seg.start, seg.end, seg.count)? {
+            by_tick.entry(item.tick).or_insert(item.label);
+        }
+    }
+    let missing_extras: Vec<i64> = extra_ticks
+        .into_iter()
+        .take(MAX_EXTRA_TICKS)
+        .filter(|tick| !by_tick.contains_key(tick))
+        .collect();
+    for item in calendar.humanize_ticks(&missing_extras)? {
+        by_tick.entry(item.tick).or_insert(item.label);
+    }
+    Ok(by_tick
+        .into_iter()
+        .map(|(tick, label)| CalendarTick { tick, label })
+        .collect())
 }
 
 #[tauri::command]

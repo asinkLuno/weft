@@ -1,131 +1,215 @@
-import type { Event, WeftDoc } from "@/lib/document";
-export type EventItem = Event & { id: string; title: string };
+import type { Event, Events, WeftDoc } from "@/lib/document";
 
-export function eventItems(doc: WeftDoc | null): EventItem[] {
-  return Object.entries(doc?.event ?? {})
-    .map(([id, event]) => ({
-      ...event,
-      id,
-      title: id,
-    }))
-    .sort((a, b) => (a.start_tick ?? 0) - (b.start_tick ?? 0));
-}
+export type EventItem = Event & { id: string };
 
-export type GanttBounds = {
+export type GanttBreak = {
   start: number;
   end: number;
+};
+
+export type TickSegmentRequest = {
+  start: number;
+  end: number;
+  count: number;
+};
+
+export type CalendarTick = {
+  tick: number;
+  label: string;
+};
+
+export type GanttChartModel = {
+  events: EventItem[];
+  minTick: number;
+  maxTick: number;
   startDisplay?: string;
   endDisplay?: string;
+  breaks: GanttBreak[];
+  initialLabels: Map<number, string>;
 };
 
-export type GanttScale = {
-  position: (tick: number) => number;
-  breaks: Array<{ start: number; end: number; label: string }>;
-};
+export function buildEventsView(doc: WeftDoc | null) {
+  const byId = new Map<string, EventItem>(
+    Object.entries(doc?.event ?? {}).map(([id, event]) => [
+      id,
+      { ...event, id },
+    ]),
+  );
+  const entries = Object.entries(doc?.events ?? {})
+    .filter(([, ids]) => ids.length > 0)
+    .sort(([a], [b]) => a.localeCompare(b));
+  const calendarId = doc?.story?.date.id ?? "gregorian";
+  return { byId, entries, calendarId };
+}
 
-export function ganttScale(events: EventItem[], origin: number): GanttScale {
+/**
+ * 为单个事件列表构造 ECharts 6 甘特图所需的坐标边界、断轴区间与已知刻度文案。
+ * 事件展示顺序保持作者在 `events` 列表里声明的顺序。
+ */
+export function buildGanttChartModel(
+  ids: Events,
+  byId: Map<string, EventItem>,
+): GanttChartModel {
+  const events = ids.flatMap((id) => {
+    const event = byId.get(id);
+    return event ? [event] : [];
+  });
+
+  const initialLabels = new Map<number, string>();
   const intervals: Array<{ start: number; end: number }> = [];
-  const labels = new Map<number, string>();
+  let first: EventItem | undefined;
+  let last: EventItem | undefined;
+
   for (const event of events) {
     if (event.start_tick === undefined) continue;
-    const start = event.start_tick - origin;
-    const end = (event.end_tick ?? event.start_tick) - origin;
-    labels.set(start, event.start_display ?? "");
-    labels.set(end, event.end_display ?? event.start_display ?? "");
+    const start = event.start_tick;
+    const end = event.end_tick ?? start;
+    if (event.start_display) {
+      initialLabels.set(start, event.start_display);
+    }
+    if (event.end_tick !== undefined && event.end_display) {
+      initialLabels.set(event.end_tick, event.end_display);
+    }
+    if (!first || start < (first.start_tick ?? 0)) {
+      first = event;
+    }
+    if (!last || end > (last.end_tick ?? last.start_tick ?? 0)) {
+      last = event;
+    }
     intervals.push({ start, end });
   }
+
+  const rawMin = first?.start_tick ?? 0;
+  const rawMax = last?.end_tick ?? last?.start_tick ?? rawMin;
+  const totalSpan = rawMax - rawMin;
+
+  if (totalSpan <= 0) {
+    return {
+      events,
+      minTick: rawMin - 1,
+      maxTick: rawMax + 1,
+      startDisplay: first?.start_display,
+      endDisplay: last?.end_display ?? last?.start_display,
+      breaks: [],
+      initialLabels,
+    };
+  }
+
   intervals.sort((a, b) => a.start - b.start);
-  const merged: typeof intervals = [];
+  const merged: Array<{ start: number; end: number }> = [];
   for (const interval of intervals) {
-    const previous = merged[merged.length - 1];
-    if (previous && interval.start <= previous.end) {
-      previous.end = Math.max(previous.end, interval.end);
+    const prev = merged[merged.length - 1];
+    if (prev && interval.start <= prev.end) {
+      prev.end = Math.max(prev.end, interval.end);
     } else {
       merged.push({ ...interval });
     }
   }
-  const activeTicks = merged.reduce(
-    (sum, interval) => sum + interval.end - interval.start,
+
+  const activeSpan = merged.reduce(
+    (sum, interval) => sum + (interval.end - interval.start),
     0,
   );
-  const gaps = merged
-    .slice(1)
-    .map((interval, index) => interval.start - merged[index].end);
-  // 所有空白合计最多占活动时长的 15%；只有时间点时保留相对间距。
-  const gapLimit =
-    activeTicks > 0 && gaps.length > 0
-      ? (activeTicks * 0.15) / gaps.length
-      : Number.POSITIVE_INFINITY;
-  const segments: Array<{
-    start: number;
-    end: number;
-    offset: number;
-    length: number;
-  }> = [];
-  const compressed: Array<{ start: number; end: number; label: string }> = [];
-  let total = 0;
-  for (const [index, interval] of merged.entries()) {
-    if (index > 0) {
-      const start = merged[index - 1].end;
-      const end = interval.start;
-      const length = Math.min(end - start, gapLimit);
-      segments.push({ start, end, offset: total, length });
-      if (length < end - start) {
-        compressed.push({
-          start: total,
-          end: total + length,
-          label: `${labels.get(start)} – ${labels.get(end)}`,
-        });
-      }
-      total += length;
+  const gaps: Array<{ start: number; end: number; length: number }> = [];
+  for (let i = 1; i < merged.length; i += 1) {
+    const start = merged[i - 1].end;
+    const end = merged[i].start;
+    if (end > start) {
+      gaps.push({ start, end, length: end - start });
     }
-    const length = interval.end - interval.start;
-    segments.push({ ...interval, offset: total, length });
-    total += length;
   }
-  const span = Math.max(total, 1);
+
+  // 仅折叠占比显著的大段空白，避免把正常分布的密集事件切得支离破碎。
+  const foldedGaps = gaps.filter(
+    (gap) =>
+      gap.length >= totalSpan * 0.35 ||
+      (gap.length >= totalSpan * 0.25 &&
+        activeSpan > 0 &&
+        activeSpan < totalSpan * 0.05 &&
+        gaps.length <= 4),
+  );
+
+  const foldedTotal = foldedGaps.reduce((sum, gap) => sum + gap.length, 0);
+  const unbrokenSpan = Math.max(totalSpan - foldedTotal, 0);
+  const referenceSpan =
+    unbrokenSpan > 0 ? unbrokenSpan : Math.max(1, Math.round(totalSpan * 0.02));
+
+  // 在断轴两端保留小段留白，避免锯齿贴到事件条/里程碑点上。
+  const breaks: GanttBreak[] = [];
+  for (const gap of foldedGaps) {
+    const maxInset = Math.floor(gap.length * 0.4);
+    const desiredInset = Math.max(1, Math.round(referenceSpan * 0.06));
+    const inset = Math.min(desiredInset, maxInset);
+    const start = gap.start + inset;
+    const end = gap.end - inset;
+    if (end > start) {
+      breaks.push({ start, end });
+    }
+  }
+
+  const edgePad = Math.max(1, Math.round(referenceSpan * 0.04));
+
   return {
-    position: (tick) => {
-      const relative = tick - origin;
-      const segment = segments.find(
-        (segment) => relative >= segment.start && relative <= segment.end,
-      );
-      if (!segment) return relative <= 0 ? 0 : 100;
-      const fraction =
-        segment.end > segment.start
-          ? (relative - segment.start) / (segment.end - segment.start)
-          : 0;
-      return ((segment.offset + fraction * segment.length) / span) * 100;
-    },
-    breaks: compressed.map((gap) => ({
-      ...gap,
-      start: (gap.start / span) * 100,
-      end: (gap.end / span) * 100,
-    })),
+    events,
+    minTick: rawMin - edgePad,
+    maxTick: rawMax + edgePad,
+    startDisplay: first?.start_display,
+    endDisplay: last?.end_display ?? last?.start_display,
+    breaks,
+    initialLabels,
   };
 }
 
-export function buildEventsView(doc: WeftDoc | null) {
-  // 事件索引：id → 展示数据
-  const events = eventItems(doc);
-  const byId = new Map(events.map((event) => [event.id, event]));
-  let first: EventItem | undefined;
-  let last: EventItem | undefined;
-  for (const event of events) {
-    if (event.start_tick === undefined) continue;
-    if (!first || event.start_tick < (first.start_tick ?? 0)) first = event;
-    const end = event.end_tick ?? event.start_tick;
-    if (!last || end > (last.end_tick ?? last.start_tick ?? 0)) last = event;
+/**
+ * 将当前可视区间按未展开的断轴切分成若干连续可视段，按长度比例分配刻度预算。
+ */
+export function buildTickSegments(
+  viewMin: number,
+  viewMax: number,
+  activeBreaks: GanttBreak[],
+  totalBudget: number,
+): TickSegmentRequest[] {
+  const start = Math.floor(viewMin);
+  const end = Math.ceil(viewMax);
+  if (end <= start) {
+    return [{ start, end: start, count: 1 }];
   }
-  const bounds: GanttBounds = {
-    start: first?.start_tick ?? 0,
-    end: last?.end_tick ?? last?.start_tick ?? 0,
-    startDisplay: first?.start_display,
-    endDisplay: last?.end_display ?? last?.start_display,
-  };
-  const scale = ganttScale(events, bounds.start);
-  const entries = Object.entries(doc?.events ?? {})
-    .filter(([, ids]) => ids.length > 0)
-    .sort(([a], [b]) => a.localeCompare(b));
-  return { byId, bounds, scale, entries };
+
+  const clipped: Array<{ start: number; end: number }> = [];
+  for (const brk of activeBreaks) {
+    if (brk.end <= start || brk.start >= end) continue;
+    const clippedStart = Math.max(start, Math.floor(brk.start));
+    const clippedEnd = Math.min(end, Math.ceil(brk.end));
+    if (clippedEnd > clippedStart) {
+      clipped.push({ start: clippedStart, end: clippedEnd });
+    }
+  }
+  clipped.sort((a, b) => a.start - b.start);
+
+  const rawSegments: Array<{ start: number; end: number }> = [];
+  let cursor = start;
+  for (const brk of clipped) {
+    if (brk.start > cursor) {
+      rawSegments.push({ start: cursor, end: brk.start });
+    }
+    cursor = Math.max(cursor, brk.end);
+  }
+  if (cursor < end) {
+    rawSegments.push({ start: cursor, end });
+  }
+  if (rawSegments.length === 0) {
+    return [{ start, end, count: Math.max(2, totalBudget) }];
+  }
+
+  const visibleSpan = rawSegments.reduce(
+    (sum, seg) => sum + Math.max(1, seg.end - seg.start),
+    0,
+  );
+  const budget = Math.max(rawSegments.length * 2, totalBudget);
+
+  return rawSegments.map((seg) => {
+    const weight = Math.max(1, seg.end - seg.start) / visibleSpan;
+    const count = Math.max(2, Math.round(budget * weight));
+    return { start: seg.start, end: seg.end, count };
+  });
 }

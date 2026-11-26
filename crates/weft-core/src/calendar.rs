@@ -59,6 +59,13 @@ pub struct Moment {
     pub precision: usize,
 }
 
+/// 供时间轴标尺使用的历法刻度点。
+#[derive(Debug, Clone, Serialize)]
+pub struct CalendarTick {
+    pub tick: i64,
+    pub label: String,
+}
+
 impl Calendar {
     pub fn builtin_gregorian(lang: &str) -> Result<Self, DocumentError> {
         Self::from_source(BUILTIN_GREGORIAN_SRC, BUILTIN_GREGORIAN_NAME, lang)
@@ -211,10 +218,209 @@ impl Calendar {
     }
 
     pub fn humanize(&self, moment: &Moment) -> Result<String, DocumentError> {
+        let mut vm = self.vm();
+        self.humanize_with(&mut vm, &moment.values, moment.precision)
+    }
+
+    /// 批量将任意 tick 转换为当前历法的展示文案，复用同一 VM。
+    pub fn humanize_ticks(&self, ticks: &[i64]) -> Result<Vec<CalendarTick>, DocumentError> {
+        let mut vm = self.vm();
+        let mut out = Vec::with_capacity(ticks.len());
+        for &tick in ticks {
+            out.push(self.humanize_tick_with(&mut vm, tick)?);
+        }
+        Ok(out)
+    }
+
+    /// 为时间轴区间 `[start_tick, end_tick]` 生成贴合当前历法边界的刻度点；
+    /// 优先按历法分量（如年/月/日/时）步进，无法推进时自动退化为均匀数值刻度。
+    pub fn axis_ticks(
+        &self,
+        start_tick: i64,
+        end_tick: i64,
+        target_count: usize,
+    ) -> Result<Vec<CalendarTick>, DocumentError> {
+        if target_count == 0 {
+            return Ok(Vec::new());
+        }
+        let mut vm = self.vm();
+        if end_tick <= start_tick {
+            return Ok(vec![self.humanize_tick_with(&mut vm, start_tick)?]);
+        }
+
+        let span = i128::from(end_tick) - i128::from(start_tick);
+        let target = target_count.clamp(2, 24);
+        if let Some((level, unit_span)) =
+            self.detect_tick_level(&mut vm, start_tick, span, target)?
+        {
+            let approx_units = (span / unit_span).max(1);
+            let stride = nice_stride(approx_units, target as i128);
+            let ticks = self.step_calendar_ticks(&mut vm, start_tick, end_tick, level, stride)?;
+            if ticks.len() >= 2 {
+                return Ok(ticks);
+            }
+        }
+
+        self.uniform_axis_ticks(&mut vm, start_tick, end_tick, span, target)
+    }
+
+    // 探测各分量在区间中点处的大致刻度跨度，选出最粗且步数足够的分量层级。
+    fn detect_tick_level(
+        &self,
+        vm: &mut Vm,
+        start_tick: i64,
+        span: i128,
+        target: usize,
+    ) -> Result<Option<(usize, i128)>, DocumentError> {
+        let mid_tick = start_tick.saturating_add((span / 2) as i64);
+        let mid_vals = self.from_tick_with(vm, mid_tick)?;
+        let min_units = i128::from((target / 2).max(2) as u64);
+
+        let mut finest: Option<(usize, i128)> = None;
+        for level in 0..self.components {
+            let mut base = mid_vals.clone();
+            self.truncate_after_level(&mut base, level);
+            let mut next = base.clone();
+            let Some(incremented) = next[level].checked_add(1) else {
+                continue;
+            };
+            next[level] = incremented;
+            let (Ok(t0), Ok(t1)) = (
+                self.to_tick_with(vm, &base),
+                self.to_tick_with(vm, &next),
+            ) else {
+                continue;
+            };
+            let unit_span = i128::from(t1) - i128::from(t0);
+            if unit_span <= 0 {
+                continue;
+            }
+            if span / unit_span >= min_units {
+                return Ok(Some((level, unit_span)));
+            }
+            finest = Some((level, unit_span));
+        }
+        Ok(finest)
+    }
+
+    fn step_calendar_ticks(
+        &self,
+        vm: &mut Vm,
+        start_tick: i64,
+        end_tick: i64,
+        level: usize,
+        stride: i64,
+    ) -> Result<Vec<CalendarTick>, DocumentError> {
+        let mut cur = self.from_tick_with(vm, start_tick)?;
+        self.truncate_after_level(&mut cur, level);
+        if stride > 1 {
+            let origin = self.minimums[level];
+            let delta = i128::from(cur[level]) - i128::from(origin);
+            let aligned =
+                i128::from(origin) + delta.div_euclid(i128::from(stride)) * i128::from(stride);
+            if let Ok(v) = i64::try_from(aligned) {
+                cur[level] = v;
+            }
+        }
+
+        let mut out = Vec::new();
+        let mut prev_tick: Option<i64> = None;
+        for _ in 0..64 {
+            let Ok(tick) = self.to_tick_with(vm, &cur) else {
+                break;
+            };
+            if let Some(prev) = prev_tick
+                && tick <= prev
+            {
+                break;
+            }
+            prev_tick = Some(tick);
+            if tick > end_tick {
+                break;
+            }
+            let Ok(mut normalized) = self.from_tick_with(vm, tick) else {
+                break;
+            };
+            if tick >= start_tick {
+                let precision = self.effective_precision(&normalized, 1);
+                let label = self.humanize_with(vm, &normalized, precision)?;
+                out.push(CalendarTick { tick, label });
+            }
+            self.truncate_after_level(&mut normalized, level);
+            let Some(next_val) = normalized[level].checked_add(stride) else {
+                break;
+            };
+            normalized[level] = next_val;
+            cur = normalized;
+        }
+        Ok(out)
+    }
+
+    // 退化：区间小于最小历法单位，或脚本不支持分量进位时，按均匀数值刻度生成。
+    fn uniform_axis_ticks(
+        &self,
+        vm: &mut Vm,
+        start_tick: i64,
+        end_tick: i64,
+        span: i128,
+        target: usize,
+    ) -> Result<Vec<CalendarTick>, DocumentError> {
+        let count = target.min((span + 1).min(24) as usize).max(2);
+        let mut out = Vec::with_capacity(count);
+        let mut last_tick: Option<i64> = None;
+        for i in 0..count {
+            let tick = if i + 1 == count {
+                end_tick
+            } else {
+                let offset = (span * i128::from(i as u64)) / i128::from((count - 1) as u64);
+                i64::try_from(i128::from(start_tick) + offset).unwrap_or(end_tick)
+            };
+            if last_tick == Some(tick) {
+                continue;
+            }
+            last_tick = Some(tick);
+            out.push(self.humanize_tick_with(vm, tick)?);
+        }
+        Ok(out)
+    }
+
+    fn humanize_tick_with(&self, vm: &mut Vm, tick: i64) -> Result<CalendarTick, DocumentError> {
+        let values = self.from_tick_with(vm, tick)?;
+        let precision = self.effective_precision(&values, 1);
+        let label = self.humanize_with(vm, &values, precision)?;
+        Ok(CalendarTick { tick, label })
+    }
+
+    fn truncate_after_level(&self, values: &mut [i64], level: usize) {
+        for j in (level + 1)..self.components {
+            values[j] = self.minimums[j];
+        }
+    }
+
+    // 去掉尾部等于历法起始值的分量，保留最有辨识度的展示精度。
+    fn effective_precision(&self, values: &[i64], min_precision: usize) -> usize {
+        let last_non_min = values
+            .iter()
+            .zip(&self.minimums)
+            .enumerate()
+            .rev()
+            .find(|(_, (val, min))| val != min)
+            .map_or(0, |(idx, _)| idx);
+        (last_non_min + 1)
+            .max(min_precision)
+            .clamp(1, self.components)
+    }
+
+    fn humanize_with(
+        &self,
+        vm: &mut Vm,
+        values: &[i64],
+        precision: usize,
+    ) -> Result<String, DocumentError> {
         let ctx = plugin_loader::to_rune_value(&json!({
             "api": plugin_loader::API_VERSION,
-            "values": &moment.values,
-            "precision": moment.precision,
+            "values": values,
+            "precision": precision,
             "language": &self.language,
         }))
         .map_err(|details| ValidationError::CalendarCall {
@@ -222,11 +428,23 @@ impl Calendar {
             entry: "humanizer".to_owned(),
             details,
         })?;
-        let mut vm = self.vm();
-        self.call_vm(&mut vm, "humanizer", (ctx,))?
+        self.call_vm(vm, "humanizer", (ctx,))?
             .into_string()
             .map(|string| string.into_std())
             .map_err(|_| self.invalid_return("humanizer").into())
+    }
+
+    fn from_tick_with(&self, vm: &mut Vm, tick: i64) -> Result<Vec<i64>, DocumentError> {
+        let output = self.call_vm(vm, "from_tick", (tick,))?;
+        let result: Vec<i64> =
+            rune::from_value(output).map_err(|_| self.invalid_return("from_tick"))?;
+        if result.len() != self.components {
+            return Err(ValidationError::NormalizeWrongComponentCount {
+                expected: self.components.to_string(),
+            }
+            .into());
+        }
+        Ok(result)
     }
 
     // 脚本只认 components 个分量，超长是写错了。
@@ -269,15 +487,7 @@ impl Calendar {
         values: &[i64],
     ) -> Result<(Vec<i64>, i64), DocumentError> {
         let tick = self.to_tick_with(vm, values)?;
-        let output = self.call_vm(vm, "from_tick", (tick,))?;
-        let result: Vec<i64> =
-            rune::from_value(output).map_err(|_| self.invalid_return("from_tick"))?;
-        if result.len() != self.components {
-            return Err(ValidationError::NormalizeWrongComponentCount {
-                expected: self.components.to_string(),
-            }
-            .into());
-        }
+        let result = self.from_tick_with(vm, tick)?;
         if self.to_tick_with(vm, &result)? != tick {
             return Err(ValidationError::CalendarRoundTripMismatch {
                 calendar: self.source_name.clone(),
@@ -328,4 +538,24 @@ impl Calendar {
             entry: entry.to_owned(),
         }
     }
+}
+
+// 1-2-5 系列步长，使刻度总数贴近 target_count。
+fn nice_stride(approx_units: i128, target_count: i128) -> i64 {
+    let target = target_count.max(1);
+    let raw = (approx_units + target - 1) / target;
+    if raw <= 1 {
+        return 1;
+    }
+    let mut mag: i128 = 1;
+    while mag.saturating_mul(10) <= raw {
+        mag = mag.saturating_mul(10);
+    }
+    for mult in [1, 2, 5, 10] {
+        let candidate = mag.saturating_mul(mult);
+        if candidate >= raw {
+            return i64::try_from(candidate).unwrap_or(i64::MAX);
+        }
+    }
+    i64::try_from(raw).unwrap_or(i64::MAX)
 }

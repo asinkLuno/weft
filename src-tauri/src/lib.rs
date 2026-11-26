@@ -96,6 +96,7 @@ pub fn run() {
             weft_doc::inspect_disk,
             weft_doc::reload_document,
             weft_doc::save_document,
+            weft_doc::calendar_axis_ticks,
             weft_doc::close_document,
             get_language,
         ])

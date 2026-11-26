@@ -1,181 +1,409 @@
-import { memo, type ReactNode, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { CustomChart } from "echarts/charts";
+import {
+  DataZoomComponent,
+  GridComponent,
+  TooltipComponent,
+} from "echarts/components";
+import * as echarts from "echarts/core";
+import { AxisBreak } from "echarts/features";
+import { CanvasRenderer } from "echarts/renderers";
+import { FoldHorizontal, RotateCcw, UnfoldHorizontal } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Lang, strings } from "@/i18n";
 import type { Events } from "@/lib/document";
-import type { EventItem, GanttBounds, GanttScale } from "./model";
+import {
+  breakKey,
+  buildGanttOption,
+  MAX_VISIBLE_ROWS,
+  ROW_HEIGHT,
+  readDaisyPalette,
+} from "./gantt-option";
+import {
+  buildGanttChartModel,
+  buildTickSegments,
+  type CalendarTick,
+  type EventItem,
+  type GanttBreak,
+} from "./model";
 
-function EventHoverContent({ event }: { event: EventItem }) {
-  return (
-    <>
-      <div className="text-sm font-semibold">{event.id}</div>
-      <div className="mt-0.5 font-mono text-xs text-base-content/60">
-        {event.start_display}
-        {event.end_display && ` – ${event.end_display}`}
-      </div>
-      {event.description && (
-        <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-base-content/80">
-          {event.description}
-        </p>
-      )}
-    </>
-  );
+echarts.use([
+  CustomChart,
+  GridComponent,
+  TooltipComponent,
+  DataZoomComponent,
+  AxisBreak,
+  CanvasRenderer,
+]);
+
+// 按「历法 + 语言」共享刻度文案缓存，跨事件列表与缩放往返零延迟命中。
+const MAX_CACHED_TICKS = 2000;
+let sharedCacheKey = "";
+const sharedTickLabels = new Map<number, string>();
+
+function getSharedTickCache(calendarKey: string): Map<number, string> {
+  if (sharedCacheKey !== calendarKey) {
+    sharedCacheKey = calendarKey;
+    sharedTickLabels.clear();
+  }
+  return sharedTickLabels;
 }
 
-// 悬浮卡：daisyUI 的 dropdown-hover，触发器与内容都带 tabindex 以支持键盘
-function EventHoverCard({
-  event,
-  label,
-  placement = "top",
-  className,
-  style,
-  children,
-}: {
-  event: EventItem;
-  label?: string;
-  placement?: "top" | "bottom";
-  className?: string;
-  style?: React.CSSProperties;
-  children: ReactNode;
-}) {
-  // 内容只在 hover/focus 时挂载：每个事件两个悬浮卡，常挂会翻倍 DOM
-  const [open, setOpen] = useState(false);
-  return (
-    <fieldset
-      className={`dropdown dropdown-hover ${
-        placement === "bottom" ? "dropdown-bottom" : "dropdown-top"
-      } m-0 min-w-0 border-0 p-0 ${className ?? ""}`}
-      style={style}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-      onFocus={() => setOpen(true)}
-      onBlur={() => setOpen(false)}
-    >
-      <button
-        type="button"
-        tabIndex={0}
-        aria-label={label}
-        className="block w-full cursor-pointer text-left"
-      >
-        {children}
-      </button>
-      {open && (
-        <div
-          role="dialog"
-          className="dropdown-content z-20 w-72 rounded-box border border-base-300 bg-base-100 p-3 shadow-md"
-        >
-          <EventHoverContent event={event} />
-        </div>
-      )}
-    </fieldset>
-  );
+function storeTickLabel(
+  cache: Map<number, string>,
+  tick: number,
+  label: string,
+): void {
+  if (cache.size >= MAX_CACHED_TICKS && !cache.has(tick)) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(tick, label);
 }
 
-// 所有事件列表以最早事件的 tick 为原点，共用相对时间范围。
+const FOLD_ICON = <FoldHorizontal className="size-3.5" />;
+const UNFOLD_ICON = <UnfoldHorizontal className="size-3.5" />;
+const RESET_ICON = <RotateCcw className="size-3.5" />;
+
 export const EventsGantt = memo(function EventsGantt({
   name,
   ids,
   byId,
-  bounds,
-  scale,
+  calendarKey,
   t,
 }: {
   name: string;
   ids: Events;
   byId: Map<string, EventItem>;
-  bounds: GanttBounds;
-  scale: GanttScale;
+  calendarKey: string;
   t: (typeof strings)[Lang];
 }) {
-  const events = ids.flatMap((id) => {
-    const event = byId.get(id);
-    return event ? [event] : [];
+  const model = useMemo(() => buildGanttChartModel(ids, byId), [ids, byId]);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<echarts.ECharts | null>(null);
+  const expandedBreaksRef = useRef<Set<string>>(new Set());
+  const viewRangeRef = useRef<{ min: number; max: number }>({
+    min: model.minTick,
+    max: model.maxTick,
   });
-  const originTick = bounds.start;
+  const fetchTimerRef = useRef<number | null>(null);
+  const requestSeqRef = useRef(0);
+
+  const [isZoomed, setIsZoomed] = useState(false);
+  const [hasExpandedBreak, setHasExpandedBreak] = useState(false);
+
+  const chartHeight = Math.max(
+    180,
+    Math.min(model.events.length, MAX_VISIBLE_ROWS) * ROW_HEIGHT + 96,
+  );
+
+  const cancelPendingRefresh = useCallback(() => {
+    if (fetchTimerRef.current !== null) {
+      window.clearTimeout(fetchTimerRef.current);
+      fetchTimerRef.current = null;
+    }
+  }, []);
+
+  const refreshCalendarTicks = useCallback(
+    (rangeMin: number, rangeMax: number) => {
+      cancelPendingRefresh();
+      const width = containerRef.current?.clientWidth ?? 600;
+      const budget = Math.max(4, Math.min(10, Math.floor(width / 120)));
+      const activeBreaks: GanttBreak[] = model.breaks.filter(
+        (brk) => !expandedBreaksRef.current.has(breakKey(brk)),
+      );
+      const segments = buildTickSegments(
+        rangeMin,
+        rangeMax,
+        activeBreaks,
+        budget,
+      );
+      const extraTicks = model.breaks.flatMap((b) => [b.start, b.end]);
+      const seq = ++requestSeqRef.current;
+
+      void invoke<CalendarTick[]>("calendar_axis_ticks", {
+        segments,
+        extraTicks,
+      })
+        .then((result) => {
+          if (seq !== requestSeqRef.current) return;
+          if (!Array.isArray(result) || result.length === 0) return;
+
+          const cache = getSharedTickCache(calendarKey);
+          const extraSet = new Set(extraTicks);
+          const axisTickValues: number[] = [];
+          for (const item of result) {
+            storeTickLabel(cache, item.tick, item.label);
+            if (!extraSet.has(item.tick)) {
+              axisTickValues.push(item.tick);
+            }
+          }
+          const ticks =
+            axisTickValues.length > 0
+              ? axisTickValues
+              : result.map((item) => item.tick);
+          const chart = chartRef.current;
+          if (!chart || chart.isDisposed()) return;
+          chart.setOption({
+            xAxis: {
+              axisTick: { customValues: ticks },
+              axisLabel: { customValues: ticks },
+            },
+          });
+        })
+        .catch(() => {
+          // 离线或无后端历法会话时，保留事件自身文案作为降级显示。
+        });
+    },
+    [calendarKey, cancelPendingRefresh, model.breaks],
+  );
+
+  const scheduleTickRefresh = useCallback(
+    (rangeMin: number, rangeMax: number) => {
+      cancelPendingRefresh();
+      fetchTimerRef.current = window.setTimeout(() => {
+        fetchTimerRef.current = null;
+        refreshCalendarTicks(rangeMin, rangeMax);
+      }, 100);
+    },
+    [cancelPendingRefresh, refreshCalendarTicks],
+  );
+
+  const scheduleRefreshRef = useRef(scheduleTickRefresh);
+  scheduleRefreshRef.current = scheduleTickRefresh;
+
+  // 初始化与数据/语言变更时重建图配置，同时同步后端历法刻度。
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const cache = getSharedTickCache(calendarKey);
+    for (const [tick, label] of model.initialLabels) {
+      storeTickLabel(cache, tick, label);
+    }
+    expandedBreaksRef.current = new Set();
+    viewRangeRef.current = { min: model.minTick, max: model.maxTick };
+    setIsZoomed(false);
+    setHasExpandedBreak(false);
+
+    let chart = chartRef.current;
+    if (!chart || chart.isDisposed()) {
+      chart = echarts.init(container, undefined, { renderer: "canvas" });
+      chartRef.current = chart;
+    }
+
+    const fallbackTicks = Array.from(model.initialLabels.keys()).sort(
+      (a, b) => a - b,
+    );
+    const option = buildGanttOption({
+      name,
+      model,
+      palette: readDaisyPalette(container),
+      entitiesLabel: t.ganttEntities,
+      formatExactTick: (value) => {
+        const labels = getSharedTickCache(calendarKey);
+        return labels.get(value) ?? labels.get(Math.round(value)) ?? "";
+      },
+      customValues: fallbackTicks,
+      expandedBreaks: expandedBreaksRef.current,
+    });
+    chart.setOption(option, true);
+    refreshCalendarTicks(model.minTick, model.maxTick);
+
+    const handleDataZoom = () => {
+      if (!chart || chart.isDisposed()) return;
+      const opt = chart.getOption() as {
+        dataZoom?: Array<{
+          xAxisIndex?: number | number[];
+          start?: number;
+          end?: number;
+          startValue?: number;
+          endValue?: number;
+        }>;
+      };
+      const xZoom = opt.dataZoom?.find((dz) => {
+        const idx = dz.xAxisIndex;
+        return idx === 0 || (Array.isArray(idx) && idx.includes(0));
+      });
+      if (!xZoom) return;
+      const startPct = xZoom.start ?? 0;
+      const endPct = xZoom.end ?? 100;
+      setIsZoomed(startPct > 0.1 || endPct < 99.9);
+
+      const span = model.maxTick - model.minTick;
+      const nextMin =
+        typeof xZoom.startValue === "number"
+          ? xZoom.startValue
+          : model.minTick + (span * startPct) / 100;
+      const nextMax =
+        typeof xZoom.endValue === "number"
+          ? xZoom.endValue
+          : model.minTick + (span * endPct) / 100;
+      if (
+        nextMin === viewRangeRef.current.min &&
+        nextMax === viewRangeRef.current.max
+      ) {
+        return;
+      }
+      viewRangeRef.current = { min: nextMin, max: nextMax };
+      scheduleRefreshRef.current(nextMin, nextMax);
+    };
+
+    const handleBreakChanged = (rawEvent: unknown) => {
+      const event = rawEvent as {
+        breaks?: Array<{ start: number; end: number; isExpanded?: boolean }>;
+      };
+      if (!Array.isArray(event?.breaks)) return;
+      for (const brk of event.breaks) {
+        const key = breakKey({ start: brk.start, end: brk.end });
+        if (brk.isExpanded) {
+          expandedBreaksRef.current.add(key);
+        } else {
+          expandedBreaksRef.current.delete(key);
+        }
+      }
+      setHasExpandedBreak(expandedBreaksRef.current.size > 0);
+      scheduleRefreshRef.current(
+        viewRangeRef.current.min,
+        viewRangeRef.current.max,
+      );
+    };
+
+    chart.on("datazoom", handleDataZoom);
+    chart.on("axisbreakchanged", handleBreakChanged);
+
+    return () => {
+      chart?.off("datazoom", handleDataZoom);
+      chart?.off("axisbreakchanged", handleBreakChanged);
+      cancelPendingRefresh();
+    };
+  }, [
+    calendarKey,
+    cancelPendingRefresh,
+    model,
+    name,
+    refreshCalendarTicks,
+    t.ganttEntities,
+  ]);
+
+  // 响应 Dockview 面板分屏/切换可见性与窗口尺寸变化；仅在挂载时绑定一次。
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    let lastWidth = container.clientWidth;
+
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect || rect.width <= 0 || rect.height <= 0) return;
+      const chart = chartRef.current;
+      if (!chart || chart.isDisposed()) return;
+      chart.resize();
+      if (Math.abs(rect.width - lastWidth) > 80) {
+        lastWidth = rect.width;
+        scheduleRefreshRef.current(
+          viewRangeRef.current.min,
+          viewRangeRef.current.max,
+        );
+      }
+    });
+
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  // 卸载时释放 ECharts 实例。
+  useEffect(() => {
+    return () => {
+      cancelPendingRefresh();
+      if (chartRef.current && !chartRef.current.isDisposed()) {
+        chartRef.current.dispose();
+      }
+      chartRef.current = null;
+    };
+  }, [cancelPendingRefresh]);
+
+  const handleToggleBreaks = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart || chart.isDisposed() || model.breaks.length === 0) return;
+    chart.dispatchAction({
+      type: hasExpandedBreak ? "collapseAxisBreak" : "expandAxisBreak",
+      xAxisIndex: 0,
+      breaks: model.breaks.map((b) => ({ start: b.start, end: b.end })),
+    });
+  }, [hasExpandedBreak, model.breaks]);
+
+  const handleResetView = useCallback(() => {
+    const chart = chartRef.current;
+    if (!chart || chart.isDisposed()) return;
+    viewRangeRef.current = { min: model.minTick, max: model.maxTick };
+    chart.dispatchAction({
+      type: "dataZoom",
+      dataZoomIndex: 0,
+      start: 0,
+      end: 100,
+    });
+    if (model.breaks.length > 0 && expandedBreaksRef.current.size > 0) {
+      chart.dispatchAction({
+        type: "collapseAxisBreak",
+        xAxisIndex: 0,
+        breaks: model.breaks.map((b) => ({ start: b.start, end: b.end })),
+      });
+    }
+    setIsZoomed(false);
+    refreshCalendarTicks(model.minTick, model.maxTick);
+  }, [model.breaks, model.maxTick, model.minTick, refreshCalendarTicks]);
+
   return (
     <section className="min-w-0">
-      <h2 className="mb-2 text-base font-semibold">{name}</h2>
-      <div className="rounded-box border border-base-300 bg-base-100">
-        <div className="grid grid-cols-[minmax(100px,220px)_minmax(140px,1fr)] rounded-t-box border-b border-base-300 bg-base-200 text-xs text-base-content/60">
-          <div className="h-8 border-r border-base-300 px-3 leading-8">
-            {t.ganttEvent}
-          </div>
-          <div className="relative flex h-8 items-end justify-between px-3 pb-1 font-mono">
-            <span>{bounds.startDisplay}</span>
-            <span>{bounds.endDisplay}</span>
-            {scale.breaks.map((gap) => (
-              <span
-                key={gap.start}
-                title={gap.label}
-                className="absolute top-0 -translate-x-1/2 bg-base-200 px-1 font-bold"
-                style={{ left: `${(gap.start + gap.end) / 2}%` }}
-              >
-                {"//"}
-              </span>
-            ))}
-          </div>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <h2 className="truncate text-base font-semibold">{name}</h2>
+          <span className="badge badge-ghost badge-xs">
+            {model.events.length}
+          </span>
+          {model.startDisplay ? (
+            <span className="truncate font-mono text-xs text-base-content/50">
+              {model.startDisplay}
+              {model.endDisplay && model.endDisplay !== model.startDisplay
+                ? ` – ${model.endDisplay}`
+                : ""}
+            </span>
+          ) : null}
         </div>
-        {events.map((event, index) => {
-          const start = event.start_tick ?? originTick;
-          const left = scale.position(start);
-          const width = scale.position(event.end_tick ?? start) - left;
-          const placement = index === 0 ? "bottom" : "top";
-          return (
-            <div
-              key={event.id}
-              className="grid min-h-12 grid-cols-[minmax(100px,220px)_minmax(140px,1fr)] border-b border-base-300 last:border-b-0"
+        <div className="flex items-center gap-1">
+          <span className="hidden text-xs text-base-content/40 sm:inline">
+            {t.ganttZoomHint}
+          </span>
+          {model.breaks.length > 0 ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs"
+              onClick={handleToggleBreaks}
             >
-              <div className="min-w-0 border-r border-base-300 px-3 py-2">
-                <EventHoverCard
-                  event={event}
-                  placement={placement}
-                  className="dropdown-start w-full"
-                >
-                  <span className="block truncate text-sm font-medium transition-colors hover:text-primary">
-                    {event.id}
-                  </span>
-                </EventHoverCard>
-                <div className="mt-0.5 truncate font-mono text-xs text-base-content/50">
-                  {event.start_display}
-                </div>
-              </div>
-              <div className="relative">
-                {scale.breaks.map((gap) => (
-                  <span
-                    key={gap.start}
-                    title={gap.label}
-                    className="absolute inset-y-0 border-x border-dashed border-base-300 bg-base-200/70"
-                    style={{
-                      left: `${gap.start}%`,
-                      width: `${gap.end - gap.start}%`,
-                    }}
-                  />
-                ))}
-                {event.end_tick === undefined ? (
-                  <EventHoverCard
-                    event={event}
-                    label={event.id}
-                    placement={placement}
-                    className="absolute top-1/2 -translate-1/2"
-                    style={{
-                      left: `clamp(6px, ${left}%, calc(100% - 6px))`,
-                    }}
-                  >
-                    <span className="block size-3 rotate-45 rounded-[2px] border-2 border-primary bg-base-100 transition-colors hover:bg-primary" />
-                  </EventHoverCard>
-                ) : (
-                  <EventHoverCard
-                    event={event}
-                    label={event.id}
-                    placement={placement}
-                    className="absolute top-1/2 -translate-y-1/2"
-                    style={{ left: `${left}%`, width: `${width}%` }}
-                  >
-                    <span className="block h-4 min-w-3 rounded-xs bg-primary transition-opacity hover:opacity-80" />
-                  </EventHoverCard>
-                )}
-              </div>
-            </div>
-          );
-        })}
+              {hasExpandedBreak ? FOLD_ICON : UNFOLD_ICON}
+              {hasExpandedBreak ? t.ganttCollapseBreaks : t.ganttExpandBreaks}
+            </button>
+          ) : null}
+          {isZoomed || hasExpandedBreak ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs"
+              onClick={handleResetView}
+            >
+              {RESET_ICON}
+              {t.ganttResetZoom}
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <div className="rounded-box border border-base-300 bg-base-100">
+        <div
+          ref={containerRef}
+          className="w-full"
+          style={{ height: `${chartHeight}px` }}
+        />
       </div>
     </section>
   );
