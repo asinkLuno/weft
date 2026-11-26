@@ -8,3 +8,13 @@ cd "$(dirname "$0")/.."
 yarn tauri build --no-bundle
 
 sudo install -m755 target/release/weft target/release/weft-desktop /usr/bin/
+sudo install -Dm644 src-tauri/icons/icon.png /usr/share/icons/hicolor/512x512/apps/weft.png
+sudo install -Dm644 /dev/stdin /usr/share/applications/weft.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=weft
+Exec=weft-desktop
+Icon=weft
+Terminal=false
+Categories=Utility;
+EOF

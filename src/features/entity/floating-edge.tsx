@@ -9,11 +9,6 @@ import { memo } from "react";
 import { DEFAULT_NODE_SIZE } from "./layout";
 import type { FloatingEdgeData } from "./model";
 
-const FLOATING_EDGE_STYLE = {
-  stroke: "var(--color-primary)",
-  strokeWidth: 1.5,
-} as const;
-
 const round1 = (value: number) => Math.round(value * 10) / 10;
 
 type Rect = { x: number; y: number; w: number; h: number };
@@ -91,6 +86,7 @@ export const FloatingEdge = memo(function FloatingEdge({
   source,
   target,
   data,
+  style,
 }: EdgeProps) {
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
@@ -111,7 +107,7 @@ export const FloatingEdge = memo(function FloatingEdge({
 
   return (
     <>
-      <BaseEdge id={id} path={path} style={FLOATING_EDGE_STYLE} />
+      <BaseEdge id={id} path={path} style={style} />
       {edgeData?.label && (
         <EdgeLabelRenderer>
           <div

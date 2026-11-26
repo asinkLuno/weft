@@ -66,11 +66,6 @@ export type EntityDetail = {
 };
 
 const EMPTY_SIZES: ReadonlyMap<string, NodeSize> = new Map();
-const BELONG_EDGE_STYLE = {
-  stroke: "var(--color-base-content)",
-  strokeOpacity: 0.35,
-  strokeWidth: 1.5,
-} as const;
 
 type EntityDocIndex = {
   parentsById: Map<string, Set<string>>;
@@ -290,7 +285,6 @@ function buildBelongEdges(
         id: `${p}->${id}`,
         source: p,
         target: id,
-        style: BELONG_EDGE_STYLE,
       });
     }
   }

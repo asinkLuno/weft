@@ -1,5 +1,6 @@
 import {
   Background,
+  type DefaultEdgeOptions,
   type Edge,
   Panel,
   ReactFlow,
@@ -24,6 +25,12 @@ import type { EntityFlowNode } from "./model";
 
 const nodeTypes = { entity: EntityNode };
 const edgeTypes = { floating: FloatingEdge };
+const DEFAULT_EDGE_OPTIONS: DefaultEdgeOptions = {
+  style: {
+    stroke: "var(--color-primary)",
+    strokeWidth: 1.5,
+  },
+};
 
 const ZOOM_IN_ICON = <Plus className="size-4" />;
 const ZOOM_OUT_ICON = <Minus className="size-4" />;
@@ -270,6 +277,7 @@ function EntityCanvasInner({
         onNodesChange={onNodesChange}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
+        defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
         onNodeClick={handleNodeClick}
         onPaneClick={handlePaneClick}
         onNodeDragStop={onPersist ? handleNodeDragStop : undefined}
