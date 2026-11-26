@@ -1,0 +1,26 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <title>Weft</title>
+  <style>
+    .weft-w { stroke: #141416; }
+    .weft-s-entry { fill: #002FA7; }
+    .weft-s-exit { fill: #0A45E6; }
+    .weft-s-line { stroke: #002FA7; }
+    @media (prefers-color-scheme: dark) {
+      .weft-w { stroke: #F4F4F5; }
+      .weft-s-entry { fill: #0035C5; }
+      .weft-s-exit { fill: #1852FF; }
+      .weft-s-line { stroke: #1852FF; }
+    }
+  </style>
+  <g class="weft-w" fill="none" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="21" y1="24" x2="28.09" y2="50.33"/>
+    <path d="M 32.15 65.40 L 35 76 L 50 34 L 65 76 L 72.48 48.22"/>
+    <line x1="76.53" y1="33.16" x2="79" y2="24"/>
+  </g>
+  <g class="weft-s-line" fill="none" stroke-width="5.6" stroke-linecap="round">
+    <path d="M 10 62 C 18.45 61.67, 27.11 59.13, 35.85 55.81"/>
+    <path d="M 62.42 44.86 C 71.74 41.21, 80.99 38.35, 90 38"/>
+  </g>
+  <circle class="weft-s-entry" cx="10" cy="62" r="4.4"/>
+  <circle class="weft-s-exit" cx="90" cy="38" r="6.4"/>
+</svg>
