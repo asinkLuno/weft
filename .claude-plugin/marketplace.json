@@ -4,13 +4,13 @@
     "name": "asinkLuno"
   },
   "metadata": {
-    "description": "Official Weft story language skills and tooling plugins.",
+    "description": "Official Weft timeline language skills and tooling plugins.",
     "version": "0.1.0"
   },
   "plugins": [
     {
       "name": "weft-writer",
-      "description": "Author, validate, and format .weft story documents and .rn Rune plugins with weft check and weft fmt.",
+      "description": "Author, validate, and format .weft timeline documents and .rn Rune plugins with weft check and weft fmt.",
       "source": "./"
     }
   ]

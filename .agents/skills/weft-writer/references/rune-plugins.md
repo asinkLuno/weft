@@ -1,9 +1,9 @@
 # Weft Rune (`.rn`) Plugin Reference
 
-Weft extends stories with two kinds of sandboxed [Rune](https://rune-rs.github.io/) scripts (`.rn`, embedded `rune` 0.14.x), referenced relative to the `.weft` file:
+Weft extends `.weft` documents with two kinds of sandboxed [Rune](https://rune-rs.github.io/) scripts (`.rn`, embedded `rune` 0.14.x), referenced relative to the `.weft` file:
 
-1. **Custom calendars** (`story.date_mode = "my_calendar.rn"`)
-2. **Calculable properties** (`story.calculable_props = { my_prop = "my_prop.rn" }`)
+1. **Custom time axes / calendars** (`story.date_mode = "my_axis.rn"`) — define any discrete linear coordinate system: fiscal calendars (`[FY, Q, Week]`), sprint cycles (`[Release, Sprint, Day]`), elapsed experiment/mission time (`[Day, Hour, Minute]`), historical/lunar calendars, or custom world calendars.
+2. **Calculable properties** (`story.calculable_props = { my_prop = "my_prop.rn" }`) — compute derived entity metadata from `base_time`, `belong_to`, `extra_props`, and `calendar` metadata (e.g. era/cohort tags, lifecycle phases, tier labels).
 
 ## Official Rune Language Docs
 
@@ -16,73 +16,72 @@ When writing non-trivial logic or hitting unfamiliar Rune syntax, consult the [R
 - [Anonymous objects](https://rune-rs.github.io/book/objects.html) (`#{ key: value }` returned by `meta(ctx)` or `calculable_prop(ctx)`)
 - [Template literals](https://rune-rs.github.io/book/template_literals.html) (`` `${expr}` `` string interpolation used in `humanizer(ctx)`)
 
-> **Important difference from examples in the Rune Book**: Weft constructs its VM with `Context::with_config(false)` (no I/O). Do **not** copy `println!`, `print!`, or `dbg!` from Rune Book snippets—they will fail to compile in Weft's sandbox.
+> **Important difference from Rune Book snippets**: Weft constructs its VM with `Context::with_config(false)` (no I/O). Do **not** use `println!`, `print!`, or `dbg!`—they fail to compile in Weft's sandbox.
 
 ## Sandbox & Runtime Constraints
 
-- **No I/O**: Host builds `Context::with_config(false)`—there is no `println!`, `dbg!`, filesystem, or network access.
+- **No I/O**: No `println!`, `dbg!`, filesystem, or network access.
 - **Limits**: 1,000,000 instruction budget per entry call; max script file size 1 MB; file extension must be `.rn`.
 - **API version**: `ctx.api` is `1`.
-- **Localization**: `ctx.language` is `"zh"` or `"en"` (controlled via CLI `--lang zh|en` or system locale). Support both when practical, and test both with `weft check --lang zh` and `weft check --lang en`.
+- **Localization**: `ctx.language` is `"zh"` or `"en"` (set via CLI `--lang zh|en` or system locale). Support both when practical, and test both with `weft check --lang zh` and `weft check --lang en`.
 - **Rune gotchas**:
   - JSON `null` deserializes to Rune unit `()`, and returning `()` from `calculable_prop` means "omit this property".
-  - String interpolation uses backticks: `` `${year}年${month}月` ``.
+  - String interpolation uses backticks: `` `FY${y} Q${q}` ``.
   - Anonymous objects use `#{ key: value }`.
-  - When calling `panic(message)` conditionally, wrap it in `match` rather than `if` if the surrounding function returns a non-unit value—in Rune, an `if` branch with `panic` can trigger unit-type inference errors and swallow the message.
-  - Use explicit floor division / positive modulo helpers when `tick` or offsets can be negative, because `/` and `%` truncate toward zero in Rune (just like Rust).
+  - Wrap conditional `panic(message)` inside `match` rather than `if` inside functions returning a non-unit value—in Rune, an `if` branch with `panic` can trigger unit-type inference errors and hide the message.
+  - Use explicit floor division / positive modulo helpers when `tick` or offsets can be negative, because `/` and `%` truncate toward zero in Rune (as in Rust).
 
 ---
 
-## 1. Custom Calendar Script (`date_mode`)
+## 1. Custom Calendar / Time-Axis Script (`date_mode`)
 
-A calendar `.rn` script MUST export four `pub fn` entry points:
+A `date_mode` `.rn` script MUST export four `pub fn` entry points:
 
 | Function | Signature | Purpose |
 | --- | --- | --- |
-| `meta(ctx)` | `ctx: #{ api, language }` -> `#{ id, name, description?, components, minimums }` | Calendar metadata & shape |
-| `to_tick(values)` | `values: Vec<i64>` (len = `components`) -> `i64` | Convert date components (including unnormalized offset results!) to linear integer tick |
-| `from_tick(tick)` | `tick: i64` -> `Vec<i64>` (len = `components`) | Convert linear tick back to normalized date components |
-| `humanizer(ctx)` | `ctx: #{ api, values, precision, language }` -> `String` | Format normalized date respecting author's `precision` |
+| `meta(ctx)` | `ctx: #{ api, language }` -> `#{ id, name, description?, components, minimums }` | Axis metadata, arity, and per-component minimums |
+| `to_tick(values)` | `values: Vec<i64>` (len = `components`) -> `i64` | Map component tuple (including unnormalized offset sums!) to a linear integer tick |
+| `from_tick(tick)` | `tick: i64` -> `Vec<i64>` (len = `components`) | Map linear tick back to normalized components |
+| `humanizer(ctx)` | `ctx: #{ api, values, precision, language }` -> `String` | Format normalized components respecting `ctx.precision` |
 
 ### Critical Invariants Enforced by `weft check`
 
 1. **`meta` validation**:
    - `id` and `name` must be non-empty strings.
    - `components` must be in `1..=64`.
-   - `minimums.len()` must equal `components`. `minimums[0]` is informational (the highest component has no lower bound); for `i > 0`, any absolute time in `.weft` with `value < minimums[i]` fails with `time-component-below-minimum`.
+   - `minimums.len()` must equal `components`. `minimums[0]` is informational (component `0` has no lower bound); for `i > 0`, any absolute time in `.weft` with `value < minimums[i]` fails with `time-component-below-minimum`.
 2. **Normalization = `from_tick(to_tick(values))`**:
-   - When resolving `anchor + offset` or `anchor - offset`, the host adds/subtracts component-wise first, then passes the **unnormalized** array directly to `to_tick(values)`!
-   - Therefore `to_tick(values)` MUST gracefully handle out-of-range and negative component values (e.g., month `13`, month `0`, day `-5`, hour `26`), carrying/borrowing them into the linear tick.
-3. **Round-trip check (`calendar-round-trip-mismatch`)**:
-   - After computing `norm = from_tick(tick)`, the host immediately verifies `to_tick(norm) == tick`. Any mismatch fails compilation.
+   - For `anchor + offset` / `anchor - offset`, the host adds/subtracts component-wise first, then passes the **unnormalized** array straight to `to_tick(values)`.
+   - Therefore `to_tick(values)` MUST handle arbitrary overflowed or negative component values (e.g. quarter `5`, quarter `0`, week `-3`), folding them linearly into the tick.
+3. **Round-trip invariant (`calendar-round-trip-mismatch`)**:
+   - After `norm = from_tick(tick)`, the host verifies `to_tick(norm) == tick`. Any mismatch fails compilation.
 4. **Precision in `humanizer(ctx)`**:
-   - `ctx.precision` is the number of components the author wrote (or `max(base, offset)` for relative times), from `1` up to `components`. Format only up to `precision` (or show time-of-day only when precision covers it or values are non-zero).
+   - `ctx.precision` is the number of components written by the author (or `max(base, offset)` for relative times), in `1..=components`. Format only up to `precision` (or show lower components only when precision covers them or they are non-zero).
 
-### Minimal Calendar Template (Fixed-Length Sci-Fi / Fantasy Calendar)
+### Minimal Time-Axis Template (Fixed-Radix `[Year, Quarter, Week]`)
 
-Example: 3-component calendar `[Year, Month, Day]` with 10 months of 30 days each (300 days/year):
+Example: 3-component fiscal/planning axis `[Year, Quarter, Week]`, 4 quarters × 13 weeks = 52 weeks/year:
 
 ```rune
-// 3-component custom calendar: [Year, Month, Day], 10 months x 30 days = 300 days/year.
+// 3-component time axis: [Year, Quarter, Week], 4 quarters x 13 weeks = 52 weeks/year.
 
 pub fn meta(ctx) {
     let zh = ctx.language == "zh";
     #{
-        id: "imperial-decimal",
-        name: if zh { "帝国十进制历" } else { "Imperial Decimal Calendar" },
+        id: "fiscal-quarter-week",
+        name: if zh { "财年季度周历" } else { "Fiscal Quarter-Week Calendar" },
         description: if zh {
-            "每年 10 个月，每月 30 日，共 300 日。"
+            "每年 4 个季度，每季度 13 周，共 52 周。"
         } else {
-            "10 months of 30 days each (300 days per year)."
+            "4 quarters of 13 weeks each (52 weeks per year)."
         },
         components: 3,
         minimums: [1, 1, 1],
     }
 }
 
-const DAYS_PER_MONTH = 30;
-const MONTHS_PER_YEAR = 10;
-const DAYS_PER_YEAR = 300;
+const WEEKS_PER_QUARTER = 13;
+const WEEKS_PER_YEAR = 52;
 
 fn floor_div(a, b) {
     let q = a / b;
@@ -96,45 +95,45 @@ fn pos_mod(a, b) {
 
 pub fn to_tick(values) {
     let year = values[0];
-    let month = values[1];
-    let day = values[2];
-    // Handles arbitrary negative/overflowed months and days linearly
-    (year - 1) * DAYS_PER_YEAR + (month - 1) * DAYS_PER_MONTH + (day - 1)
+    let quarter = values[1];
+    let week = values[2];
+    // Handles arbitrary negative/overflowed quarters and weeks linearly
+    (year - 1) * WEEKS_PER_YEAR + (quarter - 1) * WEEKS_PER_QUARTER + (week - 1)
 }
 
 pub fn from_tick(tick) {
-    let year = floor_div(tick, DAYS_PER_YEAR) + 1;
-    let rem = pos_mod(tick, DAYS_PER_YEAR);
-    let month = rem / DAYS_PER_MONTH + 1;
-    let day = rem % DAYS_PER_MONTH + 1;
-    [year, month, day]
+    let year = floor_div(tick, WEEKS_PER_YEAR) + 1;
+    let rem = pos_mod(tick, WEEKS_PER_YEAR);
+    let quarter = rem / WEEKS_PER_QUARTER + 1;
+    let week = rem % WEEKS_PER_QUARTER + 1;
+    [year, quarter, week]
 }
 
 pub fn humanizer(ctx) {
     let v = ctx.values;
     let p = ctx.precision;
     let y = v[0];
-    let m = v[1];
-    let d = v[2];
+    let q = v[1];
+    let w = v[2];
     if ctx.language == "zh" {
         if p <= 1 {
-            `帝历${y}年`
+            `${y}财年`
         } else if p == 2 {
-            `帝历${y}年${m}月`
+            `${y}财年 Q${q}`
         } else {
-            `帝历${y}年${m}月${d}日`
+            `${y}财年 Q${q} 第${w}周`
         }
     } else if p <= 1 {
-        `Year ${y}`
+        `FY${y}`
     } else if p == 2 {
-        `Year ${y}, Month ${m}`
+        `FY${y} Q${q}`
     } else {
-        `Year ${y}, Month ${m}, Day ${d}`
+        `FY${y} Q${q} W${w}`
     }
 }
 ```
 
-For leap-year or variable-month calendars, model `to_tick` / `from_tick` using cycle math (see `examples/lunar.rn` or `crates/weft-core/rune/gregorian.rn` in the weft repo if available).
+For irregular calendars (leap years, variable month lengths), compute `to_tick` / `from_tick` via cycle math (see `examples/lunar.rn` or `crates/weft-core/rune/gregorian.rn` in the Weft repo if available).
 
 ---
 
@@ -144,19 +143,17 @@ Register in `story`:
 
 ```weft
 story {
-  title = "..."
-  calculable_props = {
-    zodiac = "zodiac.rn"
-  }
+  title            = "平台演进时间轴"
+  calculable_props = { cohort = "cohort.rn" }
 }
 ```
 
 Enable on an entity:
 
 ```weft
-entity Alice {
-  base_time        = [1996, 8, 12]
-  calculable_props = [zodiac]
+entity "api/v2" {
+  base_time        = [2025, 4, 10]
+  calculable_props = [cohort]
 }
 ```
 
@@ -175,23 +172,23 @@ Export `pub fn calculable_prop(ctx)`:
       "minimums": [0, 1, 1, 0, 0, 0]
     },
     "entity": {
-      "id": "Alice",
+      "id": "api/v2",
       "base_time": {
-        "values": [1996, 8, 12, 0, 0, 0],
+        "values": [2025, 4, 10, 0, 0, 0],
         "precision": 3,
-        "tick": 63006912000
+        "tick": 63911462400
       },
       "description": "...",
-      "belong_to": ["GroupA"],
-      "extra_props": { "role": "hero" }
+      "belong_to": ["平台组"],
+      "extra_props": { "kind": "service" }
     }
   }
   ```
-  - `ctx.entity.base_time` and `ctx.entity.description` are `()` (unit) when absent on the entity!
+  - `ctx.entity.base_time` and `ctx.entity.description` are `()` (unit) when omitted on the entity.
   - `ctx.entity.extra_props` contains the entity's raw static extra fields (not outputs of other calculable props).
 - **Return value**:
-  - Return `()` to skip writing the key (recommended when optional input data like `base_time` is missing or lacks precision).
-  - Otherwise return any JSON-serializable value: string, int, float, bool, array `[...]`, or object `#{ ... }`. The host stores it in `entity.extra_props[<registered_id>]`.
+  - Return `()` to omit the key (recommended when required input like `base_time` is absent or lacks precision).
+  - Otherwise return any JSON-serializable value: string, int, float, bool, array `[...]`, or object `#{ ... }`. The host merges it into `entity.extra_props[<registered_id>]`.
 
 ### Minimal Calculable Property Template
 
@@ -218,27 +215,26 @@ pub fn calculable_prop(ctx) {
         () => return (),
         bt => bt,
     };
-    if bt.precision < 1 {
+    if bt.precision < 2 {
         return ();
     }
 
     let year = bt.values[0];
-    let animals = if zh {
-        ["猴", "鸡", "狗", "猪", "鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊"]
+    let month = bt.values[1];
+    let quarter = (month - 1) / 3 + 1;
+    if zh {
+        `${year}年 Q${quarter}`
     } else {
-        ["Monkey", "Rooster", "Dog", "Pig", "Rat", "Ox", "Tiger", "Rabbit", "Dragon", "Snake", "Horse", "Goat"]
-    };
-    let idx = year % 12;
-    let idx = if idx < 0 { idx + 12 } else { idx };
-    animals[idx]
+        `${year}-Q${quarter}`
+    }
 }
 ```
 
 ## Verification Checklist for `.rn` Plugins
 
-Always verify plugins by running `weft check` WITHOUT `--syntax-only`, exercising both locales and edge cases (missing `base_time`, low precision, negative/overflow time offsets):
+Always verify plugins by running `weft check` WITHOUT `--syntax-only`, testing both locales and edge cases (omitted `base_time`, low precision, overflow/negative time offsets):
 
 ```bash
-"$WEFT" check path/to/story.weft --deny-warnings --lang zh
-"$WEFT" check path/to/story.weft --deny-warnings --lang en
+"$WEFT" check path/to/doc.weft --deny-warnings --lang zh
+"$WEFT" check path/to/doc.weft --deny-warnings --lang en
 ```

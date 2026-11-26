@@ -1,7 +1,7 @@
 {
   "name": "weft-writer",
   "version": "0.1.0",
-  "description": "Author, validate, and format .weft story documents and .rn Rune calendar/calculable-prop plugins using the weft CLI.",
+  "description": "Author, validate, and format .weft timeline documents and .rn Rune time-axis/calculable-prop plugins using the weft CLI.",
   "author": {
     "name": "asinkLuno"
   },
