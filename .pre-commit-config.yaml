@@ -1,0 +1,15 @@
+exclude: ^tests/
+
+repos:
+  - repo: https://github.com/hukkin/mdformat
+    rev: 1.0.0
+    hooks:
+      - id: mdformat
+        args: [--number]
+        additional_dependencies:
+          - mdformat-gfm==1.0.0
+
+  - repo: https://github.com/hougesen/mdsf
+    rev: v0.12.1
+    hooks:
+      - id: mdsf-format

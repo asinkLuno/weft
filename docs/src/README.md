@@ -1,10 +1,7 @@
-# Weft 开发文档
+# Weft 用户文档
 
-这本书记录 Weft 故事文档（WeftDoc）的数据格式与 Rune 插件接口。一个历法或 calculable prop 各对应一份 `.rn` 文件；历法负责时间的计算与展示，可计算属性按语言返回属性值。
+Weft 用一个 `.weft` 文本文件描述故事：元信息、实体与归属、实体关系、事件和叙事线。写好后用 `weft` 命令检查并格式化，应用负责把它渲染成故事。
 
-- [数据格式](weftdoc.md)：故事 YAML 的顶层结构、id 引用与解析流程。
-- [历法脚本](rune-calendar.md)：时间分量、归一化、排序和日期展示。
-- [Calculable props 脚本](rune-calculable-props.md)：从实体数据计算属性值，写进 `extra_props`。
-- [后端设计](design/README.md)：从 Phase 时间模型开始，说明领域对象、历法运行时与文档解析管线，并提供 UML 图。
-
-内置历法见 `src-tauri/rune/gregorian.rn`；星座属性示例见 `examples/constellation.rn`，需要在故事中显式注册。
+- 第一次写：从[语言指南](weft-syntax.md)的“最小文档”开始。
+- 检查语法、统一格式：见 [weft CLI](weft-cli.md)。
+- 完整示例：仓库中的 `examples/story.weft`。

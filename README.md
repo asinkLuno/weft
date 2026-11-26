@@ -1,6 +1,9 @@
-# Tauri + React + Typescript
+# Weft
 
-[Rune 脚本规范（mdBook）](docs/src/README.md)：[历法](docs/src/rune-calendar.md)与 [calculable props](docs/src/rune-calculable-props.md)。
+## 文档
+
+- [Weft 语言指南](docs/src/weft-syntax.md)：`.weft` 怎么写。
+- [weft CLI](docs/src/weft-cli.md)：`weft check` 检查、`weft fmt` 格式化。
 
 在仓库根目录运行 `mdbook serve docs` 可本地阅读。
 
