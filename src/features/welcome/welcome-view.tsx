@@ -6,12 +6,13 @@ import {
   History,
   Waypoints,
 } from "lucide-react";
+import { memo } from "react";
 import { WeftPrint } from "@/components/weft-art";
 import { type Lang, strings } from "@/i18n";
 
 const PATH_SEP_RE = /[\\/]/;
 
-export function WelcomeView({
+export const WelcomeView = memo(function WelcomeView({
   lang,
   recents,
   onOpen,
@@ -119,4 +120,4 @@ export function WelcomeView({
       </main>
     </div>
   );
-}
+});

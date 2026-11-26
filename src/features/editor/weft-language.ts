@@ -8,6 +8,20 @@ import {
   TOP_KEYWORDS,
 } from "./weft-schema";
 
+const NUMBER_RE = /^[0-9]+(?:\.[0-9]+)?/;
+const OPERATOR_RE = /^[+\-=.]/;
+const PUNCTUATION_RE = /^[{}[\],;]/;
+
+function hasFollowingEquals(line: string, startPos: number): boolean {
+  for (let i = startPos; i < line.length; i++) {
+    const ch = line.charCodeAt(i);
+    // space, tab, carriage return
+    if (ch === 32 || ch === 9 || ch === 13) continue;
+    return ch === 61; // '='
+  }
+  return false;
+}
+
 type WeftParserState = {
   inBlockComment: boolean;
   inMultilineString: boolean;
@@ -94,15 +108,15 @@ export const weftLanguage = StreamLanguage.define<WeftParserState>({
       state.expectDeclName = false;
       return "operator";
     }
-    if (stream.match(/^[0-9]+(?:\.[0-9]+)?/)) {
+    if (stream.match(NUMBER_RE)) {
       state.expectDeclName = false;
       return "number";
     }
-    if (stream.match(/^[+\-=.]/)) {
+    if (stream.match(OPERATOR_RE)) {
       state.expectDeclName = false;
       return "operator";
     }
-    if (stream.match(/^[{}[\],;]/)) {
+    if (stream.match(PUNCTUATION_RE)) {
       state.expectDeclName = false;
       return "punctuation";
     }
@@ -122,7 +136,7 @@ export const weftLanguage = StreamLanguage.define<WeftParserState>({
       }
       if (BUILTIN_PROPS.has(word)) return "propertyName";
       // Look ahead for `=` to highlight custom extra_props keys as propertyName
-      if (/^\s*=/.test(stream.string.slice(stream.pos))) {
+      if (hasFollowingEquals(stream.string, stream.pos)) {
         return "propertyName";
       }
       return "variableName";

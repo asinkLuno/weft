@@ -128,6 +128,8 @@ const validationMessages = {
   },
 } satisfies Record<Lang, Record<ValidationCode, string>>;
 
+const TEMPLATE_PARAM_RE = /\{(\w+)\}/g;
+
 export function formatValidationError(
   error: ValidationError,
   lang: Lang,
@@ -140,7 +142,7 @@ export function formatValidationError(
     string
   >;
   return template.replace(
-    /\{(\w+)\}/g,
+    TEMPLATE_PARAM_RE,
     (_, key: string) => params[key] ?? `{${key}}`,
   );
 }

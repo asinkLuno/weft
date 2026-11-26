@@ -59,13 +59,138 @@ export type EntityDetail = {
   baseTime?: string;
   description?: string;
   extraProps: Array<[string, string]>;
-  parents: Array<{ id: string; name: string }>;
-  children: Array<{ id: string; name: string }>;
+  parents: Array<{ id: string; label: string }>;
+  children: Array<{ id: string; label: string }>;
   links: EntityLinkEntry[];
   events: EntityEventEntry[];
 };
 
 const EMPTY_SIZES: ReadonlyMap<string, NodeSize> = new Map();
+const BELONG_EDGE_STYLE = {
+  stroke: "var(--color-base-content)",
+  strokeOpacity: 0.35,
+  strokeWidth: 1.5,
+} as const;
+
+type EntityDocIndex = {
+  parentsById: Map<string, Set<string>>;
+  childrenById: Map<string, Array<{ id: string; label: string }>>;
+  linksByEntity: Map<string, EntityLinkEntry[]>;
+  eventsByEntity: Map<string, EntityEventEntry[]>;
+};
+
+const entityIndexCache = new WeakMap<WeftDoc, EntityDocIndex>();
+
+// 按 WeftDoc 实例缓存反向索引：点击不同实体查详情 O(1)，同时与 buildEntityView 复用 parentsById
+function getEntityDocIndex(doc: WeftDoc): EntityDocIndex {
+  const cached = entityIndexCache.get(doc);
+  if (cached) return cached;
+
+  const entityMap = doc.entity ?? {};
+  const parentsById = entityParents(doc.belong_dag);
+
+  const childrenById = new Map<string, Array<{ id: string; label: string }>>();
+  for (const [childId, pSet] of parentsById.entries()) {
+    const child = entityMap[childId];
+    if (!child) continue;
+    for (const parentId of pSet) {
+      let list = childrenById.get(parentId);
+      if (!list) {
+        list = [];
+        childrenById.set(parentId, list);
+      }
+      list.push({ id: childId, label: child.id });
+    }
+  }
+  for (const list of childrenById.values()) {
+    list.sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  const linksByEntity = new Map<string, EntityLinkEntry[]>();
+  const sortedGroups = Object.entries(doc.entity_link ?? {}).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  const pushLink = (entityId: string, entry: EntityLinkEntry) => {
+    let list = linksByEntity.get(entityId);
+    if (!list) {
+      list = [];
+      linksByEntity.set(entityId, list);
+    }
+    list.push(entry);
+  };
+  for (const [group, entries] of sortedGroups) {
+    for (let i = 0; i < entries.length; i++) {
+      const {
+        entities: [a, b],
+        relations,
+      } = entries[i];
+      const entA = entityMap[a];
+      const entB = entityMap[b];
+      if (!entA || !entB) continue;
+      pushLink(a, {
+        key: `${group}:${i}:a`,
+        group,
+        relation: relations,
+        peerId: b,
+        peerName: entB.id,
+      });
+      if (a !== b) {
+        pushLink(b, {
+          key: `${group}:${i}:b`,
+          group,
+          relation: relations,
+          peerId: a,
+          peerName: entA.id,
+        });
+      }
+    }
+  }
+
+  const rawEventsByEntity = new Map<
+    string,
+    Array<EntityEventEntry & { tick: number }>
+  >();
+  for (const [id, ev] of Object.entries(doc.event ?? {})) {
+    const participants = ev.entities;
+    if (!participants?.length) continue;
+    const entry: EntityEventEntry & { tick: number } = {
+      id,
+      time: formatTimeRange(ev.start_display, ev.end_display),
+      description: ev.description,
+      tick: ev.start_tick ?? Number.MAX_SAFE_INTEGER,
+    };
+    const seen = participants.length > 1 ? new Set<string>() : null;
+    for (const entityId of participants) {
+      if (seen) {
+        if (seen.has(entityId)) continue;
+        seen.add(entityId);
+      }
+      let list = rawEventsByEntity.get(entityId);
+      if (!list) {
+        list = [];
+        rawEventsByEntity.set(entityId, list);
+      }
+      list.push(entry);
+    }
+  }
+  const eventsByEntity = new Map<string, EntityEventEntry[]>();
+  for (const [entityId, list] of rawEventsByEntity.entries()) {
+    list.sort((a, b) => a.tick - b.tick || a.id.localeCompare(b.id));
+    eventsByEntity.set(
+      entityId,
+      list.map(({ id, time, description }) => ({ id, time, description })),
+    );
+  }
+
+  const index: EntityDocIndex = {
+    parentsById,
+    childrenById,
+    linksByEntity,
+    eventsByEntity,
+  };
+  entityIndexCache.set(doc, index);
+  return index;
+}
 
 // 从归属 DAG 收集直接归属；后端已保证 ID 合法且无环。
 export function entityParents(
@@ -155,20 +280,21 @@ function buildBelongEdges(
   parentsById: ReadonlyMap<string, Set<string>>,
   visibleSet: ReadonlySet<string>,
 ): Edge[] {
-  return filtered.flatMap(([id]) =>
-    [...(parentsById.get(id) ?? [])]
-      .filter((p) => visibleSet.has(p))
-      .map((p) => ({
+  const edges: Edge[] = [];
+  for (const [id] of filtered) {
+    const parents = parentsById.get(id);
+    if (!parents) continue;
+    for (const p of parents) {
+      if (!visibleSet.has(p)) continue;
+      edges.push({
         id: `${p}->${id}`,
         source: p,
         target: id,
-        style: {
-          stroke: "var(--color-base-content)",
-          strokeOpacity: 0.35,
-          strokeWidth: 1.5,
-        },
-      })),
-  );
+        style: BELONG_EDGE_STYLE,
+      });
+    }
+  }
+  return edges;
 }
 
 type LinkEdgeRecord = {
@@ -239,70 +365,6 @@ function buildLinkEdges(
   });
 }
 
-function collectEntityChildren(
-  entityId: string,
-  parentsById: ReadonlyMap<string, Set<string>>,
-  entityMap: Readonly<Record<string, EntityT>>,
-): Array<{ id: string; name: string }> {
-  const children: Array<{ id: string; name: string }> = [];
-  for (const [childId, pSet] of parentsById.entries()) {
-    const child = entityMap[childId];
-    if (child && pSet.has(entityId)) {
-      children.push({ id: childId, name: child.id });
-    }
-  }
-  return children.sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function collectEntityLinks(
-  entityId: string,
-  entityLinks: WeftDoc["entity_link"],
-  entityMap: Readonly<Record<string, EntityT>>,
-): EntityLinkEntry[] {
-  const links: EntityLinkEntry[] = [];
-  const groups = Object.entries(entityLinks ?? {}).sort(([a], [b]) =>
-    a.localeCompare(b),
-  );
-  for (const [group, entries] of groups) {
-    for (let i = 0; i < entries.length; i++) {
-      const {
-        entities: [a, b],
-        relations,
-      } = entries[i];
-      const peerId = a === entityId ? b : b === entityId ? a : null;
-      const peer = peerId ? entityMap[peerId] : undefined;
-      if (peerId && peer) {
-        links.push({
-          key: `${group}:${i}:${a === entityId ? "a" : "b"}`,
-          group,
-          relation: relations,
-          peerId,
-          peerName: peer.id,
-        });
-      }
-    }
-  }
-  return links;
-}
-
-function collectEntityEvents(
-  entityId: string,
-  eventMap: WeftDoc["event"],
-): EntityEventEntry[] {
-  const events: Array<EntityEventEntry & { tick: number }> = [];
-  for (const [id, ev] of Object.entries(eventMap ?? {})) {
-    if (!ev.entities?.includes(entityId)) continue;
-    events.push({
-      id,
-      time: formatTimeRange(ev.start_display, ev.end_display),
-      description: ev.description,
-      tick: ev.start_tick ?? Number.MAX_SAFE_INTEGER,
-    });
-  }
-  events.sort((a, b) => a.tick - b.tick || a.id.localeCompare(b.id));
-  return events.map(({ id, time, description }) => ({ id, time, description }));
-}
-
 export function buildEntityDetail(
   doc: WeftDoc | null,
   lang: Lang,
@@ -310,13 +372,14 @@ export function buildEntityDetail(
 ): EntityDetail | null {
   const entityMap = doc?.entity;
   const entity = entityMap?.[entityId];
-  if (!entity || !entityMap) return null;
+  if (!doc || !entity || !entityMap) return null;
 
   const t = strings[lang];
-  const parentsById = entityParents(doc?.belong_dag);
+  const { parentsById, childrenById, linksByEntity, eventsByEntity } =
+    getEntityDocIndex(doc);
   const parents = [...(parentsById.get(entityId) ?? [])]
-    .map((id) => ({ id, name: entityMap[id]?.id ?? id }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .map((id) => ({ id, label: entityMap[id]?.id ?? id }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   return {
     id: entityId,
@@ -329,9 +392,9 @@ export function buildEntityDetail(
     description: entity.description,
     extraProps: formatExtraProps(entity.extra_props),
     parents,
-    children: collectEntityChildren(entityId, parentsById, entityMap),
-    links: collectEntityLinks(entityId, doc?.entity_link, entityMap),
-    events: collectEntityEvents(entityId, doc?.event),
+    children: childrenById.get(entityId) ?? [],
+    links: linksByEntity.get(entityId) ?? [],
+    events: eventsByEntity.get(entityId) ?? [],
   };
 }
 
@@ -413,7 +476,7 @@ export function buildEntityView(
   lang: Lang,
   dim: "belong" | "link" | null,
   pick: string | null,
-  saved: Record<string, Point>,
+  saved: Readonly<Record<string, Point>>,
 ) {
   const t = strings[lang];
   const entityMap = doc?.entity ?? {};
@@ -421,7 +484,9 @@ export function buildEntityView(
     a.localeCompare(b),
   );
   const nameOf = (id: string) => entityMap[id]?.id ?? id;
-  const parentsById = entityParents(doc?.belong_dag);
+  const parentsById = doc
+    ? getEntityDocIndex(doc).parentsById
+    : entityParents(undefined);
   const ancestorsOf = createAncestorsLookup(parentsById);
   const { targetSet, belongSections } = buildBelongSections(
     parentsById,
@@ -433,6 +498,7 @@ export function buildEntityView(
     dim === "belong" && pick && targetSet.has(pick) ? pick : null;
   const linkGroups = doc?.entity_link ?? {};
   const groups = Object.keys(linkGroups).sort();
+  const linkSections = [groups.map((g) => ({ v: g, label: g }))];
   const activeLink = dim === "link" && pick && pick in linkGroups ? pick : null;
   const activeLinks = activeLink ? (linkGroups[activeLink] ?? []) : [];
 
@@ -474,7 +540,7 @@ export function buildEntityView(
     activePick,
     activeLink,
     belongSections,
-    groups,
+    linkSections,
     nameOf,
   };
 }

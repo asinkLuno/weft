@@ -157,17 +157,22 @@ function ParentBadge({
     setCoords(null);
   }, []);
 
+  const isOpen = coords !== null;
+
   // 画布缩放或滚动时自动收起预览，防止浮层停在旧坐标
   useEffect(() => {
-    if (!coords) return;
+    if (!isOpen) return;
     const dismiss = () => setCoords(null);
     window.addEventListener("wheel", dismiss, { passive: true });
-    window.addEventListener("pointerdown", dismiss, { capture: true });
+    window.addEventListener("pointerdown", dismiss, {
+      capture: true,
+      passive: true,
+    });
     return () => {
       window.removeEventListener("wheel", dismiss);
       window.removeEventListener("pointerdown", dismiss, { capture: true });
     };
-  }, [coords]);
+  }, [isOpen]);
 
   if (!preview) {
     return (

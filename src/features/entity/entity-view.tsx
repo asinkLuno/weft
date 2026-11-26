@@ -4,6 +4,7 @@ import {
   Fragment,
   memo,
   type RefObject,
+  startTransition,
   useCallback,
   useEffect,
   useMemo,
@@ -38,7 +39,10 @@ function useDismissDetails(
         event.stopImmediatePropagation();
       }
     }
-    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("pointerdown", handlePointerDown, {
+      capture: true,
+      passive: true,
+    });
     document.addEventListener("keydown", handleKeyDown, true);
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown, true);
@@ -48,15 +52,17 @@ function useDismissDetails(
 }
 
 // 维度筛选下拉（faceted filter）：点击画布/外部或按 Esc 自动收起
-function DimensionFilter({
+const DimensionFilter = memo(function DimensionFilter({
   label,
   sections,
-  active,
+  activeValue,
+  activeLabel,
   onChoose,
 }: {
   label: string;
   sections: Array<Array<{ v: string; label: string }>>;
-  active: { value: string; label: string } | null;
+  activeValue: string | null;
+  activeLabel: string | null;
   onChoose: (v: string) => void;
 }) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
@@ -65,7 +71,7 @@ function DimensionFilter({
 
   const count = sections.reduce((n, s) => n + s.length, 0);
   const summaryClass = `btn btn-sm btn-outline ${
-    active ? "border-primary text-primary" : "border-base-300"
+    activeValue ? "border-primary text-primary" : "border-base-300"
   }${count === 0 ? " btn-disabled" : ""}`;
 
   return (
@@ -76,8 +82,8 @@ function DimensionFilter({
     >
       <summary className={summaryClass}>
         {label}
-        {active && (
-          <span className="badge badge-xs badge-primary">{active.label}</span>
+        {activeLabel && (
+          <span className="badge badge-xs badge-primary">{activeLabel}</span>
         )}
         <ChevronDown className="size-3.5" />
       </summary>
@@ -94,7 +100,7 @@ function DimensionFilter({
               <li key={v}>
                 <button
                   type="button"
-                  className={active?.value === v ? "menu-active" : ""}
+                  className={activeValue === v ? "menu-active" : ""}
                   onClick={() => {
                     onChoose(v);
                     if (detailsRef.current) detailsRef.current.open = false;
@@ -109,7 +115,7 @@ function DimensionFilter({
       </ul>
     </details>
   );
-}
+});
 
 function useSavedLayoutPositions(path: string) {
   const layoutKey = `layout:${path}`;
@@ -128,6 +134,11 @@ function useSavedLayoutPositions(path: string) {
     };
   }, [layoutKey]);
 
+  const getPositions = useCallback(
+    (): Readonly<Record<string, Point>> => savedRef.current,
+    [],
+  );
+
   const persist = useCallback(
     (id: string, pos: Point) => {
       const next = { ...savedRef.current, [id]: pos };
@@ -139,7 +150,7 @@ function useSavedLayoutPositions(path: string) {
 
   return {
     ready: loadedKey === layoutKey,
-    positions: savedRef.current,
+    getPositions,
     persist,
   };
 }
@@ -169,8 +180,12 @@ function EntityViewInner({
   const focusSeqRef = useRef(0);
 
   const savedLayout = useSavedLayoutPositions(path);
-  const hasEntities = Object.keys(doc?.entity ?? {}).length > 0;
+  const hasEntities = useMemo(
+    () => Object.keys(doc?.entity ?? {}).length > 0,
+    [doc],
+  );
 
+  // 通过稳定的 getPositions 回调按需读取已保存坐标：拖拽节点后再点击选中不触发 buildEntityView 重建
   const view = useMemo(
     () =>
       hasEntities && savedLayout.ready
@@ -179,10 +194,17 @@ function EntityViewInner({
             lang,
             filter?.dim ?? null,
             filter?.pick ?? null,
-            savedLayout.positions,
+            savedLayout.getPositions(),
           )
         : null,
-    [doc, lang, filter, hasEntities, savedLayout.ready, savedLayout.positions],
+    [
+      doc,
+      lang,
+      filter,
+      hasEntities,
+      savedLayout.ready,
+      savedLayout.getPositions,
+    ],
   );
 
   const selectedDetail = useMemo(
@@ -198,15 +220,29 @@ function EntityViewInner({
 
   const handleCloseDetail = useCallback(() => setSelectedId(null), []);
 
+  const chooseBelong = useCallback((pick: string) => {
+    startTransition(() => {
+      setFilter((prev) =>
+        prev?.dim === "belong" && prev.pick === pick
+          ? null
+          : { dim: "belong", pick },
+      );
+    });
+  }, []);
+
+  const chooseLink = useCallback((pick: string) => {
+    startTransition(() => {
+      setFilter((prev) =>
+        prev?.dim === "link" && prev.pick === pick
+          ? null
+          : { dim: "link", pick },
+      );
+    });
+  }, []);
+
   if (!hasEntities)
     return <EmptyState icon={Waypoints}>{t.entityEmpty}</EmptyState>;
   if (!view) return <EmptyState>{t.loading}</EmptyState>;
-
-  function choose(dim: "belong" | "link", pick: string) {
-    setFilter((prev) =>
-      prev?.dim === dim && prev.pick === pick ? null : { dim, pick },
-    );
-  }
 
   const {
     nodes,
@@ -215,7 +251,7 @@ function EntityViewInner({
     activePick,
     activeLink,
     belongSections,
-    groups,
+    linkSections,
     nameOf,
   } = view;
   const canvasKey = `${path}|${activePick ?? ""}|${activeLink ?? ""}`;
@@ -226,16 +262,16 @@ function EntityViewInner({
         <DimensionFilter
           label={t.belongTo}
           sections={belongSections}
-          active={
-            activePick ? { value: activePick, label: nameOf(activePick) } : null
-          }
-          onChoose={(v) => choose("belong", v)}
+          activeValue={activePick}
+          activeLabel={activePick ? nameOf(activePick) : null}
+          onChoose={chooseBelong}
         />
         <DimensionFilter
           label={t.linkGroup}
-          sections={[groups.map((g) => ({ v: g, label: g }))]}
-          active={activeLink ? { value: activeLink, label: activeLink } : null}
-          onChoose={(v) => choose("link", v)}
+          sections={linkSections}
+          activeValue={activeLink}
+          activeLabel={activeLink}
+          onChoose={chooseLink}
         />
       </div>
       <div className="flex min-h-0 flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/60">
@@ -245,7 +281,7 @@ function EntityViewInner({
             initialNodes={nodes}
             edges={edges}
             layoutMode={layoutMode}
-            savedPositions={savedLayout.positions}
+            getSavedPositions={savedLayout.getPositions}
             selectedId={selectedDetail?.id ?? null}
             focusTarget={focusTarget}
             lang={lang}

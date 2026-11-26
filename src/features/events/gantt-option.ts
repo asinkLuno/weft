@@ -120,8 +120,10 @@ export function breakKey(brk: GanttBreak): string {
   return `${brk.start}:${brk.end}`;
 }
 
+const HTML_ESCAPE_RE = /[&<>"']/g;
+
 function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (ch) => HTML_ESCAPE_MAP[ch] ?? ch);
+  return text.replace(HTML_ESCAPE_RE, (ch) => HTML_ESCAPE_MAP[ch] ?? ch);
 }
 
 function formatTooltipHtml(

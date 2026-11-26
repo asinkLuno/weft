@@ -5,7 +5,7 @@ import {
   themeLight,
 } from "dockview-react";
 import { FileText, RotateCcw, X as XIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DiskStatus, DraftStore } from "@/features/document/use-document";
 import type { WeftDeclKind } from "@/features/editor/weft-completion";
 import { type CompileDiagnostic, type Lang, strings } from "@/i18n";
@@ -16,6 +16,7 @@ import {
   type EditorRevealRequest,
   WorkspaceDocContext,
   WorkspaceEditorContext,
+  WorkspaceToneContext,
 } from "./workspace-context";
 import {
   applyDefaultLayout,
@@ -32,6 +33,33 @@ import {
 import "dockview-react/dist/styles/dockview.css";
 
 const LAYOUT_SETTINGS_KEY = "workspaceLayout:v1";
+
+const FOOTER_FILE_ICON = (
+  <FileText className="size-3.5 shrink-0" aria-hidden="true" />
+);
+const FOOTER_RESET_ICON = <RotateCcw className="size-3.5" />;
+const FOOTER_CLOSE_ICON = <XIcon className="size-3.5" />;
+
+// 隔离 Dockview 宿主：flash / diagnostic / dirty 等状态更新时不触发 DockviewReact 重渲染
+const WorkspaceDockview = memo(function WorkspaceDockview({
+  onReady,
+}: {
+  onReady: (event: DockviewReadyEvent) => void;
+}) {
+  return (
+    <DockviewReact
+      theme={themeLight}
+      disableDnd
+      disableFloatingGroups
+      components={WORKSPACE_COMPONENTS}
+      defaultTabComponent={WorkspaceTab}
+      leftHeaderActionsComponent={WorkspaceAddTabAction}
+      rightHeaderActionsComponent={WorkspaceGroupActions}
+      watermarkComponent={WorkspaceWatermark}
+      onReady={onReady}
+    />
+  );
+});
 
 export function Workspace({
   path,
@@ -73,6 +101,11 @@ export function Workspace({
   const persistTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  // 挂载即预取布局，与 Dockview 初始化并行消除 onReady 瀑布
+  const [initialLayoutPromise] = useState(() =>
+    settings.get<unknown>(LAYOUT_SETTINGS_KEY),
+  );
+  const initialLayoutConsumedRef = useRef(false);
 
   // 快捷键回调读最新动作：渲染期不写 ref，放到提交阶段同步
   useEffect(() => {
@@ -148,8 +181,12 @@ export function Workspace({
         disposable.dispose();
       };
 
-      void settings
-        .get<unknown>(LAYOUT_SETTINGS_KEY)
+      const layoutPromise = initialLayoutConsumedRef.current
+        ? settings.get<unknown>(LAYOUT_SETTINGS_KEY)
+        : initialLayoutPromise;
+      initialLayoutConsumedRef.current = true;
+
+      void layoutPromise
         .then((saved) => {
           if (cancelled || apiRef.current !== api) return;
           if (!restoreLayout(api, saved)) {
@@ -166,7 +203,7 @@ export function Workspace({
           }
         });
     },
-    [schedulePersistLayout],
+    [initialLayoutPromise, schedulePersistLayout],
   );
 
   const [revealRequest, setRevealRequest] =
@@ -241,17 +278,9 @@ export function Workspace({
       <main className="min-h-0 flex-1 overflow-hidden">
         <WorkspaceDocContext.Provider value={docContextValue}>
           <WorkspaceEditorContext.Provider value={editorContextValue}>
-            <DockviewReact
-              theme={themeLight}
-              disableDnd
-              disableFloatingGroups
-              components={WORKSPACE_COMPONENTS}
-              defaultTabComponent={WorkspaceTab}
-              leftHeaderActionsComponent={WorkspaceAddTabAction}
-              rightHeaderActionsComponent={WorkspaceGroupActions}
-              watermarkComponent={WorkspaceWatermark}
-              onReady={onReady}
-            />
+            <WorkspaceToneContext.Provider value={tone}>
+              <WorkspaceDockview onReady={onReady} />
+            </WorkspaceToneContext.Provider>
           </WorkspaceEditorContext.Provider>
         </WorkspaceDocContext.Provider>
       </main>
@@ -261,7 +290,7 @@ export function Workspace({
           flash ? "bg-base-300" : "bg-base-200"
         }`}
       >
-        <FileText className="size-3.5 shrink-0" aria-hidden="true" />
+        {FOOTER_FILE_ICON}
         <span className="min-w-0 flex-1 truncate font-mono" title={path}>
           {path}
         </span>
@@ -287,7 +316,7 @@ export function Workspace({
           title={t.resetLayout}
           onClick={handleResetLayout}
         >
-          <RotateCcw className="size-3.5" />
+          {FOOTER_RESET_ICON}
         </button>
         <button
           type="button"
@@ -296,7 +325,7 @@ export function Workspace({
           title={t.close}
           onClick={onClose}
         >
-          <XIcon className="size-3.5" />
+          {FOOTER_CLOSE_ICON}
         </button>
       </footer>
     </div>

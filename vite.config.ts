@@ -14,6 +14,26 @@ export default defineConfig(() => ({
       "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
+  build: {
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: "zrender",
+              test: /[\\/]node_modules[\\/]zrender[\\/]/,
+              priority: 20,
+            },
+            {
+              name: "echarts",
+              test: /[\\/]node_modules[\\/]echarts[\\/]/,
+              priority: 10,
+            },
+          ],
+        },
+      },
+    },
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

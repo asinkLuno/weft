@@ -81,10 +81,13 @@ export const EventsGantt = memo(function EventsGantt({
   onSelectEvent: (eventId: string, listName: string) => void;
 }) {
   const model = useMemo(() => buildGanttChartModel(ids, byId), [ids, byId]);
+  const breakEdges = useMemo(() => {
+    const ticks = model.breaks.flatMap((b) => [b.start, b.end]);
+    return { ticks, tickSet: new Set(ticks) };
+  }, [model.breaks]);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
   const onSelectEventRef = useRef(onSelectEvent);
-  onSelectEventRef.current = onSelectEvent;
   const expandedBreaksRef = useRef<Set<string>>(new Set());
   const viewRangeRef = useRef<{ min: number; max: number }>({
     min: model.minTick,
@@ -92,6 +95,10 @@ export const EventsGantt = memo(function EventsGantt({
   });
   const fetchTimerRef = useRef<number | null>(null);
   const requestSeqRef = useRef(0);
+
+  useEffect(() => {
+    onSelectEventRef.current = onSelectEvent;
+  }, [onSelectEvent]);
 
   const [isZoomed, setIsZoomed] = useState(false);
   const [hasExpandedBreak, setHasExpandedBreak] = useState(false);
@@ -122,7 +129,8 @@ export const EventsGantt = memo(function EventsGantt({
         activeBreaks,
         budget,
       );
-      const extraTicks = model.breaks.flatMap((b) => [b.start, b.end]);
+      const extraTicks = breakEdges.ticks;
+      const extraSet = breakEdges.tickSet;
       const seq = ++requestSeqRef.current;
 
       void invoke<CalendarTick[]>("calendar_axis_ticks", {
@@ -134,7 +142,6 @@ export const EventsGantt = memo(function EventsGantt({
           if (!Array.isArray(result) || result.length === 0) return;
 
           const cache = getSharedTickCache(calendarKey);
-          const extraSet = new Set(extraTicks);
           const axisTickValues: number[] = [];
           for (const item of result) {
             storeTickLabel(cache, item.tick, item.label);
@@ -159,7 +166,7 @@ export const EventsGantt = memo(function EventsGantt({
           // 离线或无后端历法会话时，保留事件自身文案作为降级显示。
         });
     },
-    [calendarKey, cancelPendingRefresh, model.breaks],
+    [breakEdges, calendarKey, cancelPendingRefresh, model.breaks],
   );
 
   const scheduleTickRefresh = useCallback(
@@ -174,7 +181,9 @@ export const EventsGantt = memo(function EventsGantt({
   );
 
   const scheduleRefreshRef = useRef(scheduleTickRefresh);
-  scheduleRefreshRef.current = scheduleTickRefresh;
+  useEffect(() => {
+    scheduleRefreshRef.current = scheduleTickRefresh;
+  }, [scheduleTickRefresh]);
 
   // 初始化与数据/语言变更时重建图配置，同时同步后端历法刻度。
   useEffect(() => {

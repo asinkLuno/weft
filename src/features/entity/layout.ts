@@ -193,24 +193,35 @@ function uniqueUndirectedLinks(
 function stepForceLayout(
   nodes: BoxNode[],
   links: readonly [number, number][],
+  diags: Float64Array,
+  fx: Float64Array,
+  fy: Float64Array,
   cool: number,
 ): void {
   const n = nodes.length;
-  const fx = new Array<number>(n).fill(0);
-  const fy = new Array<number>(n).fill(0);
+  fx.fill(0);
+  fy.fill(0);
 
   for (let i = 0; i < n; i++) {
+    const ni = nodes[i];
+    const ix = ni.cx;
+    const iy = ni.cy;
+    const iw = ni.w;
+    const ih = ni.h;
     for (let j = i + 1; j < n; j++) {
-      const dx = nodes[j].cx - nodes[i].cx;
-      const dy = nodes[j].cy - nodes[i].cy;
-      const dist = Math.hypot(dx, dy) || 1;
-      const idealMin =
-        Math.hypot(nodes[i].w + nodes[j].w, nodes[i].h + nodes[j].h) * 0.45 +
-        90;
+      const nj = nodes[j];
+      const dx = nj.cx - ix;
+      const dy = nj.cy - iy;
+      const distSq = dx * dx + dy * dy;
+      const dist = distSq > 0 ? Math.sqrt(distSq) : 1;
+      const sumW = iw + nj.w;
+      const sumH = ih + nj.h;
+      const idealMin = Math.sqrt(sumW * sumW + sumH * sumH) * 0.45 + 90;
       if (dist < idealMin * 1.8) {
         const repulse = ((idealMin * idealMin) / (dist * dist)) * 18;
-        const rx = (dx / dist) * repulse;
-        const ry = (dy / dist) * repulse;
+        const factor = repulse / dist;
+        const rx = dx * factor;
+        const ry = dy * factor;
         fx[i] -= rx;
         fy[i] -= ry;
         fx[j] += rx;
@@ -222,15 +233,13 @@ function stepForceLayout(
   for (const [a, b] of links) {
     const dx = nodes[b].cx - nodes[a].cx;
     const dy = nodes[b].cy - nodes[a].cy;
-    const dist = Math.hypot(dx, dy) || 1;
-    const ideal =
-      (Math.hypot(nodes[a].w, nodes[a].h) +
-        Math.hypot(nodes[b].w, nodes[b].h)) *
-        0.38 +
-      110;
+    const distSq = dx * dx + dy * dy;
+    const dist = distSq > 0 ? Math.sqrt(distSq) : 1;
+    const ideal = (diags[a] + diags[b]) * 0.38 + 110;
     const pull = (dist - ideal) * 0.08;
-    const px = (dx / dist) * pull;
-    const py = (dy / dist) * pull;
+    const factor = pull / dist;
+    const px = dx * factor;
+    const py = dy * factor;
     fx[a] += px;
     fy[a] += py;
     fx[b] -= px;
@@ -239,13 +248,15 @@ function stepForceLayout(
 
   const maxStep = 36 * (0.2 + 0.8 * cool);
   for (let i = 0; i < n; i++) {
-    fx[i] -= nodes[i].cx * 0.012;
-    fy[i] -= nodes[i].cy * 0.012;
-    const mag = Math.hypot(fx[i], fy[i]);
-    if (mag > 0) {
+    const node = nodes[i];
+    const forceX = fx[i] - node.cx * 0.012;
+    const forceY = fy[i] - node.cy * 0.012;
+    const magSq = forceX * forceX + forceY * forceY;
+    if (magSq > 0) {
+      const mag = Math.sqrt(magSq);
       const scale = Math.min(mag, maxStep) / mag;
-      nodes[i].cx += fx[i] * scale;
-      nodes[i].cy += fy[i] * scale;
+      node.cx += forceX * scale;
+      node.cy += forceY * scale;
     }
   }
 }
@@ -328,9 +339,15 @@ function layoutComponent(
   });
 
   const links = uniqueUndirectedLinks(indexById, edges);
+  const diags = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    diags[i] = Math.hypot(nodes[i].w, nodes[i].h);
+  }
+  const fx = new Float64Array(n);
+  const fy = new Float64Array(n);
   const iterations = 140;
   for (let step = 0; step < iterations; step++) {
-    stepForceLayout(nodes, links, 1 - step / iterations);
+    stepForceLayout(nodes, links, diags, fx, fy, 1 - step / iterations);
     separateBoxes(nodes, padX, padY);
   }
   for (let pass = 0; pass < 32; pass++) {

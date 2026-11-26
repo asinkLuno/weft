@@ -1,6 +1,12 @@
 import { CalendarDays, Code2, type LucideIcon, X } from "lucide-react";
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { entityInitials } from "@/lib/ui";
+
+const CLOSE_ICON = <X className="size-4" />;
+const LOCATE_ICON = <Code2 className="size-3.5" aria-hidden="true" />;
+const CALENDAR_ICON = (
+  <CalendarDays className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+);
 
 const AVATAR_SIZE_CLASS = {
   sm: "w-7 text-[10px]",
@@ -59,13 +65,19 @@ export function DetailPanel({
   onLocate: () => void;
   children: ReactNode;
 }) {
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.defaultPrevented) return;
+      if (event.key === "Escape") onCloseRef.current();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, []);
 
   return (
     <aside
@@ -85,7 +97,7 @@ export function DetailPanel({
             title={closeLabel}
             onClick={onClose}
           >
-            <X className="size-4" />
+            {CLOSE_ICON}
           </button>
         </div>
         <div className="flex items-center justify-between gap-2">
@@ -94,7 +106,7 @@ export function DetailPanel({
             className="btn btn-outline btn-xs border-base-300"
             onClick={onLocate}
           >
-            <Code2 className="size-3.5" aria-hidden="true" />
+            {LOCATE_ICON}
             {locateLabel}
           </button>
           {extraActions}
@@ -135,7 +147,7 @@ export function DetailSection({
 export function DetailTimeRow({ value }: { value: string }) {
   return (
     <div className="flex items-start gap-1.5 text-base-content/70">
-      <CalendarDays className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+      {CALENDAR_ICON}
       <span className="break-words font-mono leading-5">{value}</span>
     </div>
   );

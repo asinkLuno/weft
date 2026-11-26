@@ -9,7 +9,7 @@ import {
   useReactFlow,
 } from "@xyflow/react";
 import { Maximize, Minus, Plus } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Lang } from "@/i18n";
 import { EntityNode, EntitySelectContext } from "./entity-card";
 import { FloatingEdge } from "./floating-edge";
@@ -25,11 +25,15 @@ import type { EntityFlowNode } from "./model";
 const nodeTypes = { entity: EntityNode };
 const edgeTypes = { floating: FloatingEdge };
 
+const ZOOM_IN_ICON = <Plus className="size-4" />;
+const ZOOM_OUT_ICON = <Minus className="size-4" />;
+const FIT_VIEW_ICON = <Maximize className="size-4" />;
+
 export type EntityCanvasProps = {
   initialNodes: EntityFlowNode[];
   edges: Edge[];
   layoutMode: EntityLayoutMode;
-  savedPositions: Readonly<Record<string, Point>>;
+  getSavedPositions: () => Readonly<Record<string, Point>>;
   selectedId: string | null;
   focusTarget: { id: string; seq: number } | null;
   lang: Lang;
@@ -38,34 +42,43 @@ export type EntityCanvasProps = {
   onPersist?: (id: string, pos: Point) => void;
 };
 
-type MeasuredSnapshot = {
-  sizes: Map<string, NodeSize>;
-  ids: string[];
-  fingerprint: string;
-};
-
-function collectMeasuredSnapshot(
+function computeMeasuredFingerprint(
   nodes: readonly EntityFlowNode[],
   layoutMode: EntityLayoutMode,
   edgeSignature: string,
-): MeasuredSnapshot | null {
+): string | null {
   if (nodes.length === 0) return null;
-  const sizes = new Map<string, NodeSize>();
-  const parts: string[] = [];
-  for (const node of nodes) {
+  let fingerprint = `${layoutMode}|${edgeSignature}|`;
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
     const w = node.measured?.width;
     const h = node.measured?.height;
     if (!w || !h) return null;
     const rw = Math.ceil(w / 2) * 2;
     const rh = Math.ceil(h / 2) * 2;
-    sizes.set(node.id, { width: rw, height: rh });
-    parts.push(`${node.id}:${rw}x${rh}`);
+    if (i > 0) fingerprint += ",";
+    fingerprint += `${node.id}:${rw}x${rh}`;
   }
-  return {
-    sizes,
-    ids: nodes.map((n) => n.id),
-    fingerprint: `${layoutMode}|${edgeSignature}|${parts.join(",")}`,
-  };
+  return fingerprint;
+}
+
+function extractMeasuredLayoutInput(nodes: readonly EntityFlowNode[]): {
+  sizes: Map<string, NodeSize>;
+  ids: string[];
+} {
+  const sizes = new Map<string, NodeSize>();
+  const ids: string[] = new Array(nodes.length);
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    const w = node.measured?.width ?? DEFAULT_NODE_SIZE.width;
+    const h = node.measured?.height ?? DEFAULT_NODE_SIZE.height;
+    sizes.set(node.id, {
+      width: Math.ceil(w / 2) * 2,
+      height: Math.ceil(h / 2) * 2,
+    });
+    ids[i] = node.id;
+  }
+  return { sizes, ids };
 }
 
 function mergeIncomingNodes(
@@ -74,18 +87,32 @@ function mergeIncomingNodes(
   selectedId: string | null,
 ): EntityFlowNode[] {
   const previous = new Map(current.map((node) => [node.id, node]));
-  return incoming.map((next) => {
+  let changed = current.length !== incoming.length;
+  const merged = incoming.map((next, idx) => {
+    const nextSelected = next.id === selectedId;
     const old = previous.get(next.id);
-    return old
-      ? {
-          ...old,
-          ...next,
-          position: old.position,
-          measured: old.measured,
-          selected: next.id === selectedId,
-        }
-      : { ...next, selected: next.id === selectedId };
+    if (!old) {
+      changed = true;
+      return { ...next, selected: nextSelected };
+    }
+    if (
+      old.data === next.data &&
+      old.type === next.type &&
+      Boolean(old.selected) === nextSelected
+    ) {
+      if (current[idx] !== old) changed = true;
+      return old;
+    }
+    changed = true;
+    return {
+      ...old,
+      ...next,
+      position: old.position,
+      measured: old.measured,
+      selected: nextSelected,
+    };
   });
+  return changed ? merged : (current as EntityFlowNode[]);
 }
 
 function applyComputedPositions(
@@ -94,7 +121,8 @@ function applyComputedPositions(
   layoutMode: EntityLayoutMode,
   saved: Readonly<Record<string, Point>>,
 ): EntityFlowNode[] {
-  return current.map((node) => {
+  let changed = false;
+  const nextNodes = current.map((node) => {
     if (layoutMode === "grid" && node.id in saved) return node;
     const nextPos = computed[node.id];
     if (!nextPos) return node;
@@ -104,23 +132,27 @@ function applyComputedPositions(
     ) {
       return node;
     }
+    changed = true;
     return { ...node, position: nextPos };
   });
+  return changed ? nextNodes : (current as EntityFlowNode[]);
 }
 
-export function EntityCanvas(props: EntityCanvasProps) {
+export const EntityCanvas = memo(function EntityCanvas(
+  props: EntityCanvasProps,
+) {
   return (
     <ReactFlowProvider>
       <EntityCanvasInner {...props} />
     </ReactFlowProvider>
   );
-}
+});
 
 function EntityCanvasInner({
   initialNodes,
   edges,
   layoutMode,
-  savedPositions,
+  getSavedPositions,
   selectedId,
   focusTarget,
   lang,
@@ -128,17 +160,22 @@ function EntityCanvasInner({
   onJumpToEntity,
   onPersist,
 }: EntityCanvasProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<EntityFlowNode>(
+  const [seedNodes] = useState<EntityFlowNode[]>(() =>
     initialNodes.map((n) => ({ ...n, selected: n.id === selectedId })),
   );
+  const [nodes, setNodes, onNodesChange] =
+    useNodesState<EntityFlowNode>(seedNodes);
   const nodesInitialized = useNodesInitialized();
-  const { fitView, setCenter, getZoom } = useReactFlow();
+  const { fitView, setCenter, getZoom, getNode } = useReactFlow();
 
   const lastLayoutFingerprintRef = useRef<string | null>(null);
   const didInitialFitRef = useRef(false);
   const handledFocusSeqRef = useRef(0);
-  const savedPositionsRef = useRef(savedPositions);
-  savedPositionsRef.current = savedPositions;
+  const nodesRef = useRef(nodes);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
 
   // 文档编辑或选中项变化时增量同步节点，保留已有位置与实测尺寸，不重置视口
   useEffect(() => {
@@ -152,10 +189,11 @@ function EntityCanvasInner({
     [edges],
   );
 
-  const measuredSnapshot = useMemo(
+  // 派生原始字符串指纹：拖拽期间宽高不变则指纹不变，避免每帧触发重排 effect 与 Map 分配
+  const measuredFingerprint = useMemo(
     () =>
       nodesInitialized
-        ? collectMeasuredSnapshot(nodes, layoutMode, edgeSignature)
+        ? computeMeasuredFingerprint(nodes, layoutMode, edgeSignature)
         : null,
     [nodesInitialized, nodes, layoutMode, edgeSignature],
   );
@@ -163,25 +201,21 @@ function EntityCanvasInner({
   // 测得真实宽高后按实测尺寸精准重排；只在首次测量后 fitView，后续编辑不跳视角
   useEffect(() => {
     if (
-      !measuredSnapshot ||
-      measuredSnapshot.fingerprint === lastLayoutFingerprintRef.current
+      !measuredFingerprint ||
+      measuredFingerprint === lastLayoutFingerprintRef.current
     ) {
       return;
     }
-    lastLayoutFingerprintRef.current = measuredSnapshot.fingerprint;
+    lastLayoutFingerprintRef.current = measuredFingerprint;
 
-    const computed = computeEntityLayout(
-      layoutMode,
-      measuredSnapshot.ids,
-      edges,
-      measuredSnapshot.sizes,
-    );
+    const { sizes, ids } = extractMeasuredLayoutInput(nodesRef.current);
+    const computed = computeEntityLayout(layoutMode, ids, edges, sizes);
     setNodes((current) =>
       applyComputedPositions(
         current,
         computed,
         layoutMode,
-        savedPositionsRef.current,
+        getSavedPositions(),
       ),
     );
 
@@ -189,12 +223,21 @@ function EntityCanvasInner({
       didInitialFitRef.current = true;
       requestAnimationFrame(() => void fitView({ padding: 0.12 }));
     }
-  }, [measuredSnapshot, layoutMode, edges, setNodes, fitView]);
+  }, [
+    measuredFingerprint,
+    layoutMode,
+    edges,
+    setNodes,
+    fitView,
+    getSavedPositions,
+  ]);
 
   // 详情栏或父级 badge 点击跳转实体时，若目标在画布内则平滑居中
   useEffect(() => {
     if (!focusTarget || focusTarget.seq === handledFocusSeqRef.current) return;
-    const target = nodes.find((n) => n.id === focusTarget.id);
+    const target =
+      getNode(focusTarget.id) ??
+      nodesRef.current.find((n) => n.id === focusTarget.id);
     if (!target) return;
     handledFocusSeqRef.current = focusTarget.seq;
     const w = target.measured?.width ?? DEFAULT_NODE_SIZE.width;
@@ -203,7 +246,21 @@ function EntityCanvasInner({
       zoom: Math.max(getZoom(), 0.85),
       duration: 240,
     });
-  }, [focusTarget, nodes, setCenter, getZoom]);
+  }, [focusTarget, getNode, setCenter, getZoom]);
+
+  const handleNodeClick = useCallback(
+    (_: unknown, node: EntityFlowNode) => onSelect(node.id),
+    [onSelect],
+  );
+
+  const handlePaneClick = useCallback(() => onSelect(null), [onSelect]);
+
+  const handleNodeDragStop = useCallback(
+    (_: unknown, node: EntityFlowNode) => {
+      onPersist?.(node.id, node.position);
+    },
+    [onPersist],
+  );
 
   return (
     <EntitySelectContext.Provider value={onJumpToEntity}>
@@ -213,11 +270,9 @@ function EntityCanvasInner({
         onNodesChange={onNodesChange}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onNodeClick={(_, node) => onSelect(node.id)}
-        onPaneClick={() => onSelect(null)}
-        onNodeDragStop={
-          onPersist ? (_, node) => onPersist(node.id, node.position) : undefined
-        }
+        onNodeClick={handleNodeClick}
+        onPaneClick={handlePaneClick}
+        onNodeDragStop={onPersist ? handleNodeDragStop : undefined}
         minZoom={0.1}
       >
         <Background gap={24} color="var(--color-base-300)" />
@@ -227,7 +282,7 @@ function EntityCanvasInner({
   );
 }
 
-function CanvasControls({ lang }: { lang: Lang }) {
+const CanvasControls = memo(function CanvasControls({ lang }: { lang: Lang }) {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   const zh = lang === "zh";
   return (
@@ -239,7 +294,7 @@ function CanvasControls({ lang }: { lang: Lang }) {
           aria-label={zh ? "放大" : "Zoom in"}
           onClick={() => zoomIn()}
         >
-          <Plus className="size-4" />
+          {ZOOM_IN_ICON}
         </button>
         <button
           type="button"
@@ -247,7 +302,7 @@ function CanvasControls({ lang }: { lang: Lang }) {
           aria-label={zh ? "缩小" : "Zoom out"}
           onClick={() => zoomOut()}
         >
-          <Minus className="size-4" />
+          {ZOOM_OUT_ICON}
         </button>
         <button
           type="button"
@@ -255,9 +310,9 @@ function CanvasControls({ lang }: { lang: Lang }) {
           aria-label={zh ? "适应画布" : "Fit view"}
           onClick={() => fitView({ padding: 0.12 })}
         >
-          <Maximize className="size-4" />
+          {FIT_VIEW_ICON}
         </button>
       </div>
     </Panel>
   );
-}
+});

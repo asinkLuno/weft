@@ -1,4 +1,5 @@
 import { GitBranch, Link2, Users, Waypoints } from "lucide-react";
+import { memo, useCallback } from "react";
 import {
   DetailBadgeList,
   DetailPanel,
@@ -94,7 +95,7 @@ function EntityEventsSection({
   );
 }
 
-export function EntityDetailPanel({
+export const EntityDetailPanel = memo(function EntityDetailPanel({
   detail,
   lang,
   onClose,
@@ -108,6 +109,10 @@ export function EntityDetailPanel({
   onRevealInEditor: (kind: WeftDeclKind, name: string) => void;
 }) {
   const t = strings[lang];
+  const handleLocate = useCallback(
+    () => onRevealInEditor("entity", detail.id),
+    [detail.id, onRevealInEditor],
+  );
   const isEmpty =
     !detail.description &&
     !detail.baseTime &&
@@ -130,7 +135,7 @@ export function EntityDetailPanel({
       isEmpty={isEmpty}
       className="border-l border-base-300"
       onClose={onClose}
-      onLocate={() => onRevealInEditor("entity", detail.id)}
+      onLocate={handleLocate}
     >
       {detail.description && (
         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-base-content/85">
@@ -154,19 +159,13 @@ export function EntityDetailPanel({
 
       {detail.parents.length > 0 && (
         <DetailSection title={t.belongTo} icon={Waypoints}>
-          <DetailBadgeList
-            items={detail.parents.map((p) => ({ id: p.id, label: p.name }))}
-            onClick={onSelectEntity}
-          />
+          <DetailBadgeList items={detail.parents} onClick={onSelectEntity} />
         </DetailSection>
       )}
 
       {detail.children.length > 0 && (
         <DetailSection title={t.entityChildren} icon={Users}>
-          <DetailBadgeList
-            items={detail.children.map((c) => ({ id: c.id, label: c.name }))}
-            onClick={onSelectEntity}
-          />
+          <DetailBadgeList items={detail.children} onClick={onSelectEntity} />
         </DetailSection>
       )}
 
@@ -189,4 +188,4 @@ export function EntityDetailPanel({
       )}
     </DetailPanel>
   );
-}
+});

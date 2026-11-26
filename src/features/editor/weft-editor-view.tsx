@@ -70,42 +70,34 @@ function toCodeMirrorDiagnostic(
   };
 }
 
-function WeftEditorViewInner({
-  path,
+const REVERT_ICON = <RotateCcw className="size-3.5" />;
+const SAVE_ICON = <Save className="size-3.5" />;
+const REFRESH_ICON = <RefreshCw className="size-3.5" />;
+
+const WeftCodeMirror = memo(function WeftCodeMirror({
   draftStore,
   diagnostic,
-  dirty,
-  saving,
-  diskStatus,
   revealRequest,
   lang,
   onChange,
-  onSave,
-  onForceSave,
-  onReloadFromDisk,
 }: {
-  path: string;
   draftStore: DraftStore;
   diagnostic: CompileDiagnostic | null;
-  dirty: boolean;
-  saving: boolean;
-  diskStatus: DiskStatus;
   revealRequest: EditorRevealRequest | null;
   lang: Lang;
   onChange: (next: string) => void;
-  onSave: () => Promise<boolean>;
-  onForceSave: () => Promise<boolean>;
-  onReloadFromDisk: () => Promise<void>;
 }) {
   const value = useSyncExternalStore(
     draftStore.subscribe,
     draftStore.getSnapshot,
   );
-  const t = strings[lang];
   const langRef = useRef(lang);
-  langRef.current = lang;
   const [editorView, setEditorView] = useState<EditorView | null>(null);
   const handledRevealSeqRef = useRef(0);
+
+  useEffect(() => {
+    langRef.current = lang;
+  }, [lang]);
 
   useEffect(() => {
     if (!editorView) return;
@@ -151,6 +143,48 @@ function WeftEditorViewInner({
     [],
   );
 
+  return (
+    <CodeMirror
+      className="h-full"
+      value={value}
+      height="100%"
+      basicSetup={BASIC_SETUP}
+      extensions={extensions}
+      onChange={onChange}
+      onCreateEditor={setEditorView}
+    />
+  );
+});
+
+function WeftEditorViewInner({
+  path,
+  draftStore,
+  diagnostic,
+  dirty,
+  saving,
+  diskStatus,
+  revealRequest,
+  lang,
+  onChange,
+  onSave,
+  onForceSave,
+  onReloadFromDisk,
+}: {
+  path: string;
+  draftStore: DraftStore;
+  diagnostic: CompileDiagnostic | null;
+  dirty: boolean;
+  saving: boolean;
+  diskStatus: DiskStatus;
+  revealRequest: EditorRevealRequest | null;
+  lang: Lang;
+  onChange: (next: string) => void;
+  onSave: () => Promise<boolean>;
+  onForceSave: () => Promise<boolean>;
+  onReloadFromDisk: () => Promise<void>;
+}) {
+  const t = strings[lang];
+  const fileName = useMemo(() => fileNameOf(path), [path]);
   const canSave = (dirty || diskStatus === "deleted") && !saving;
 
   return (
@@ -160,7 +194,7 @@ function WeftEditorViewInner({
           className="min-w-0 flex-1 truncate font-mono text-xs text-base-content/80"
           title={path}
         >
-          {fileNameOf(path)}
+          {fileName}
         </span>
         {dirty && (
           <span className="badge badge-xs badge-outline shrink-0 border-primary text-primary">
@@ -177,7 +211,7 @@ function WeftEditorViewInner({
                 void onReloadFromDisk();
               }}
             >
-              <RotateCcw className="size-3.5" />
+              {REVERT_ICON}
               {t.revert}
             </button>
           )}
@@ -189,7 +223,7 @@ function WeftEditorViewInner({
               void onSave();
             }}
           >
-            <Save className="size-3.5" />
+            {SAVE_ICON}
             {saving ? t.saving : t.save}
           </button>
         </div>
@@ -207,7 +241,7 @@ function WeftEditorViewInner({
                 void onReloadFromDisk();
               }}
             >
-              <RefreshCw className="size-3.5" />
+              {REFRESH_ICON}
               {t.reloadFromDisk}
             </button>
             <button
@@ -218,7 +252,7 @@ function WeftEditorViewInner({
                 void onForceSave();
               }}
             >
-              <Save className="size-3.5" />
+              {SAVE_ICON}
               {t.overwriteDisk}
             </button>
           </div>
@@ -237,7 +271,7 @@ function WeftEditorViewInner({
                 void onForceSave();
               }}
             >
-              <Save className="size-3.5" />
+              {SAVE_ICON}
               {t.recreateFile}
             </button>
           </div>
@@ -245,16 +279,12 @@ function WeftEditorViewInner({
       )}
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        <CodeMirror
-          className="h-full"
-          value={value}
-          height="100%"
-          basicSetup={BASIC_SETUP}
-          extensions={extensions}
+        <WeftCodeMirror
+          draftStore={draftStore}
+          diagnostic={diagnostic}
+          revealRequest={revealRequest}
+          lang={lang}
           onChange={onChange}
-          onCreateEditor={(view) => {
-            setEditorView(view);
-          }}
         />
       </div>
     </div>

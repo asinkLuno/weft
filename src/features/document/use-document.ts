@@ -67,13 +67,7 @@ export function useDocument(lang: Lang) {
   const [diskStatus, setDiskStatus] = useState<DiskStatus>("synced");
   const [flash, setFlash] = useState(false);
 
-  const draftStoreRef = useRef<ReturnType<typeof createDraftStore> | null>(
-    null,
-  );
-  if (draftStoreRef.current === null) {
-    draftStoreRef.current = createDraftStore();
-  }
-  const draftStore = draftStoreRef.current;
+  const [draftStore] = useState(createDraftStore);
 
   const mountedRef = useRef(false);
   const pathRef = useRef<string | null>(null);
@@ -148,8 +142,11 @@ export function useDocument(lang: Lang) {
       const isDirty = currentDraft !== saved;
 
       const seq = ++docCompileSeq.current;
-      if (!isDirty) {
-        clearTimeout(checkTimer.current);
+      clearTimeout(checkTimer.current);
+      if (isDirty) {
+        // 与 compile_document 并行执行草稿诊断，避免串行等待；updateDraft 会自增 checkSeq 挡住过期结果
+        void checkDraft(currentDraft, session);
+      } else {
         checkSeq.current += 1;
       }
 
@@ -171,11 +168,6 @@ export function useDocument(lang: Lang) {
         });
       } catch (error) {
         console.error("compile_document failed:", error);
-      }
-
-      if (isDirty) {
-        clearTimeout(checkTimer.current);
-        void checkDraft(draftStore.getSnapshot(), session);
       }
     },
     [applyPublishedCompile, checkDraft, draftStore],
@@ -338,6 +330,7 @@ export function useDocument(lang: Lang) {
       const saved = savedContentRef.current;
       setDirty(saved !== null && next !== saved);
       clearTimeout(checkTimer.current);
+      checkSeq.current += 1;
       const session = sessionSeq.current;
       checkTimer.current = setTimeout(() => {
         void checkDraft(next, session);

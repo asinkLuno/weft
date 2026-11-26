@@ -16,9 +16,14 @@ export type EventDetail = {
   time?: string;
   description?: string;
   entities: EventEntityRef[];
-  lists: string[];
+  lists: Array<{ id: string; label: string }>;
   prevId?: string;
   nextId?: string;
+};
+
+export type EventsIndex = {
+  listsByEvent: ReadonlyMap<string, Array<{ id: string; label: string }>>;
+  listIndexByName: ReadonlyMap<string, ReadonlyMap<string, number>>;
 };
 
 export type GanttBreak = {
@@ -57,23 +62,49 @@ export function buildEventsView(doc: WeftDoc | null) {
   const entries = Object.entries(doc?.events ?? {})
     .filter(([, ids]) => ids.length > 0)
     .sort(([a], [b]) => a.localeCompare(b));
+
+  const listsByEvent = new Map<string, Array<{ id: string; label: string }>>();
+  const listIndexByName = new Map<string, Map<string, number>>();
+  for (const [listName, ids] of entries) {
+    const posMap = new Map<string, number>();
+    for (let i = 0; i < ids.length; i++) {
+      const eventId = ids[i];
+      if (!posMap.has(eventId)) {
+        posMap.set(eventId, i);
+        let list = listsByEvent.get(eventId);
+        if (!list) {
+          list = [];
+          listsByEvent.set(eventId, list);
+        }
+        list.push({ id: listName, label: listName });
+      }
+    }
+    listIndexByName.set(listName, posMap);
+  }
+
   const calendarId = doc?.story?.date.id ?? "gregorian";
-  return { byId, entries, calendarId };
+  return { byId, entries, calendarId, listsByEvent, listIndexByName };
 }
 
 function resolveEventNeighbors(
   eventsMap: WeftDoc["events"],
   eventId: string,
   activeListName: string | null,
-  lists: readonly string[],
+  lists: ReadonlyArray<{ id: string; label: string }>,
+  listIndexByName: ReadonlyMap<string, ReadonlyMap<string, number>>,
 ): { prevId?: string; nextId?: string } {
+  const activeIdx = activeListName
+    ? listIndexByName.get(activeListName)?.get(eventId)
+    : undefined;
   const navListName =
-    activeListName && eventsMap?.[activeListName]?.includes(eventId)
-      ? activeListName
-      : lists[0];
-  const navIds = navListName ? (eventsMap?.[navListName] ?? []) : [];
-  const idx = navIds.indexOf(eventId);
-  if (idx < 0) return {};
+    activeIdx !== undefined ? activeListName : (lists[0]?.id ?? null);
+  if (!navListName) return {};
+  const idx =
+    activeIdx !== undefined
+      ? activeIdx
+      : listIndexByName.get(navListName)?.get(eventId);
+  if (idx === undefined) return {};
+  const navIds = eventsMap?.[navListName] ?? [];
   return {
     prevId: navIds[idx - 1],
     nextId: navIds[idx + 1],
@@ -84,6 +115,7 @@ export function buildEventDetail(
   doc: WeftDoc | null,
   eventId: string,
   activeListName: string | null,
+  index: EventsIndex,
 ): EventDetail | null {
   const event = doc?.event?.[eventId];
   if (!event) return null;
@@ -99,16 +131,13 @@ export function buildEventDetail(
     };
   });
 
-  const lists = Object.entries(doc?.events ?? {})
-    .filter(([, ids]) => ids.includes(eventId))
-    .map(([name]) => name)
-    .sort((a, b) => a.localeCompare(b));
-
+  const lists = index.listsByEvent.get(eventId) ?? [];
   const { prevId, nextId } = resolveEventNeighbors(
     doc?.events,
     eventId,
     activeListName,
     lists,
+    index.listIndexByName,
   );
 
   return {
@@ -130,17 +159,16 @@ export function buildGanttChartModel(
   ids: Events,
   byId: Map<string, EventItem>,
 ): GanttChartModel {
-  const events = ids.flatMap((id) => {
-    const event = byId.get(id);
-    return event ? [event] : [];
-  });
-
+  const events: EventItem[] = [];
   const initialLabels = new Map<number, string>();
   const intervals: Array<{ start: number; end: number }> = [];
   let first: EventItem | undefined;
   let last: EventItem | undefined;
 
-  for (const event of events) {
+  for (const id of ids) {
+    const event = byId.get(id);
+    if (!event) continue;
+    events.push(event);
     if (event.start_tick === undefined) continue;
     const start = event.start_tick;
     const end = event.end_tick ?? start;

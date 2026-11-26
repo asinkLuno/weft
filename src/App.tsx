@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useCallback } from "react";
 import { useDocument } from "@/features/document/use-document";
 import { WelcomeView } from "@/features/welcome/welcome-view";
 import { useAppSettings } from "@/hooks/use-app-settings";
@@ -32,16 +32,19 @@ export default function App() {
     close,
   } = useDocument(lang);
 
-  async function openRecent(nextPath: string) {
-    const result = await bind(nextPath);
-    if (result === "bound") remember(nextPath);
-    else if (result === "failed") forget(nextPath);
-  }
+  const openRecent = useCallback(
+    async (nextPath: string) => {
+      const result = await bind(nextPath);
+      if (result === "bound") remember(nextPath);
+      else if (result === "failed") forget(nextPath);
+    },
+    [bind, forget, remember],
+  );
 
-  async function chooseFile() {
+  const chooseFile = useCallback(async () => {
     const selected = await openFile();
     if (selected) await openRecent(selected);
-  }
+  }, [openFile, openRecent]);
 
   return path ? (
     <Suspense fallback={null}>

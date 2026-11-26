@@ -5,6 +5,7 @@ import {
   List,
   Users,
 } from "lucide-react";
+import { memo, useCallback } from "react";
 import {
   DetailBadgeList,
   DetailPanel,
@@ -15,6 +16,12 @@ import {
 import type { WeftDeclKind } from "@/features/editor/weft-completion";
 import { type Lang, strings } from "@/i18n";
 import type { EventDetail } from "./model";
+
+const EVENT_LEADING_ICON = (
+  <GitBranch className="mt-1 size-4 shrink-0 text-primary" aria-hidden="true" />
+);
+const PREV_ICON = <ChevronLeft className="size-3.5" />;
+const NEXT_ICON = <ChevronRight className="size-3.5" />;
 
 function EventNavButtons({
   prevId,
@@ -40,7 +47,7 @@ function EventNavButtons({
         title={prevId ?? prevLabel}
         onClick={() => prevId && onSelectEvent(prevId)}
       >
-        <ChevronLeft className="size-3.5" />
+        {PREV_ICON}
       </button>
       <button
         type="button"
@@ -50,13 +57,13 @@ function EventNavButtons({
         title={nextId ?? nextLabel}
         onClick={() => nextId && onSelectEvent(nextId)}
       >
-        <ChevronRight className="size-3.5" />
+        {NEXT_ICON}
       </button>
     </div>
   );
 }
 
-export function EventDetailPanel({
+export const EventDetailPanel = memo(function EventDetailPanel({
   detail,
   lang,
   onClose,
@@ -70,6 +77,14 @@ export function EventDetailPanel({
   onRevealInEditor: (kind: WeftDeclKind, name: string) => void;
 }) {
   const t = strings[lang];
+  const handleLocate = useCallback(
+    () => onRevealInEditor("event", detail.id),
+    [detail.id, onRevealInEditor],
+  );
+  const handleRevealList = useCallback(
+    (listName: string) => onRevealInEditor("events", listName),
+    [onRevealInEditor],
+  );
   const isEmpty =
     !detail.time &&
     !detail.description &&
@@ -80,12 +95,7 @@ export function EventDetailPanel({
     <DetailPanel
       ariaLabel={t.eventDetails}
       title={detail.id}
-      leading={
-        <GitBranch
-          className="mt-1 size-4 shrink-0 text-primary"
-          aria-hidden="true"
-        />
-      }
+      leading={EVENT_LEADING_ICON}
       closeLabel={t.closeDetail}
       locateLabel={t.locateInEditor}
       emptyLabel={t.entityNoDetails}
@@ -101,7 +111,7 @@ export function EventDetailPanel({
         />
       }
       onClose={onClose}
-      onLocate={() => onRevealInEditor("event", detail.id)}
+      onLocate={handleLocate}
     >
       {detail.time && <DetailTimeRow value={detail.time} />}
       {detail.description && (
@@ -146,12 +156,12 @@ export function EventDetailPanel({
       {detail.lists.length > 0 && (
         <DetailSection title={t.eventLists} icon={List}>
           <DetailBadgeList
-            items={detail.lists.map((name) => ({ id: name, label: name }))}
+            items={detail.lists}
             title={t.locateInEditor}
-            onClick={(listName) => onRevealInEditor("events", listName)}
+            onClick={handleRevealList}
           />
         </DetailSection>
       )}
     </DetailPanel>
   );
-}
+});

@@ -12,12 +12,15 @@ import {
   BLOCK_FIELDS,
   type BlockKind,
   findFieldSpec,
-  IDENT_CONT_RE,
   IDENT_PREFIX_RE,
-  IDENT_START_RE,
   IDENT_VALID_RE,
   NAMED_DECL_KEYWORDS,
 } from "./weft-schema";
+
+const IDENT_TOKEN_RE = /[\p{L}_][\p{L}\p{N}_·・]*/uy;
+const BACKSLASH_RE = /\\/g;
+const QUOTE_RE = /"/g;
+const STRING_VALID_RE = /^[^"\n]*$/;
 
 // ---- 词法扫描（与 Rust src-tauri/src/weft/parser.rs 对齐） ----
 
@@ -226,30 +229,19 @@ function tokenizeWeft(src: string, cursorPos: number): TokenizeResult {
       continue;
     }
 
-    // 标识符（支持 Unicode 与中点 ·）
-    const cp = src.codePointAt(i);
-    const charStr = cp !== undefined ? String.fromCodePoint(cp) : ch;
-    if (IDENT_START_RE.test(charStr)) {
-      const start = i;
-      i += charStr.length;
-      while (i < n) {
-        const nextCp = src.codePointAt(i);
-        const nextStr =
-          nextCp !== undefined ? String.fromCodePoint(nextCp) : "";
-        if (!nextStr || !IDENT_CONT_RE.test(nextStr)) break;
-        i += nextStr.length;
-      }
-      tokens.push({
-        kind: "ident",
-        value: src.slice(start, i),
-        from: start,
-        to: i,
-        line,
-      });
+    // 标识符（支持 Unicode 与中点 ·，sticky 正则一次匹配避免逐码点分配）
+    IDENT_TOKEN_RE.lastIndex = i;
+    const identMatch = IDENT_TOKEN_RE.exec(src);
+    if (identMatch) {
+      const value = identMatch[0];
+      const to = i + value.length;
+      tokens.push({ kind: "ident", value, from: i, to, line });
+      i = to;
       continue;
     }
 
-    i += charStr.length;
+    const cp = src.codePointAt(i);
+    i += cp !== undefined && cp > 0xffff ? 2 : 1;
   }
 
   return { tokens, cursorLine, cursorInComment, cursorInString };
@@ -260,7 +252,7 @@ function isNameTok(tok: Tok | undefined): tok is Tok {
 }
 
 function escapeQuotedContent(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return value.replace(BACKSLASH_RE, "\\\\").replace(QUOTE_RE, '\\"');
 }
 
 function formatWeftName(name: string): string {
@@ -939,46 +931,51 @@ export function createWeftCompletionSource(getLang: () => Lang) {
         options = attrKeyCompletions(ctx.block, ctx.existingKeys, lang);
         break;
       case "entityRef":
-        options = Array.from(symbols.entities.values())
-          .filter((ent) => !ctx.exclude.has(ent.name))
-          .map((ent) => ({
+        for (const ent of symbols.entities.values()) {
+          if (ctx.exclude.has(ent.name)) continue;
+          options.push({
             label: ent.name,
             apply: applyName(ent.name, cursorInString),
             type: "class",
             detail: t.entityType,
             info: ent.description,
-          }));
+          });
+        }
         break;
       case "eventRef":
-        options = Array.from(symbols.events.values())
-          .filter((ev) => !ctx.exclude.has(ev.name))
-          .map((ev) => ({
+        for (const ev of symbols.events.values()) {
+          if (ctx.exclude.has(ev.name)) continue;
+          options.push({
             label: ev.name,
             apply: applyName(ev.name, cursorInString),
             type: "function",
             detail: t.eventType,
             info: ev.description,
-          }));
+          });
+        }
         break;
       case "calcPropRef":
-        options = Array.from(symbols.calculableProps)
-          .filter((prop) => !ctx.exclude.has(prop))
-          .map((prop) => ({
+        for (const prop of symbols.calculableProps) {
+          if (ctx.exclude.has(prop)) continue;
+          options.push({
             label: prop,
             apply: applyName(prop, cursorInString),
             type: "constant",
             detail: t.propType,
-          }));
+          });
+        }
         break;
       case "relationRef":
-        options = Array.from(symbols.relations).map((rel) => ({
-          label: rel,
-          apply: cursorInString
-            ? `${escapeQuotedContent(rel)}"`
-            : JSON.stringify(rel),
-          type: "text",
-          detail: t.relationType,
-        }));
+        for (const rel of symbols.relations) {
+          options.push({
+            label: rel,
+            apply: cursorInString
+              ? `${escapeQuotedContent(rel)}"`
+              : JSON.stringify(rel),
+            type: "text",
+            detail: t.relationType,
+          });
+        }
         break;
       case "timeExpr":
         options = timeExprCompletions(
@@ -1003,7 +1000,7 @@ export function createWeftCompletionSource(getLang: () => Lang) {
       from,
       to: hasClosingQuote ? cursorInString.to : pos,
       options,
-      validFor: cursorInString ? /^[^"\n]*$/ : IDENT_VALID_RE,
+      validFor: cursorInString ? STRING_VALID_RE : IDENT_VALID_RE,
     };
   };
 }

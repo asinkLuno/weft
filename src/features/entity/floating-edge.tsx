@@ -5,8 +5,16 @@ import {
   type InternalNode,
   useInternalNode,
 } from "@xyflow/react";
+import { memo } from "react";
 import { DEFAULT_NODE_SIZE } from "./layout";
 import type { FloatingEdgeData } from "./model";
+
+const FLOATING_EDGE_STYLE = {
+  stroke: "var(--color-primary)",
+  strokeWidth: 1.5,
+} as const;
+
+const round1 = (value: number) => Math.round(value * 10) / 10;
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -56,24 +64,34 @@ function computeFloatingPath(
   const start = borderPoint(sRect, aimX, aimY);
   const end = borderPoint(tRect, aimX, aimY);
 
+  const sx = round1(start.x);
+  const sy = round1(start.y);
+  const ex = round1(end.x);
+  const ey = round1(end.y);
+
   if (curveOffset === 0) {
     return {
-      path: `M ${start.x} ${start.y} L ${end.x} ${end.y}`,
-      labelX: (start.x + end.x) / 2,
-      labelY: (start.y + end.y) / 2,
+      path: `M ${sx} ${sy} L ${ex} ${ey}`,
+      labelX: round1((sx + ex) / 2),
+      labelY: round1((sy + ey) / 2),
     };
   }
 
-  const ctrlX = (start.x + end.x) / 2 + nx * curveOffset;
-  const ctrlY = (start.y + end.y) / 2 + ny * curveOffset;
+  const ctrlX = round1((sx + ex) / 2 + nx * curveOffset);
+  const ctrlY = round1((sy + ey) / 2 + ny * curveOffset);
   return {
-    path: `M ${start.x} ${start.y} Q ${ctrlX} ${ctrlY} ${end.x} ${end.y}`,
-    labelX: 0.25 * start.x + 0.5 * ctrlX + 0.25 * end.x,
-    labelY: 0.25 * start.y + 0.5 * ctrlY + 0.25 * end.y,
+    path: `M ${sx} ${sy} Q ${ctrlX} ${ctrlY} ${ex} ${ey}`,
+    labelX: round1(0.25 * sx + 0.5 * ctrlX + 0.25 * ex),
+    labelY: round1(0.25 * sy + 0.5 * ctrlY + 0.25 * ey),
   };
 }
 
-export function FloatingEdge({ id, source, target, data }: EdgeProps) {
+export const FloatingEdge = memo(function FloatingEdge({
+  id,
+  source,
+  target,
+  data,
+}: EdgeProps) {
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
   if (!sourceNode || !targetNode) return null;
@@ -93,11 +111,7 @@ export function FloatingEdge({ id, source, target, data }: EdgeProps) {
 
   return (
     <>
-      <BaseEdge
-        id={id}
-        path={path}
-        style={{ stroke: "var(--color-primary)", strokeWidth: 1.5 }}
-      />
+      <BaseEdge id={id} path={path} style={FLOATING_EDGE_STYLE} />
       {edgeData?.label && (
         <EdgeLabelRenderer>
           <div
@@ -112,4 +126,4 @@ export function FloatingEdge({ id, source, target, data }: EdgeProps) {
       )}
     </>
   );
-}
+});

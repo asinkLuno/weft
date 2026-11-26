@@ -31,8 +31,12 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { StoryView } from "@/features/story/story-view";
 import { type Lang, strings } from "@/i18n";
-import { DOCUMENT_TONE_STYLE, documentToneOf } from "@/lib/ui";
-import { useWorkspaceDoc, useWorkspaceEditor } from "./workspace-context";
+import { DOCUMENT_TONE_STYLE } from "@/lib/ui";
+import {
+  useWorkspaceDoc,
+  useWorkspaceEditor,
+  useWorkspaceTone,
+} from "./workspace-context";
 
 const loadWeftEditorView = () =>
   import("@/features/editor/weft-editor-view").then((m) => ({
@@ -90,8 +94,10 @@ export const PANEL_META: Record<
   info: { icon: Info, labelKey: "tabInfo" },
 };
 
+const PANEL_ID_SET: ReadonlySet<string> = new Set(PANEL_IDS);
+
 export function isPanelId(value: string): value is PanelId {
-  return (PANEL_IDS as readonly string[]).includes(value);
+  return PANEL_ID_SET.has(value);
 }
 
 export function panelKindOf(panel: {
@@ -272,8 +278,7 @@ export const WORKSPACE_COMPONENTS: Record<
 };
 
 function EditorDirtyDot() {
-  const { dirty, diskStatus } = useWorkspaceEditor();
-  const tone = documentToneOf(dirty, diskStatus);
+  const tone = useWorkspaceTone();
   if (tone === "synced") return null;
   return (
     <span
@@ -292,10 +297,13 @@ export function WorkspaceTab({ api, params }: IDockviewPanelHeaderProps) {
 
   useEffect(() => {
     const target = tabRef.current?.parentElement;
-    if (!target || !kind) return;
+    if (!target || !kind || !PANEL_PRELOADERS[kind]) return;
     const warm = () => preloadPanel(kind);
-    target.addEventListener("pointerenter", warm, { passive: true });
-    target.addEventListener("focusin", warm, { passive: true });
+    target.addEventListener("pointerenter", warm, {
+      passive: true,
+      once: true,
+    });
+    target.addEventListener("focusin", warm, { passive: true, once: true });
     return () => {
       target.removeEventListener("pointerenter", warm);
       target.removeEventListener("focusin", warm);
@@ -454,6 +462,8 @@ export function WorkspaceWatermark({ containerApi }: IWatermarkPanelProps) {
               key={id}
               type="button"
               className="btn btn-outline btn-sm border-base-300"
+              onPointerEnter={() => preloadPanel(id)}
+              onFocus={() => preloadPanel(id)}
               onClick={() => focusOrOpenPanel(containerApi, id, lang)}
             >
               <Icon className="size-3.5" />
