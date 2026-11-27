@@ -31,6 +31,17 @@ export type ChartPalette = {
 export const ROW_HEIGHT = 36;
 export const MAX_VISIBLE_ROWS = 12;
 
+const GRID_LEFT = 168;
+const GRID_RIGHT = 20;
+const GRID_RIGHT_WITH_SCROLL = 30;
+
+export function gridHorizontalPadding(eventCount: number): number {
+  return (
+    GRID_LEFT +
+    (eventCount > MAX_VISIBLE_ROWS ? GRID_RIGHT_WITH_SCROLL : GRID_RIGHT)
+  );
+}
+
 const BAR_HEIGHT = 16;
 const MIN_BAR_WIDTH = 8;
 const DIAMOND_RADIUS = 6;
@@ -173,6 +184,7 @@ function buildDataZoom(
       filterMode: "none",
       zoomOnMouseWheel: "ctrl",
       moveOnMouseMove: true,
+      // 滚轮平移由 EventsGantt 自行接管，避免与 Ctrl + 滚轮缩放冲突并兼容横向滚轮/触控板。
       moveOnMouseWheel: false,
       preventDefaultMouseMove: false,
     },
@@ -341,8 +353,8 @@ export function buildGanttOption({
   return {
     animation: false,
     grid: {
-      left: 168,
-      right: needsVerticalScroll ? 30 : 20,
+      left: GRID_LEFT,
+      right: needsVerticalScroll ? GRID_RIGHT_WITH_SCROLL : GRID_RIGHT,
       top: 42,
       bottom: 44,
       containLabel: false,

@@ -15,6 +15,7 @@ import type { Events } from "@/lib/document";
 import {
   breakKey,
   buildGanttOption,
+  gridHorizontalPadding,
   MAX_VISIBLE_ROWS,
   ROW_HEIGHT,
   readDaisyPalette,
@@ -65,6 +66,49 @@ const FOLD_ICON = <FoldHorizontal className="size-3.5" />;
 const UNFOLD_ICON = <UnfoldHorizontal className="size-3.5" />;
 const RESET_ICON = <RotateCcw className="size-3.5" />;
 
+type ZoomRange = { start: number; end: number };
+
+const ZOOM_EPSILON = 0.1;
+
+function isZoomedRange({ start, end }: ZoomRange): boolean {
+  return end - start < 100 - ZOOM_EPSILON;
+}
+
+function wheelDeltaToPx(event: WheelEvent, pageSize: number): number {
+  const raw =
+    Math.abs(event.deltaX) >= Math.abs(event.deltaY)
+      ? event.deltaX
+      : event.deltaY;
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return raw * 32;
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return raw * pageSize;
+  return raw;
+}
+
+function panZoomRange(
+  range: ZoomRange,
+  deltaPx: number,
+  gridWidth: number,
+): ZoomRange | null {
+  const span = range.end - range.start;
+  const deltaPct = (deltaPx / gridWidth) * span;
+  let start = range.start + deltaPct;
+  let end = range.end + deltaPct;
+  if (start < 0) {
+    start = 0;
+    end = span;
+  } else if (end > 100) {
+    end = 100;
+    start = 100 - span;
+  }
+  if (
+    Math.abs(start - range.start) <= 1e-4 &&
+    Math.abs(end - range.end) <= 1e-4
+  ) {
+    return null;
+  }
+  return { start, end };
+}
+
 export const EventsGantt = memo(function EventsGantt({
   name,
   ids,
@@ -93,6 +137,11 @@ export const EventsGantt = memo(function EventsGantt({
     min: model.minTick,
     max: model.maxTick,
   });
+  const zoomPctRef = useRef<ZoomRange>({
+    start: 0,
+    end: 100,
+  });
+  const gridPaddingRef = useRef(0);
   const fetchTimerRef = useRef<number | null>(null);
   const requestSeqRef = useRef(0);
 
@@ -196,6 +245,8 @@ export const EventsGantt = memo(function EventsGantt({
     }
     expandedBreaksRef.current = new Set();
     viewRangeRef.current = { min: model.minTick, max: model.maxTick };
+    zoomPctRef.current = { start: 0, end: 100 };
+    gridPaddingRef.current = gridHorizontalPadding(model.events.length);
     setIsZoomed(false);
     setHasExpandedBreak(false);
 
@@ -241,7 +292,9 @@ export const EventsGantt = memo(function EventsGantt({
       if (!xZoom) return;
       const startPct = xZoom.start ?? 0;
       const endPct = xZoom.end ?? 100;
-      setIsZoomed(startPct > 0.1 || endPct < 99.9);
+      const nextRange = { start: startPct, end: endPct };
+      zoomPctRef.current = nextRange;
+      setIsZoomed(isZoomedRange(nextRange));
 
       const span = model.maxTick - model.minTick;
       const nextMin =
@@ -320,6 +373,63 @@ export const EventsGantt = memo(function EventsGantt({
     refreshCalendarTicks,
     t.ganttEntities,
   ]);
+
+  // 滚轮直接左右平移时间轴（Ctrl + 滚轮交给 ECharts 缩放；未缩放时放行纵向页面滚动）。
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey) return;
+      const chart = chartRef.current;
+      if (!chart || chart.isDisposed()) return;
+
+      const rect = container.getBoundingClientRect();
+      if (
+        !chart.containPixel("grid", [
+          event.clientX - rect.left,
+          event.clientY - rect.top,
+        ])
+      ) {
+        return;
+      }
+
+      const current = zoomPctRef.current;
+      if (!isZoomedRange(current)) {
+        // 阻止 ZRender RoamController 吞掉事件，保留外层页面纵向滚动。
+        event.stopPropagation();
+        return;
+      }
+
+      const gridWidth = Math.max(
+        120,
+        container.clientWidth - gridPaddingRef.current,
+      );
+      const deltaPx = wheelDeltaToPx(event, gridWidth);
+      if (deltaPx === 0) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const next = panZoomRange(current, deltaPx, gridWidth);
+      if (!next) return;
+      chart.dispatchAction({ type: "hideTip" });
+      chart.dispatchAction({
+        type: "dataZoom",
+        dataZoomIndex: 0,
+        start: next.start,
+        end: next.end,
+      });
+    };
+
+    container.addEventListener("wheel", handleWheel, {
+      capture: true,
+      passive: false,
+    });
+    return () => {
+      container.removeEventListener("wheel", handleWheel, { capture: true });
+    };
+  }, []);
 
   // 响应 Dockview 面板分屏/切换可见性与窗口尺寸变化；仅在挂载时绑定一次。
   useEffect(() => {
