@@ -7,15 +7,11 @@
   default: true;
   --color-primary: #002fa7;
   --color-primary-content: #ffffff;
-  --knot-bg: #002fa7;
-  --knot-line: #ffffff;
 }
 @plugin "daisyui/theme" {
   name: "dark";
   prefersdark: true;
   --color-primary: #3b71ff;
   --color-primary-content: #ffffff;
-  --knot-bg: #000000;
-  --knot-line: #3b71ff;
   --depth: 0;
 }

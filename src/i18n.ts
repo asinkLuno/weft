@@ -5,7 +5,6 @@ export const strings = {
   zh: {
     recentDescription: "继续阅读你的故事。",
     recentEmpty: "从第一个故事开始。打开的文件会留在这里。",
-    fileHint: "支持 .weft 文件，保存修改后视图自动更新。",
     saved: "已保存",
     statusConflict: "磁盘文件已冲突",
     statusDeleted: "磁盘文件已删除",
@@ -63,7 +62,6 @@ export const strings = {
   en: {
     recentDescription: "Pick up where you left off.",
     recentEmpty: "Start with your first story. Opened files will appear here.",
-    fileHint: "Supports .weft files. Views update when you save changes.",
     saved: "Saved",
     statusConflict: "Disk conflict",
     statusDeleted: "Deleted on disk",

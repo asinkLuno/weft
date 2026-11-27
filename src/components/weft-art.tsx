@@ -419,7 +419,7 @@ function getPrintLayer(index: number): ReactElement {
     const threads = engravedBands(PRINTS[index]);
     layer = (
       <g
-        className="fill-(--knot-line) stroke-(--knot-bg)"
+        className="fill-primary stroke-base-200"
         strokeWidth="0.65"
         strokeLinejoin="round"
       >
@@ -459,7 +459,7 @@ export const WeftPrint = memo(function WeftPrint() {
         </pattern>
       </defs>
       <circle
-        className="text-(--knot-line) opacity-35"
+        className="text-primary opacity-25"
         cx="264"
         cy="218"
         r="190"
