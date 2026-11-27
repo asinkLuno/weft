@@ -16,6 +16,8 @@ export default defineConfig(() => ({
   },
   build: {
     rolldownOptions: {
+      // Tailwind 的 CSS 生成走 JS 回调，必然占满构建时间；这条提示只是噪音
+      checks: { bundlerTimings: false },
       output: {
         codeSplitting: {
           groups: [

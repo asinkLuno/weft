@@ -90,7 +90,7 @@ export const WelcomeView = memo(function WelcomeView({
           </div>
 
           <aside
-            className="flex min-h-[340px] flex-col gap-4 rounded-box bg-primary p-6 text-primary-content"
+            className="flex min-h-[340px] flex-col gap-4 rounded-box bg-(--knot-bg) p-6 text-(--knot-line)"
             aria-hidden="true"
           >
             <span className="text-7xl font-black uppercase leading-none tracking-tighter lg:text-8xl">
@@ -99,7 +99,7 @@ export const WelcomeView = memo(function WelcomeView({
             <div className="min-h-0 flex-1">
               <WeftPrint />
             </div>
-            <div className="flex flex-wrap justify-between gap-3 border-t border-primary-content/25 pt-3 text-xs text-primary-content/80">
+            <div className="flex flex-wrap justify-between gap-3 border-t border-(--knot-line)/25 pt-3 text-xs text-(--knot-line)/80">
               <span className="inline-flex items-center gap-1.5">
                 <BookOpen className="size-3.5" />
                 {strings[lang].tab1}
