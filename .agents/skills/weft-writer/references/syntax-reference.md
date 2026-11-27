@@ -34,7 +34,7 @@ ______________________________________________________________________
   - **Attribute blocks / objects** `{ k = v ... }`: attributes are separated by newlines, spaces, or optional `,` / `;`. Keys can be bare or quoted names.
 - **Bare identifier vs quoted string semantics**:
   - Typed string fields (`story.title`, `story.author`, `story.description`, `story.date_mode`, `entity.description`, `entity.avatar`, `event.description`) strictly require string literals (`"..."` / `"""..."""`). Bare identifiers fail with `invalid-field`.
-  - Name lists (`belong_to`, `entities`, `calculable_props`, `events`) resolve both bare and quoted names as symbol references.
+  - Name lists (`belong_to`, `tags`, `entities`, `calculable_props`, `events`) accept both bare and quoted names (`tags` requires non-empty names and needs no declaration; the others resolve symbol references).
   - In `entity` extra fields (`extra_props`), a bare identifier evaluates to a string value, though quoting strings explicitly is clearer.
 
 ______________________________________________________________________
@@ -79,24 +79,29 @@ Models any subject, node, component, person, organization, place, artifact, or c
 | `base_time`        | Time expr              | Origin, creation, birth, or launch coordinate                                               |
 | `avatar`           | String                 | Relative path to an existing `.bmp`/`.gif`/`.ico`/`.jpeg`/`.jpg`/`.png`/`.svg`/`.webp` file |
 | `belong_to`        | List of entity names   | Parent entities forming a DAG (multiple parents allowed; cycles fail with `entity-cycle`)   |
+| `tags`             | List of tag names      | Undeclared non-empty tags (bare or quoted) for categorization and frontend filtering        |
 | `calculable_props` | List of prop IDs       | IDs registered in `story.calculable_props`; outputs merge into `extra_props`                |
 | *any other key*    | Scalar / list / object | Stored verbatim in `extra_props` (time refs and `+`/`-` expressions are rejected here)      |
 
 ### `link <group> { ... }`
 
-Groups named relationships between declared entities:
+Groups named undirected or directed relationships between declared entities:
 
 ```weft
 link 架构依赖 {
-  "api/v2" -- "读写" -- 主数据库
-  "api/v2" -- "缓存" -- Redis集群
+  "api/v2" -- "读写" -> 主数据库
+  "api/v2" -- "缓存" -> Redis集群
+  主数据库 -- "主从同步" -- 备数据库
 }
 ```
 
-- Edge grammar: `<name> -- <name> -- <name>` (`left -- relation -- right`).
+- Edge grammar (freely mixable inside a group):
+  - Undirected: `<left> -- <relation> -- <right>`
+  - Directed (`left -> right`): `<left> -- <relation> -> <right>`
+  - Reverse directed (`right -> left`): `<left> <- <relation> -- <right>` (normalizes to `right -> left` at compile time)
 - Both endpoints must be declared entities (`unknown-link-entity`).
 - Multiple `link` blocks sharing the same `<group>` name merge their edges.
-- `weft fmt` always quotes `<relation>`.
+- `weft fmt` always quotes `<relation>` and preserves each edge's arrow syntax (`--`, `->`, `<-`).
 
 ### `event <name> { ... }`
 
@@ -195,15 +200,16 @@ ______________________________________________________________________
 
 ### Lint Warnings (exit code 1 under `--deny-warnings`)
 
-| Rule                 | Trigger & Fix                                                                                                                        |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `duplicate-attr`     | Same key repeated in one block -> remove duplicate.                                                                                  |
-| `unused-time-anchor` | Declared `time` anchor never referenced -> use or delete it.                                                                         |
-| `unused-entity`      | Entity unreferenced by any `event`, `link`, or `belong_to` (checked when the file has `>= 1` event or link) -> connect or remove it. |
-| `unreferenced-event` | File has `>= 1` `events`, but this event is in none -> add it to an `events` list.                                                   |
-| `self-link`          | `A -- "rel" -- A` -> remove or fix target entity.                                                                                    |
-| `duplicate-link`     | Same `(left, relation, right)` edge repeated within a `link` group -> deduplicate.                                                   |
-| `empty-block`        | Empty `link` block or empty `events` list -> populate or delete.                                                                     |
+| Rule                 | Trigger & Fix                                                                                                                                                                     |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `duplicate-attr`     | Same key repeated in one block -> remove duplicate.                                                                                                                               |
+| `duplicate-tag`      | Same tag repeated on one entity -> remove duplicate.                                                                                                                              |
+| `unused-time-anchor` | Declared `time` anchor never referenced -> use or delete it.                                                                                                                      |
+| `unused-entity`      | Entity unreferenced by any `event`, `link`, or `belong_to` (checked when the file has `>= 1` event or link) -> connect or remove it.                                              |
+| `unreferenced-event` | File has `>= 1` `events`, but this event is in none -> add it to an `events` list.                                                                                                |
+| `self-link`          | `A -- "rel" -- A` -> remove or fix target entity.                                                                                                                                 |
+| `duplicate-link`     | Same edge repeated within a `link` group (endpoint-order-insensitive for undirected; direction-sensitive for directed, with `A <- r -- B` matching `B -- r -> A`) -> deduplicate. |
+| `empty-block`        | Empty `link` block or empty `events` list -> populate or delete.                                                                                                                  |
 
 ______________________________________________________________________
 

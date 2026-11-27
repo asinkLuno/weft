@@ -182,6 +182,7 @@ Export `pub fn calculable_prop(ctx)`:
     },
     "description": "...",
     "belong_to": ["平台组"],
+    "tags": ["核心服务", "生产环境"],
     "extra_props": { "kind": "service" }
   }
 }

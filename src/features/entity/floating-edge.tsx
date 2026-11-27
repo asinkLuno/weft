@@ -87,6 +87,7 @@ export const FloatingEdge = memo(function FloatingEdge({
   target,
   data,
   style,
+  markerEnd,
 }: EdgeProps) {
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
@@ -107,7 +108,7 @@ export const FloatingEdge = memo(function FloatingEdge({
 
   return (
     <>
-      <BaseEdge id={id} path={path} style={style} />
+      <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />
       {edgeData?.label && (
         <EdgeLabelRenderer>
           <div

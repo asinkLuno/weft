@@ -4,8 +4,8 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::errors::Diagnostic;
 use crate::parser::{
-    Attr, BinOp, Comment, Expr, LinkEdge, Span, Spanned, TopItem, WeftAst, extract_comments,
-    is_valid_bare_name, parse_weft_recover,
+    Attr, BinOp, Comment, Expr, LinkEdge, LinkSyntax, Span, Spanned, TopItem, WeftAst,
+    extract_comments, is_valid_bare_name, parse_weft_recover,
 };
 
 const INDENT_UNIT: &str = "  ";
@@ -315,10 +315,15 @@ impl<'a> Formatter<'a> {
             }
 
             self.push_indent(inner_indent);
+            let (left_op, right_op) = match edge.syntax {
+                LinkSyntax::Undirected => (" -- ", " -- "),
+                LinkSyntax::Forward => (" -- ", " -> "),
+                LinkSyntax::Backward => (" <- ", " -- "),
+            };
             self.out.push_str(&format_name(&edge.left.0));
-            self.out.push_str(" -- ");
+            self.out.push_str(left_op);
             self.out.push_str(&format_quoted_string(&edge.relation.0));
-            self.out.push_str(" -- ");
+            self.out.push_str(right_op);
             self.out.push_str(&format_name(&edge.right.0));
 
             let end_line = self.line_of(edge_span.end.saturating_sub(1));

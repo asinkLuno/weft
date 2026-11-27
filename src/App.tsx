@@ -2,16 +2,18 @@ import { lazy, Suspense, useCallback } from "react";
 import { useDocument } from "@/features/document/use-document";
 import { WelcomeView } from "@/features/welcome/welcome-view";
 import { useAppSettings } from "@/hooks/use-app-settings";
+import { preloadWorkspaceLayout } from "@/lib/settings";
 
 const loadWorkspace = () => import("@/app/workspace");
 const Workspace = lazy(() =>
   loadWorkspace().then((m) => ({ default: m.Workspace })),
 );
 
-// 并行预热 Workspace 与默认首屏挂载的编辑器 chunk，消除点开文件后的二次瀑布
+// 并行预热 Workspace、编辑器 chunk 与工作区布局，消除点开文件后的二次瀑布
 function preloadWorkspace() {
   void loadWorkspace();
   void import("@/features/editor/weft-editor-view");
+  void preloadWorkspaceLayout();
 }
 
 export default function App() {
@@ -36,6 +38,7 @@ export default function App() {
 
   const openRecent = useCallback(
     async (nextPath: string) => {
+      preloadWorkspace();
       const result = await bind(nextPath);
       if (result === "bound") remember(nextPath);
       else if (result === "failed") forget(nextPath);

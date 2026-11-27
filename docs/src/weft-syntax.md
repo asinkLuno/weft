@@ -33,7 +33,7 @@ events 主线 = [开场]
 - **数字**：整数与浮点（`42`、`3.14`）；负号写在表达式里（`-1`），时间分量本身不接受负数。
 - **字面量**：`true`、`false`、`null`。
 - **列表与对象**：`[a, b]`、`{ key = "value" }`。元素间可以用逗号或分号，允许尾逗号。嵌套任意层。
-- **字符串字段必须加引号**：`description`、`avatar`、`date_mode` 只接受字符串字面量，裸标识符会报 `invalid-field: expected a string`。名字列表（`belong_to`、`entities`、`calculable_props`、`events`）里的裸标识符才按名字处理。
+- **字符串字段必须加引号**：`description`、`avatar`、`date_mode` 只接受字符串字面量，裸标识符会报 `invalid-field: expected a string`。名字列表（`belong_to`、`tags`、`entities`、`calculable_props`、`events`）里的裸标识符才按名字处理。
 - **名字不是变量**：裸标识符出现在普通属性里就是字符串，只有时间字段里的名字才按时间引用解析。
 
 ## 顶层声明
@@ -78,6 +78,7 @@ entity 哈利·波特 {
   description      = "大难不死的男孩。"
   base_time        = [1980, 7, 31]
   belong_to        = [格兰芬多, 波特一家]
+  tags             = [巫师, 学生, 主角]
   calculable_props = [constellation]
   avatar           = "images/harry.png"
 
@@ -93,6 +94,7 @@ entity 哈利·波特 {
 | `description`      | 描述，字符串                                                                      |
 | `avatar`           | 图片路径，相对 `.weft` 所在目录；必须是已存在的 bmp/gif/ico/jpeg/jpg/png/svg/webp |
 | `belong_to`        | 上级实体列表，构成归属 DAG                                                        |
+| `tags`             | 实体标签列表（免声明，支持裸标识符或字符串），用于分类与前端多选筛选              |
 | `calculable_props` | 启用的可计算属性 ID 列表，结果写进 `extra_props`                                  |
 
 不在上表里的键不会报错，会原样收进 `extra_props`。值可以是标量、列表或对象，但不能是时间引用或 `+` / `-` 表达式。归属引用必须存在且不能成环。`base_time` 不是必填，但可计算属性可能要求它。
@@ -118,9 +120,21 @@ link 波特一家 {
   哈利·波特 -- "父子" -- 詹姆·波特
   莉莉·波特 -- "夫妻" -- 詹姆·波特
 }
+
+link 对立与羁绊 {
+  伏地魔 -- "追杀" -> 哈利·波特
+  奇洛 -- "效忠" -> 伏地魔
+  哈利·波特 <- "庇护" -- 阿不思·邓布利多
+}
 ```
 
-每条边是 `实体 -- 关系 -- 实体`。两端必须是已声明实体，关系按字符串处理（可以不写引号，`fmt` 会统一补上）。自己连自己（`self-link`）和重复边（`duplicate-link`）是警告，空块是 `empty-block` 警告。同一组可以出现多次，边会合并。
+每条边支持三种写法（同一组内可混写）：
+
+- **无向**：`A -- "关系" -- B`
+- **有向（A → B）**：`A -- "关系" -> B`
+- **反向有向（B → A）**：`A <- "关系" -- B`（语义等价于 `B -- "关系" -> A`）
+
+两端必须是已声明实体，关系按字符串处理（可以不写引号，`fmt` 会统一补上）。自己连自己（`self-link`）和重复边（`duplicate-link`，无向边忽略端点顺序、有向边区分方向且 `A <- rel -- B` 与 `B -- rel -> A` 视为同边）是警告，空块是 `empty-block` 警告。同一组可以出现多次，边会合并。
 
 ### event
 
@@ -194,6 +208,7 @@ event 后续 {
 | 规则                 | 触发条件                                    |
 | -------------------- | ------------------------------------------- |
 | `duplicate-attr`     | 同一块里重复写同一个键                      |
+| `duplicate-tag`      | 同一实体重复写了同一个标签                  |
 | `unused-time-anchor` | `time` 锚点声明了但没人用                   |
 | `unused-entity`      | 实体没有被任何事件、关系或 `belong_to` 引用 |
 | `unreferenced-event` | 声明了事件列表，但事件不在任何事件列表里    |

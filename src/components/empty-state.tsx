@@ -3,9 +3,11 @@ import type { ReactNode } from "react";
 
 export function EmptyState({
   icon: Icon,
+  action,
   children,
 }: {
   icon?: LucideIcon;
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -14,6 +16,7 @@ export function EmptyState({
         <Icon className="size-7 text-base-content/30" aria-hidden="true" />
       )}
       <p>{children}</p>
+      {action}
     </div>
   );
 }

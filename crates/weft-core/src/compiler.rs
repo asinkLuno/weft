@@ -19,7 +19,7 @@ use crate::event::{
 use crate::lint::{LintContext, run_lints};
 use crate::events::{Events, check_collecting as check_event_lists_collecting};
 use crate::parser::{
-    Attr, Expr, Span, Spanned, TopItem, WeftAst, parse_weft_recover, to_byte_span,
+    Attr, Expr, LinkSyntax, Span, Spanned, TopItem, WeftAst, parse_weft_recover, to_byte_span,
 };
 use crate::phase::{TimeResolver, TimeTarget};
 use crate::story::{RawStory, Story, StoryContext};
@@ -241,10 +241,18 @@ fn analyze_ast(
                     .or_insert_with(|| to_byte_span(group.1));
                 let entry = link_groups.entry(group.0).or_default();
                 for (edge, edge_span) in edges {
+                    let raw_left = (edge.left.0, to_byte_span(edge.left.1));
+                    let raw_right = (edge.right.0, to_byte_span(edge.right.1));
+                    let (left, right, directed) = match edge.syntax {
+                        LinkSyntax::Undirected => (raw_left, raw_right, false),
+                        LinkSyntax::Forward => (raw_left, raw_right, true),
+                        LinkSyntax::Backward => (raw_right, raw_left, true),
+                    };
                     entry.push(RawEntityLink {
-                        left: (edge.left.0, to_byte_span(edge.left.1)),
-                        right: (edge.right.0, to_byte_span(edge.right.1)),
+                        left,
+                        right,
                         relations: edge.relation.0,
+                        directed,
                         span: to_byte_span(edge_span),
                     });
                 }
@@ -559,6 +567,7 @@ fn lower_entity(
     let mut description = None;
     let mut avatar = None;
     let mut belong_to = Vec::new();
+    let mut tags = Vec::new();
     let mut calculable_props = Vec::new();
     let mut extra_props = HashMap::new();
 
@@ -590,6 +599,28 @@ fn lower_entity(
                     belong_to = list;
                 }
             }
+            "tags" => {
+                if let Some(list) = expect_name_list(&section, &key, attr.value, diagnostics) {
+                    tags = list
+                        .into_iter()
+                        .filter(|(tag, span)| {
+                            if tag.trim().is_empty() {
+                                diagnostics.push(Diagnostic::from_validation(
+                                    ValidationError::InvalidField {
+                                        section: section.clone(),
+                                        field: key.clone(),
+                                        reason: "tag name cannot be empty".to_owned(),
+                                    },
+                                    Some(*span),
+                                ));
+                                false
+                            } else {
+                                true
+                            }
+                        })
+                        .collect();
+                }
+            }
             "calculable_props" => {
                 if let Some(list) = expect_name_list(&section, &key, attr.value, diagnostics) {
                     calculable_props = list;
@@ -610,6 +641,7 @@ fn lower_entity(
             description,
             avatar,
             belong_to,
+            tags,
             calculable_props,
             extra_props,
         },

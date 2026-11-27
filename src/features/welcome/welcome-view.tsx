@@ -10,6 +10,18 @@ import { memo } from "react";
 import { WeftPrint } from "@/components/weft-art";
 import { type Lang, strings } from "@/i18n";
 
+const BOOK_ICON = <BookOpen className="size-3.5" />;
+const WAYPOINTS_ICON = <Waypoints className="size-3.5" />;
+const GIT_BRANCH_ICON = <GitBranch className="size-3.5" />;
+const FOLDER_OPEN_ICON = <FolderOpen className="size-4" />;
+const HISTORY_ICON = <History className="size-4 text-base-content/60" />;
+const RECENT_FILE_ICON = (
+  <FileText className="size-4 shrink-0 text-base-content/50" />
+);
+const EMPTY_FILE_ICON = (
+  <FileText className="size-4 shrink-0 text-base-content/35" />
+);
+
 function splitPath(path: string): { name: string; dir: string } {
   const sep = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   return sep < 0
@@ -44,15 +56,15 @@ export const WelcomeView = memo(function WelcomeView({
               </h1>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-base-content/55">
                 <span className="inline-flex items-center gap-1.5">
-                  <BookOpen className="size-3.5" />
+                  {BOOK_ICON}
                   {strings[lang].tab1}
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <Waypoints className="size-3.5" />
+                  {WAYPOINTS_ICON}
                   {strings[lang].tab2}
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <GitBranch className="size-3.5" />
+                  {GIT_BRANCH_ICON}
                   {strings[lang].tab4}
                 </span>
               </div>
@@ -65,7 +77,7 @@ export const WelcomeView = memo(function WelcomeView({
               onMouseEnter={onPreload}
               onFocus={onPreload}
             >
-              <FolderOpen className="size-4" />
+              {FOLDER_OPEN_ICON}
               {strings[lang].open}
             </button>
           </header>
@@ -73,7 +85,7 @@ export const WelcomeView = memo(function WelcomeView({
           <section className="flex min-w-0 flex-col gap-3 border-t border-base-300 pt-6">
             <header className="flex flex-col gap-0.5">
               <h2 className="flex items-center gap-2 text-sm font-semibold">
-                <History className="size-4 text-base-content/60" />
+                {HISTORY_ICON}
                 {strings[lang].recent}
               </h2>
               <p className="text-xs text-base-content/60">
@@ -94,7 +106,7 @@ export const WelcomeView = memo(function WelcomeView({
                         onMouseEnter={onPreload}
                         onFocus={onPreload}
                       >
-                        <FileText className="size-4 shrink-0 text-base-content/50" />
+                        {RECENT_FILE_ICON}
                         <span className="flex min-w-0 flex-col items-start">
                           <strong className="max-w-full truncate text-sm font-medium">
                             {name}
@@ -112,7 +124,7 @@ export const WelcomeView = memo(function WelcomeView({
               </ul>
             ) : (
               <div className="flex items-center gap-2.5 py-3 text-xs text-base-content/50">
-                <FileText className="size-4 shrink-0 text-base-content/35" />
+                {EMPTY_FILE_ICON}
                 <p>{strings[lang].recentEmpty}</p>
               </div>
             )}

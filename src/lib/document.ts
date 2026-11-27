@@ -20,6 +20,7 @@ export type WeftDoc = {
       description?: string;
       base_time?: Phase | null;
       base_time_humanizer?: string;
+      tags?: string[];
       // 内置 key 之外的输入字段原样透传（后端 extra_props）
       extra_props?: Record<string, unknown>;
     }
@@ -28,7 +29,7 @@ export type WeftDoc = {
   belong_dag?: Array<{ id: string; belong_to?: string[] }>;
   entity_link?: Record<
     string,
-    Array<{ entities: [string, string]; relations: string }>
+    Array<{ entities: [string, string]; relations: string; directed: boolean }>
   >;
   // 事件 ID → 事件定义
   event?: Record<string, Event>;

@@ -16,6 +16,7 @@ pub enum SymbolKind {
     TimeAnchor,
     LinkGroup,
     CalculableProp,
+    Tag,
 }
 
 impl SymbolKind {
@@ -27,6 +28,7 @@ impl SymbolKind {
             Self::TimeAnchor => "time",
             Self::LinkGroup => "link",
             Self::CalculableProp => "calculable_prop",
+            Self::Tag => "tag",
         }
     }
 }
@@ -39,6 +41,7 @@ pub struct SymbolDecl {
     pub full_span: ByteSpan,
     pub description: Option<String>,
     pub belong_to: Vec<String>,
+    pub tags: Vec<String>,
     pub entities: Vec<String>,
 }
 
@@ -130,6 +133,7 @@ impl DocumentIndex {
                                         _ => None,
                                     },
                                     belong_to: Vec::new(),
+                                    tags: Vec::new(),
                                     entities: Vec::new(),
                                 });
                             }
@@ -152,6 +156,7 @@ impl DocumentIndex {
                         full_span,
                         description: None,
                         belong_to: Vec::new(),
+                        tags: Vec::new(),
                         entities: Vec::new(),
                     });
                     idx.top_decls.push(TopDeclEntry {
@@ -166,6 +171,7 @@ impl DocumentIndex {
                     let name_span = to_byte_span(name.1);
                     let mut description = None;
                     let mut belong_to = Vec::new();
+                    let mut tags = Vec::new();
                     for (attr, _) in attrs {
                         idx.attr_keys.push(AttrKeySite {
                             block: BlockKind::Entity,
@@ -184,6 +190,16 @@ impl DocumentIndex {
                                     belong_to.push(target.to_owned());
                                 }
                             }
+                        } else if attr.key.0 == "tags"
+                            && let Expr::List(items) = &attr.value.0
+                        {
+                            for (expr, _) in items {
+                                if let Some(tag) = expr_as_name(expr)
+                                    && !tag.trim().is_empty()
+                                {
+                                    tags.push(tag.to_owned());
+                                }
+                            }
                         }
                     }
                     idx.register_decl(SymbolDecl {
@@ -193,6 +209,7 @@ impl DocumentIndex {
                         full_span,
                         description: description.clone(),
                         belong_to,
+                        tags,
                         entities: Vec::new(),
                     });
                     idx.top_decls.push(TopDeclEntry {
@@ -212,6 +229,7 @@ impl DocumentIndex {
                         full_span,
                         description: None,
                         belong_to: Vec::new(),
+                        tags: Vec::new(),
                         entities: Vec::new(),
                     });
                     idx.top_decls.push(TopDeclEntry {
@@ -253,6 +271,7 @@ impl DocumentIndex {
                         full_span,
                         description: description.clone(),
                         belong_to: Vec::new(),
+                        tags: Vec::new(),
                         entities,
                     });
                     idx.top_decls.push(TopDeclEntry {
@@ -272,6 +291,7 @@ impl DocumentIndex {
                         full_span,
                         description: None,
                         belong_to: Vec::new(),
+                        tags: Vec::new(),
                         entities: Vec::new(),
                     });
                     idx.top_decls.push(TopDeclEntry {
@@ -302,6 +322,21 @@ impl DocumentIndex {
                                             idx.push_ref(
                                                 SymbolKind::Entity,
                                                 target,
+                                                to_byte_span(*span),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            "tags" => {
+                                if let Expr::List(items) = &attr.value.0 {
+                                    for (expr, span) in items {
+                                        if let Some(tag) = expr_as_name(expr)
+                                            && !tag.trim().is_empty()
+                                        {
+                                            idx.push_ref(
+                                                SymbolKind::Tag,
+                                                tag,
                                                 to_byte_span(*span),
                                             );
                                         }
@@ -399,6 +434,7 @@ impl DocumentIndex {
                         full_span,
                         description: None,
                         belong_to: Vec::new(),
+                        tags: Vec::new(),
                         entities: Vec::new(),
                     });
                     idx.top_decls.push(TopDeclEntry {

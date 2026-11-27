@@ -278,6 +278,10 @@ export const EventsGantt = memo(function EventsGantt({
     setIsZoomed(false);
     setHasExpandedBreak(false);
 
+    // 先读取主题缓存色板再初始化 Canvas，避免多甘特图挂载时 DOM 写后读样式抖动
+    appliedThemeRef.current = themeRef.current;
+    const palette = readDaisyPalette(appliedThemeRef.current);
+
     let chart = chartRef.current;
     if (!chart || chart.isDisposed()) {
       chart = echarts.init(container, undefined, { renderer: "canvas" });
@@ -288,11 +292,10 @@ export const EventsGantt = memo(function EventsGantt({
       (a, b) => a - b,
     );
     lastTicksRef.current = fallbackTicks;
-    appliedThemeRef.current = themeRef.current;
     const option = buildGanttOption({
       name,
       model,
-      palette: readDaisyPalette(container),
+      palette,
       entitiesLabel: t.ganttEntities,
       formatExactTick: (value) => formatCachedTick(calendarKey, value),
       customValues: fallbackTicks,
@@ -417,7 +420,7 @@ export const EventsGantt = memo(function EventsGantt({
     const option = buildGanttOption({
       name: currentName,
       model: currentModel,
-      palette: readDaisyPalette(container),
+      palette: readDaisyPalette(theme),
       entitiesLabel,
       formatExactTick: (value) => formatCachedTick(currentCalendarKey, value),
       customValues: lastTicksRef.current,

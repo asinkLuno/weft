@@ -13,6 +13,8 @@ pub enum TokKind {
     Str,
     Num,
     Dash2,
+    ArrowRight,
+    ArrowLeft,
     Plus,
     Minus,
     Eq,
@@ -36,6 +38,13 @@ pub struct Tok {
 impl Tok {
     pub fn is_name(&self) -> bool {
         matches!(self.kind, TokKind::Ident | TokKind::Str)
+    }
+
+    pub fn is_link_op(&self) -> bool {
+        matches!(
+            self.kind,
+            TokKind::Dash2 | TokKind::ArrowRight | TokKind::ArrowLeft
+        )
     }
 }
 
@@ -205,11 +214,31 @@ pub fn tokenize(src: &str, cursor_byte: usize) -> TokenizeResult {
             continue;
         }
 
-        // 双短横 `--`
+        // 关系连线符 `--` / `->` / `<-`
         if b == b'-' && bytes.get(i + 1) == Some(&b'-') {
             tokens.push(Tok {
                 kind: TokKind::Dash2,
                 value: "--".to_owned(),
+                span: ByteSpan::new(i, i + 2),
+                line,
+            });
+            i += 2;
+            continue;
+        }
+        if b == b'-' && bytes.get(i + 1) == Some(&b'>') {
+            tokens.push(Tok {
+                kind: TokKind::ArrowRight,
+                value: "->".to_owned(),
+                span: ByteSpan::new(i, i + 2),
+                line,
+            });
+            i += 2;
+            continue;
+        }
+        if b == b'<' && bytes.get(i + 1) == Some(&b'-') {
+            tokens.push(Tok {
+                kind: TokKind::ArrowLeft,
+                value: "<-".to_owned(),
                 span: ByteSpan::new(i, i + 2),
                 line,
             });
@@ -332,6 +361,7 @@ pub struct ScanSymbols {
     pub time_anchors: BTreeSet<String>,
     pub calculable_props: BTreeSet<String>,
     pub relations: BTreeSet<String>,
+    pub tags: BTreeSet<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -360,6 +390,9 @@ pub enum CursorContext {
         exclude: BTreeSet<String>,
     },
     CalcPropRef {
+        exclude: BTreeSet<String>,
+    },
+    TagRef {
         exclude: BTreeSet<String>,
     },
     RelationRef,
@@ -455,7 +488,7 @@ pub fn scan_document(
                     capture_snapshot!();
                 } else {
                     prev = last.take();
-                    if t.line == cursor_line && t.kind == TokKind::Dash2 {
+                    if t.line == cursor_line && t.is_link_op() {
                         dash_count_on_cursor_line += 1;
                     }
                     last = Some(t.clone());
@@ -592,9 +625,9 @@ pub fn scan_document(
 
         if brace_depth == 1 && bracket_depth == 0 {
             if block_kind == Some(BlockKind::Link) {
-                if tok.kind == TokKind::Dash2
+                if tok.is_link_op()
                     && tokens.get(i + 1).is_some_and(Tok::is_name)
-                    && tokens.get(i + 2).is_some_and(|t| t.kind == TokKind::Dash2)
+                    && tokens.get(i + 2).is_some_and(Tok::is_link_op)
                 {
                     symbols.relations.insert(tokens[i + 1].value.clone());
                 }
@@ -658,8 +691,17 @@ pub fn scan_document(
             continue;
         }
 
-        if snapshot.is_none() && bracket_depth == 1 && tok.is_name() {
-            list_items.insert(tok.value.clone());
+        if bracket_depth == 1 && tok.is_name() {
+            if block_kind == Some(BlockKind::Entity)
+                && active_attr.as_deref() == Some("tags")
+                && !tok.value.trim().is_empty()
+                && !(tok.span.start < cursor_byte && cursor_byte <= tok.span.end)
+            {
+                symbols.tags.insert(tok.value.clone());
+            }
+            if snapshot.is_none() {
+                list_items.insert(tok.value.clone());
+            }
         }
 
         i += 1;
@@ -750,6 +792,11 @@ fn resolve_cursor_context(
                         exclude.insert(self_name);
                     }
                     return CursorContext::EntityRef { exclude };
+                }
+                FieldValueKind::TagList => {
+                    return CursorContext::TagRef {
+                        exclude: s.list_items,
+                    };
                 }
                 FieldValueKind::CalcPropList => {
                     return CursorContext::CalcPropRef {

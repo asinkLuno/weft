@@ -11,6 +11,7 @@ use crate::event::RawEvent;
 /// 所有可选 Lint 规则名清单。
 pub const LINT_RULES: &[&str] = &[
     "duplicate-attr",
+    "duplicate-tag",
     "unused-time-anchor",
     "unused-entity",
     "unreferenced-event",
@@ -32,9 +33,37 @@ pub(crate) struct LintContext<'a> {
 
 pub(crate) fn run_lints(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
     lint_unused_anchors(ctx, diagnostics);
+    lint_duplicate_tags(ctx, diagnostics);
     lint_links(ctx, diagnostics);
     lint_unused_entities(ctx, diagnostics);
     lint_event_lists_and_events(ctx, diagnostics);
+}
+
+fn lint_duplicate_tags(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
+    let zh = ctx.lang == "zh";
+    let rel_msg = if zh {
+        "首次出现于此"
+    } else {
+        "first listed here"
+    };
+    for (id, raw) in ctx.entities {
+        let mut seen: HashMap<&str, ByteSpan> = HashMap::new();
+        for (tag, span) in &raw.tags {
+            if let Some(&first_span) = seen.get(tag.as_str()) {
+                let msg = if zh {
+                    format!("实体 `{id}` 重复声明了标签 `{tag}`")
+                } else {
+                    format!("entity `{id}` lists duplicate tag `{tag}`")
+                };
+                diagnostics.push(
+                    Diagnostic::warning("duplicate-tag", msg, Some(*span))
+                        .with_related(first_span, rel_msg),
+                );
+            } else {
+                seen.insert(tag.as_str(), *span);
+            }
+        }
+    }
 }
 
 fn lint_unused_anchors(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
@@ -67,7 +96,7 @@ fn lint_links(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
             ));
             continue;
         }
-        let mut seen: HashMap<(&str, &str, &str), ByteSpan> = HashMap::new();
+        let mut seen: HashMap<(bool, &str, &str, &str), ByteSpan> = HashMap::new();
         for edge in edges {
             if edge.left.0 == edge.right.0 {
                 let msg = if zh {
@@ -80,20 +109,22 @@ fn lint_links(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
                 };
                 diagnostics.push(Diagnostic::warning("self-link", msg, Some(edge.span)));
             }
-            let key = (
-                edge.left.0.as_str(),
-                edge.relations.as_str(),
-                edge.right.0.as_str(),
-            );
+            let (norm_left, norm_right) = if edge.directed || edge.left.0 <= edge.right.0 {
+                (edge.left.0.as_str(), edge.right.0.as_str())
+            } else {
+                (edge.right.0.as_str(), edge.left.0.as_str())
+            };
+            let key = (edge.directed, norm_left, edge.relations.as_str(), norm_right);
             if let Some(&first_span) = seen.get(&key) {
+                let right_op = if edge.directed { "->" } else { "--" };
                 let msg = if zh {
                     format!(
-                        "关系组 `{group}` 重复声明了边 `{} -- \"{}\" -- {}`",
+                        "关系组 `{group}` 重复声明了边 `{} -- \"{}\" {right_op} {}`",
                         edge.left.0, edge.relations, edge.right.0
                     )
                 } else {
                     format!(
-                        "duplicate link edge `{} -- \"{}\" -- {}` in `{group}`",
+                        "duplicate link edge `{} -- \"{}\" {right_op} {}` in `{group}`",
                         edge.left.0, edge.relations, edge.right.0
                     )
                 };

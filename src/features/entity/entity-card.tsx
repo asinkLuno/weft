@@ -24,6 +24,15 @@ export const EntitySelectContext = createContext<((id: string) => void) | null>(
   null,
 );
 
+export type EntityTagContextValue = {
+  activeTags: ReadonlySet<string>;
+  onToggleTag: (tag: string) => void;
+};
+
+export const EntityTagContext = createContext<EntityTagContextValue | null>(
+  null,
+);
+
 // 入参只要 data 与 selected：memo 避免拖动单个节点时重渲染其余卡片
 export const EntityNode = memo(function EntityNode({
   data,
@@ -81,6 +90,9 @@ export function EntityCard({
             {data.description}
           </p>
         )}
+        {data.tags.length > 0 && (
+          <TagBadgeList tags={data.tags} interactive={interactive} />
+        )}
       </div>
       {(data.baseTime ||
         data.extraProps.length > 0 ||
@@ -116,6 +128,47 @@ export function EntityCard({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function TagBadgeList({
+  tags,
+  interactive,
+}: {
+  tags: readonly string[];
+  interactive: boolean;
+}) {
+  const tagCtx = useContext(EntityTagContext);
+  return (
+    <div className="flex flex-wrap gap-1">
+      {tags.map((tag) => {
+        const active = tagCtx?.activeTags.has(tag) ?? false;
+        const tone = active ? "badge-primary" : "badge-soft badge-primary";
+        if (!interactive || !tagCtx) {
+          return (
+            <span
+              key={tag}
+              className={`badge badge-xs h-auto max-w-full whitespace-normal break-words ${tone}`}
+            >
+              {tag}
+            </span>
+          );
+        }
+        return (
+          <button
+            key={tag}
+            type="button"
+            className={`nodrag badge badge-xs h-auto max-w-full cursor-pointer whitespace-normal break-words transition-colors ${tone}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              tagCtx.onToggleTag(tag);
+            }}
+          >
+            {tag}
+          </button>
+        );
+      })}
     </div>
   );
 }

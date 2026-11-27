@@ -42,6 +42,7 @@ export type EntityCanvasProps = {
   initialNodes: EntityFlowNode[];
   edges: Edge[];
   layoutMode: EntityLayoutMode;
+  viewKey?: string;
   getSavedPositions: () => Readonly<Record<string, Point>>;
   selectedId: string | null;
   focusTarget: { id: string; seq: number } | null;
@@ -132,8 +133,10 @@ function applyComputedPositions(
 ): EntityFlowNode[] {
   let changed = false;
   const nextNodes = current.map((node) => {
-    if (layoutMode === "grid" && node.id in saved) return node;
-    const nextPos = computed[node.id];
+    const nextPos =
+      layoutMode === "grid" && node.id in saved
+        ? saved[node.id]
+        : computed[node.id];
     if (!nextPos) return node;
     if (
       Math.abs(node.position.x - nextPos.x) < 1 &&
@@ -161,6 +164,7 @@ function EntityCanvasInner({
   initialNodes,
   edges,
   layoutMode,
+  viewKey = "",
   getSavedPositions,
   selectedId,
   focusTarget,
@@ -181,12 +185,21 @@ function EntityCanvasInner({
 
   const lastLayoutFingerprintRef = useRef<string | null>(null);
   const didInitialFitRef = useRef(false);
+  const prevViewKeyRef = useRef(viewKey);
   const handledFocusSeqRef = useRef(0);
   const nodesRef = useRef(nodes);
 
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
+
+  // 同布局下切换筛选条件（如多选标签）时复用 ReactFlow 实例，仅重置指纹以重新排布并适应视口
+  useEffect(() => {
+    if (prevViewKeyRef.current === viewKey) return;
+    prevViewKeyRef.current = viewKey;
+    lastLayoutFingerprintRef.current = null;
+    didInitialFitRef.current = false;
+  }, [viewKey]);
 
   // 仅在节点尺寸或增删替换变化时递增测量版本，拖拽（position）期间零指纹计算与字符串分配
   const handleNodesChange = useCallback(
@@ -225,6 +238,7 @@ function EntityCanvasInner({
   useEffect(() => {
     void measureVersion;
     void nodeCount;
+    void viewKey;
     if (!nodesInitialized) return;
     const measuredFingerprint = computeMeasuredFingerprint(
       nodesRef.current,
@@ -265,6 +279,7 @@ function EntityCanvasInner({
     nodesInitialized,
     measureVersion,
     nodeCount,
+    viewKey,
     layoutMode,
     edgeSignature,
     edges,

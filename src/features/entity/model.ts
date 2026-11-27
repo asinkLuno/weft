@@ -1,5 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import type { Edge, Node } from "@xyflow/react";
+import { type Edge, MarkerType, type Node } from "@xyflow/react";
 import { type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 import { formatTimeRange } from "@/lib/ui";
@@ -12,6 +12,16 @@ import {
 
 export type EntityT = NonNullable<WeftDoc["entity"]>[string];
 
+export type EntityFilter =
+  | { dim: "belong"; pick: string }
+  | { dim: "link"; pick: string }
+  | { dim: "tags"; picks: readonly string[] };
+
+export type TagOption = {
+  tag: string;
+  count: number;
+};
+
 export type EntityParentRef = {
   id: string;
   name: string;
@@ -23,6 +33,7 @@ export type EntityData = {
   name: string;
   avatar?: string;
   baseTime?: string;
+  tags: string[];
   parents: EntityParentRef[];
   extraProps: Array<[string, string]>;
   description?: string;
@@ -33,15 +44,19 @@ export type EntityFlowNode = Node<EntityData, "entity">;
 
 export type FloatingEdgeData = {
   label: string;
+  directed: boolean;
   pairIndex: number;
   pairTotal: number;
   canonicalForward: boolean;
 };
 
+export type EntityLinkDirection = "undirected" | "outgoing" | "incoming";
+
 export type EntityLinkEntry = {
   key: string;
   group: string;
   relation: string;
+  direction: EntityLinkDirection;
   peerId: string;
   peerName: string;
 };
@@ -58,6 +73,7 @@ export type EntityDetail = {
   avatar?: string;
   baseTime?: string;
   description?: string;
+  tags: string[];
   extraProps: Array<[string, string]>;
   parents: Array<{ id: string; label: string }>;
   children: Array<{ id: string; label: string }>;
@@ -68,7 +84,14 @@ export type EntityDetail = {
 const EMPTY_SIZES: ReadonlyMap<string, NodeSize> = new Map();
 
 type EntityDocIndex = {
+  sortedEntities: ReadonlyArray<[string, EntityT]>;
   parentsById: Map<string, Set<string>>;
+  ancestorsOf: (id: string) => Set<string>;
+  belongTargetSet: ReadonlySet<string>;
+  belongSections: Array<Array<{ v: string; label: string }>>;
+  linkSections: Array<Array<{ v: string; label: string }>>;
+  tagCounts: ReadonlyMap<string, number>;
+  tagOptions: ReadonlyArray<TagOption>;
   childrenById: Map<string, Array<{ id: string; label: string }>>;
   linksByEntity: Map<string, EntityLinkEntry[]>;
   eventsByEntity: Map<string, EntityEventEntry[]>;
@@ -76,13 +99,33 @@ type EntityDocIndex = {
 
 const entityIndexCache = new WeakMap<WeftDoc, EntityDocIndex>();
 
-// 按 WeftDoc 实例缓存反向索引：点击不同实体查详情 O(1)，同时与 buildEntityView 复用 parentsById
+// 按 WeftDoc 实例缓存文档级派生索引：筛选切换零重复排序/DAG遍历/标签聚合，详情查表 O(1)
 function getEntityDocIndex(doc: WeftDoc): EntityDocIndex {
   const cached = entityIndexCache.get(doc);
   if (cached) return cached;
 
   const entityMap = doc.entity ?? {};
+  const sortedEntities = Object.entries(entityMap).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  const nameOf = (id: string) => entityMap[id]?.id ?? id;
   const parentsById = entityParents(doc.belong_dag);
+  const ancestorsOf = createAncestorsLookup(parentsById);
+  const { targetSet: belongTargetSet, belongSections } = buildBelongSections(
+    parentsById,
+    ancestorsOf,
+    nameOf,
+  );
+
+  const tagCounts = new Map<string, number>();
+  for (const [, entity] of sortedEntities) {
+    for (const tag of entity.tags ?? []) {
+      tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+    }
+  }
+  const tagOptions: TagOption[] = [...tagCounts.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([tag, count]) => ({ tag, count }));
 
   const childrenById = new Map<string, Array<{ id: string; label: string }>>();
   for (const [childId, pSet] of parentsById.entries()) {
@@ -105,6 +148,7 @@ function getEntityDocIndex(doc: WeftDoc): EntityDocIndex {
   const sortedGroups = Object.entries(doc.entity_link ?? {}).sort(([a], [b]) =>
     a.localeCompare(b),
   );
+  const linkSections = [sortedGroups.map(([g]) => ({ v: g, label: g }))];
   const pushLink = (entityId: string, entry: EntityLinkEntry) => {
     let list = linksByEntity.get(entityId);
     if (!list) {
@@ -118,6 +162,7 @@ function getEntityDocIndex(doc: WeftDoc): EntityDocIndex {
       const {
         entities: [a, b],
         relations,
+        directed,
       } = entries[i];
       const entA = entityMap[a];
       const entB = entityMap[b];
@@ -126,6 +171,7 @@ function getEntityDocIndex(doc: WeftDoc): EntityDocIndex {
         key: `${group}:${i}:a`,
         group,
         relation: relations,
+        direction: directed ? "outgoing" : "undirected",
         peerId: b,
         peerName: entB.id,
       });
@@ -134,6 +180,7 @@ function getEntityDocIndex(doc: WeftDoc): EntityDocIndex {
           key: `${group}:${i}:b`,
           group,
           relation: relations,
+          direction: directed ? "incoming" : "undirected",
           peerId: a,
           peerName: entA.id,
         });
@@ -178,7 +225,14 @@ function getEntityDocIndex(doc: WeftDoc): EntityDocIndex {
   }
 
   const index: EntityDocIndex = {
+    sortedEntities,
     parentsById,
+    ancestorsOf,
+    belongTargetSet,
+    belongSections,
+    linkSections,
+    tagCounts,
+    tagOptions,
     childrenById,
     linksByEntity,
     eventsByEntity,
@@ -296,12 +350,17 @@ type LinkEdgeRecord = {
   source: string;
   target: string;
   relation: string;
+  directed: boolean;
   pairKey: string;
   canonicalForward: boolean;
 };
 
 function collectValidLinks(
-  activeLinks: ReadonlyArray<{ entities: [string, string]; relations: string }>,
+  activeLinks: ReadonlyArray<{
+    entities: [string, string];
+    relations: string;
+    directed: boolean;
+  }>,
   visibleSet: ReadonlySet<string>,
 ): LinkEdgeRecord[] {
   const valid: LinkEdgeRecord[] = [];
@@ -309,6 +368,7 @@ function collectValidLinks(
     const {
       entities: [source, target],
       relations,
+      directed,
     } = activeLinks[i];
     if (source === target || !visibleSet.has(source) || !visibleSet.has(target))
       continue;
@@ -321,6 +381,7 @@ function collectValidLinks(
       source,
       target,
       relation: relations,
+      directed,
       pairKey,
       canonicalForward,
     });
@@ -328,9 +389,20 @@ function collectValidLinks(
   return valid;
 }
 
+const DIRECTED_MARKER = {
+  type: MarkerType.ArrowClosed,
+  color: "var(--color-primary)",
+  width: 18,
+  height: 18,
+} as const;
+
 function buildLinkEdges(
   activeLink: string,
-  activeLinks: ReadonlyArray<{ entities: [string, string]; relations: string }>,
+  activeLinks: ReadonlyArray<{
+    entities: [string, string];
+    relations: string;
+    directed: boolean;
+  }>,
   visibleSet: ReadonlySet<string>,
 ): Edge[] {
   const valid = collectValidLinks(activeLinks, visibleSet);
@@ -345,6 +417,7 @@ function buildLinkEdges(
     pairSeen.set(item.pairKey, pairIndex + 1);
     const data: FloatingEdgeData = {
       label: item.relation,
+      directed: item.directed,
       pairIndex,
       pairTotal: pairCounts.get(item.pairKey) ?? 1,
       canonicalForward: item.canonicalForward,
@@ -354,6 +427,7 @@ function buildLinkEdges(
       type: "floating",
       source: item.source,
       target: item.target,
+      markerEnd: item.directed ? DIRECTED_MARKER : undefined,
       data,
     };
   });
@@ -384,6 +458,7 @@ export function buildEntityDetail(
         ? `${t.baseTime}: ${entity.base_time_humanizer}`
         : undefined,
     description: entity.description,
+    tags: entity.tags ?? [],
     extraProps: formatExtraProps(entity.extra_props),
     parents,
     children: childrenById.get(entityId) ?? [],
@@ -415,6 +490,7 @@ function createEntityDataBuilder(
         e.base_time_humanizer !== undefined
           ? `${t.baseTime}: ${e.base_time_humanizer}`
           : undefined,
+      tags: e.tags ?? [],
       parents: [...(parentsById.get(id) ?? [])].map((b) => ({
         id: b,
         name: entityMap[b]?.id ?? b,
@@ -451,6 +527,7 @@ function filterEntities(
   entities: ReadonlyArray<[string, EntityT]>,
   activePick: string | null,
   activeLink: string | null,
+  activeTags: readonly string[],
   ancestorsOf: (id: string) => Set<string>,
   linkMembers: ReadonlySet<string>,
 ): Array<[string, EntityT]> {
@@ -462,44 +539,70 @@ function filterEntities(
   if (activeLink) {
     return entities.filter(([id]) => linkMembers.has(id));
   }
+  if (activeTags.length > 0) {
+    return entities.filter(([, entity]) => {
+      const entityTags = entity.tags;
+      if (!entityTags || entityTags.length < activeTags.length) return false;
+      return activeTags.every((tag) => entityTags.includes(tag));
+    });
+  }
   return [...entities];
 }
+
+const EMPTY_DOC_INDEX: EntityDocIndex = {
+  sortedEntities: [],
+  parentsById: new Map(),
+  ancestorsOf: () => new Set(),
+  belongTargetSet: new Set(),
+  belongSections: [],
+  linkSections: [[]],
+  tagCounts: new Map(),
+  tagOptions: [],
+  childrenById: new Map(),
+  linksByEntity: new Map(),
+  eventsByEntity: new Map(),
+};
 
 export function buildEntityView(
   doc: WeftDoc | null,
   lang: Lang,
-  dim: "belong" | "link" | null,
-  pick: string | null,
+  filter: EntityFilter | null,
   saved: Readonly<Record<string, Point>>,
 ) {
   const t = strings[lang];
   const entityMap = doc?.entity ?? {};
-  const entities = Object.entries(entityMap).sort(([a], [b]) =>
-    a.localeCompare(b),
-  );
-  const nameOf = (id: string) => entityMap[id]?.id ?? id;
-  const parentsById = doc
-    ? getEntityDocIndex(doc).parentsById
-    : entityParents(undefined);
-  const ancestorsOf = createAncestorsLookup(parentsById);
-  const { targetSet, belongSections } = buildBelongSections(
+  const index = doc ? getEntityDocIndex(doc) : EMPTY_DOC_INDEX;
+  const {
+    sortedEntities: entities,
     parentsById,
     ancestorsOf,
-    nameOf,
-  );
+    belongTargetSet: targetSet,
+    belongSections,
+    linkSections,
+    tagCounts,
+    tagOptions,
+  } = index;
+  const nameOf = (id: string) => entityMap[id]?.id ?? id;
 
   const activePick =
-    dim === "belong" && pick && targetSet.has(pick) ? pick : null;
+    filter?.dim === "belong" && targetSet.has(filter.pick) ? filter.pick : null;
   const linkGroups = doc?.entity_link ?? {};
-  const groups = Object.keys(linkGroups).sort();
-  const linkSections = [groups.map((g) => ({ v: g, label: g }))];
-  const activeLink = dim === "link" && pick && pick in linkGroups ? pick : null;
+  const activeLink =
+    filter?.dim === "link" && filter.pick in linkGroups ? filter.pick : null;
   const activeLinks = activeLink ? (linkGroups[activeLink] ?? []) : [];
+
+  const activeTags =
+    filter?.dim === "tags"
+      ? [...new Set(filter.picks.filter((tag) => tagCounts.has(tag)))].sort(
+          (a, b) => a.localeCompare(b),
+        )
+      : [];
 
   const filtered = filterEntities(
     entities,
     activePick,
     activeLink,
+    activeTags,
     ancestorsOf,
     collectLinkMembers(activeLinks, entityMap),
   );
@@ -509,6 +612,7 @@ export function buildEntityView(
     : activeLink
       ? "network"
       : "grid";
+  const useSavedPositions = layoutMode === "grid" && activeTags.length === 0;
 
   const visibleIds = filtered.map(([id]) => id);
   const visibleSet = new Set(visibleIds);
@@ -524,7 +628,7 @@ export function buildEntityView(
   const nodes: EntityFlowNode[] = filtered.map(([id, e]) => ({
     id,
     type: "entity",
-    position: layoutMode === "grid" ? (saved[id] ?? auto[id]) : auto[id],
+    position: useSavedPositions ? (saved[id] ?? auto[id]) : auto[id],
     data: entityData(id, e),
   }));
 
@@ -532,10 +636,13 @@ export function buildEntityView(
     nodes,
     edges,
     layoutMode,
+    useSavedPositions,
     activePick,
     activeLink,
+    activeTags,
     belongSections,
     linkSections,
+    tagOptions,
     nameOf,
   };
 }

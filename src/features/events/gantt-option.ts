@@ -6,6 +6,7 @@ import type {
 } from "echarts/components";
 import * as echarts from "echarts/core";
 import type { EntityTimeDelta } from "@/lib/document";
+import type { ResolvedTheme } from "@/lib/theme";
 import { formatTimeRange } from "@/lib/ui";
 import type { EventItem, GanttBreak, GanttChartModel } from "./model";
 
@@ -89,30 +90,23 @@ function resolveCssColor(
   return `rgba(${r}, ${g}, ${b}, ${finalAlpha})`;
 }
 
-let cachedPaletteKey: string | null = null;
-let cachedPalette: ChartPalette | null = null;
+const paletteCache = new Map<ResolvedTheme, ChartPalette>();
 
-export function readDaisyPalette(element: HTMLElement): ChartPalette {
-  const style = getComputedStyle(element);
+export function readDaisyPalette(theme: ResolvedTheme): ChartPalette {
+  const hit = paletteCache.get(theme);
+  if (hit) return hit;
+
   const rootStyle = getComputedStyle(document.documentElement);
-  const readVar = (name: string) =>
-    style.getPropertyValue(name).trim() ||
-    rootStyle.getPropertyValue(name).trim();
+  const readVar = (name: string) => rootStyle.getPropertyValue(name).trim();
 
   const primaryRaw = readVar("--color-primary");
   const base100Raw = readVar("--color-base-100");
   const base200Raw = readVar("--color-base-200");
   const base300Raw = readVar("--color-base-300");
   const contentRaw = readVar("--color-base-content");
-  const fontSans = style.fontFamily || "sans-serif";
+  const fontSans = rootStyle.fontFamily || "sans-serif";
 
-  const key = `${primaryRaw}|${base100Raw}|${base200Raw}|${base300Raw}|${contentRaw}|${fontSans}`;
-  if (cachedPalette && cachedPaletteKey === key) {
-    return cachedPalette;
-  }
-
-  cachedPaletteKey = key;
-  cachedPalette = {
+  const palette: ChartPalette = {
     primary: resolveCssColor(primaryRaw, "#002fa7", 1),
     primarySoft: resolveCssColor(primaryRaw, "#002fa7", 0.14),
     primaryBorder: resolveCssColor(primaryRaw, "#002fa7", 0.45),
@@ -126,7 +120,8 @@ export function readDaisyPalette(element: HTMLElement): ChartPalette {
     fontMono:
       'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
   };
-  return cachedPalette;
+  paletteCache.set(theme, palette);
+  return palette;
 }
 
 export function breakKey(brk: GanttBreak): string {

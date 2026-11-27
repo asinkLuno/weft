@@ -237,16 +237,21 @@ export function useDocument(lang: Lang) {
     }
   }, [draftStore, recompileSaved, reloadInternal]);
 
+  const inspectDiskRef = useRef(inspectDisk);
+  useEffect(() => {
+    inspectDiskRef.current = inspectDisk;
+  }, [inspectDisk]);
+
   useEffect(() => {
     mountedRef.current = true;
     void invoke("close_document").catch(() => {});
 
     const handleFocus = () => {
-      void inspectDisk();
+      void inspectDiskRef.current();
     };
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
-        void inspectDisk();
+        void inspectDiskRef.current();
       }
     };
     window.addEventListener("focus", handleFocus);
@@ -262,7 +267,7 @@ export function useDocument(lang: Lang) {
         void invoke("close_document").catch(() => {});
       }
     };
-  }, [inspectDisk]);
+  }, []);
 
   useEffect(() => {
     if (prevLangRef.current === lang) return;

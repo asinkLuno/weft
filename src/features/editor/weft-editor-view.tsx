@@ -30,7 +30,15 @@ import {
   Save,
   Sparkles,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   type EditorRevealRequest,
   useWorkspaceTheme,
@@ -66,6 +74,59 @@ const WARNING_BADGE_ICON = (
 );
 
 const EMPTY_COUNTS: DiagnosticCounts = { errors: 0, warnings: 0 };
+
+type DiagnosticCountsStore = {
+  getSnapshot: () => DiagnosticCounts;
+  subscribe: (listener: () => void) => () => void;
+  set: (next: DiagnosticCounts) => void;
+};
+
+function createDiagnosticCountsStore(): DiagnosticCountsStore {
+  let value = EMPTY_COUNTS;
+  const listeners = new Set<() => void>();
+
+  return {
+    getSnapshot: () => value,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    set: (next: DiagnosticCounts) => {
+      if (next.errors === value.errors && next.warnings === value.warnings) {
+        return;
+      }
+      value = next;
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
+// 隔离高频诊断计数更新，避免每次 LSP publishDiagnostics 触发整个编辑器视图重渲染
+const DiagnosticBadges = memo(function DiagnosticBadges({
+  store,
+}: {
+  store: DiagnosticCountsStore;
+}) {
+  const counts = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  return (
+    <>
+      {counts.errors > 0 ? (
+        <span className="badge badge-xs badge-error gap-1 shrink-0">
+          {ERROR_BADGE_ICON}
+          {counts.errors}
+        </span>
+      ) : null}
+      {counts.warnings > 0 ? (
+        <span className="badge badge-xs badge-warning gap-1 shrink-0">
+          {WARNING_BADGE_ICON}
+          {counts.warnings}
+        </span>
+      ) : null}
+    </>
+  );
+});
 
 const BASE_EDITOR_THEME = EditorView.theme({
   "&": { height: "100%" },
@@ -270,7 +331,7 @@ function WeftEditorViewInner({
   const fileName = fileNameOf(path);
   const canSave = (dirty || diskStatus === "deleted") && !saving;
   const viewRef = useRef<EditorView | null>(null);
-  const [counts, setCounts] = useState<DiagnosticCounts>(EMPTY_COUNTS);
+  const [countsStore] = useState(createDiagnosticCountsStore);
 
   const handleViewReady = useCallback((view: EditorView | null) => {
     viewRef.current = view;
@@ -292,18 +353,7 @@ function WeftEditorViewInner({
         >
           {fileName}
         </span>
-        {counts.errors > 0 ? (
-          <span className="badge badge-xs badge-error gap-1 shrink-0">
-            {ERROR_BADGE_ICON}
-            {counts.errors}
-          </span>
-        ) : null}
-        {counts.warnings > 0 ? (
-          <span className="badge badge-xs badge-warning gap-1 shrink-0">
-            {WARNING_BADGE_ICON}
-            {counts.warnings}
-          </span>
-        ) : null}
+        <DiagnosticBadges store={countsStore} />
         {dirty ? (
           <span className="badge badge-xs badge-outline shrink-0 border-primary text-primary">
             {t.unsaved}
@@ -403,7 +453,7 @@ function WeftEditorViewInner({
           draftStore={draftStore}
           revealRequest={revealRequest}
           onChange={onChange}
-          onDiagnosticCounts={setCounts}
+          onDiagnosticCounts={countsStore.set}
           onViewReady={handleViewReady}
         />
       </div>

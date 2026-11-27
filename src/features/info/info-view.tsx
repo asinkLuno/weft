@@ -59,6 +59,7 @@ entity 格兰芬多 {
 entity 哈利·波特 {
   base_time        = [1980, 7, 31]
   belong_to        = [格兰芬多]
+  tags             = [巫师, 学生, 主角]
   calculable_props = [constellation]
   gender           = "男"
 }
@@ -94,6 +95,7 @@ entity gryffindor {
 entity harry {
   base_time        = [1980, 7, 31]
   belong_to        = [gryffindor]
+  tags             = [wizard, student, protagonist]
   calculable_props = [constellation]
   gender           = "male"
 }
@@ -177,11 +179,12 @@ const copy: Record<Lang, Copy> = {
       },
       {
         title: "link",
-        lead: '按组声明实体两两关系，使用 A -- "关系" -- B 边语法。',
+        lead: '按组声明实体两两关系：A -- "关系" -- B 为无向边，A -- "关系" -> B（或反向 A <- "关系" -- B）为有向边，同一组内可混写。',
         fields: [],
-        code: `link 波特一家 {
+        code: `link 人物关系 {
   哈利·波特 -- "母子" -- 莉莉·波特
-  哈利·波特 -- "父子" -- 詹姆·波特
+  伏地魔 -- "追杀" -> 哈利·波特
+  哈利·波特 <- "庇护" -- 阿不思·邓布利多
 }`,
       },
       {
@@ -270,11 +273,12 @@ const copy: Record<Lang, Copy> = {
       },
       {
         title: "link",
-        lead: 'Grouped pairwise entity relations using A -- "relation" -- B edges.',
+        lead: 'Grouped pairwise entity relations: A -- "rel" -- B (undirected) or A -- "rel" -> B / A <- "rel" -- B (directed), freely mixable in one group.',
         fields: [],
-        code: `link potters {
+        code: `link relations {
   harry -- "mother & son" -- lily
-  harry -- "father & son" -- james
+  voldemort -- "hunts" -> harry
+  harry <- "protects" -- dumbledore
 }`,
       },
       {

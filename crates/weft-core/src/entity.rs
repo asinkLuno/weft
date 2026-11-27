@@ -2,7 +2,7 @@
 //! 以及多诊断校验、可计算属性执行和图构建的完整流程。
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     fs,
     path::Path,
 };
@@ -26,6 +26,7 @@ pub(crate) struct RawEntity {
     pub description: Option<String>,
     pub avatar: Option<(String, ByteSpan)>,
     pub belong_to: Vec<(String, ByteSpan)>,
+    pub tags: Vec<(String, ByteSpan)>,
     pub calculable_props: Vec<(String, ByteSpan)>,
     pub extra_props: HashMap<String, JsonValue>,
 }
@@ -35,6 +36,7 @@ pub(crate) struct RawEntityLink {
     pub left: (String, ByteSpan),
     pub right: (String, ByteSpan),
     pub relations: String,
+    pub directed: bool,
     pub span: ByteSpan,
 }
 
@@ -50,6 +52,8 @@ pub struct Entity {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_time_humanizer: Option<String>,
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub extra_props: HashMap<String, JsonValue>,
 }
@@ -62,11 +66,12 @@ pub struct BelongNode {
     pub belong_to: Vec<String>,
 }
 
-/// 一条关系：两个实体 ID 与关系类型；ID 是否合法由构建管线统一校验。
+/// 一条关系：两个实体 ID、关系类型与方向；`directed = true` 时方向为 `entities.0 -> entities.1`。
 #[derive(Debug, Serialize)]
 pub struct EntityLink {
     pub entities: (String, String),
     pub relations: String,
+    pub directed: bool,
 }
 
 // ---- 静态校验（不依赖 Rune 脚本） ----
@@ -242,12 +247,14 @@ pub(crate) fn build_entities_runtime(
             .and_then(|source| fs::canonicalize(context.base.join(source)).ok())
             .filter(|path| path.is_file())
             .map(|path| path.to_string_lossy().into_owned());
+        let tags = dedup_preserving_order(input.tags.into_iter().map(|(tag, _)| tag));
         let mut entity = Entity {
             id: id.clone(),
             avatar,
             base_time: input.base_time.map(|(phase, _)| phase),
             base_time_humanizer,
             description: input.description,
+            tags,
             extra_props: input.extra_props,
         };
         apply_calculable_props(
@@ -283,6 +290,7 @@ pub(crate) fn build_entities_runtime(
                     .map(|edge| EntityLink {
                         entities: (edge.left.0.clone(), edge.right.0.clone()),
                         relations: edge.relations.clone(),
+                        directed: edge.directed,
                     })
                     .collect(),
             )
@@ -317,6 +325,7 @@ fn apply_calculable_props(
             "base_time": base_time,
             "description": entity.description,
             "belong_to": belong_to,
+            "tags": entity.tags,
             "extra_props": raw_extra_props,
         });
         match context.calculable_props.calculable_prop(name, input) {
@@ -329,6 +338,17 @@ fn apply_calculable_props(
             }
         }
     }
+}
+
+fn dedup_preserving_order(items: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for item in items {
+        if seen.insert(item.clone()) {
+            out.push(item);
+        }
+    }
+    out
 }
 
 // ---- 校验工具 ----

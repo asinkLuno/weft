@@ -1,5 +1,5 @@
 import "@xyflow/react/dist/style.css";
-import { ChevronDown, Waypoints } from "lucide-react";
+import { ChevronDown, Tag, Waypoints, X } from "lucide-react";
 import {
   Fragment,
   memo,
@@ -16,6 +16,7 @@ import type { WeftDeclKind } from "@/features/editor/weft-ls-client";
 import { type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 import { EntityCanvas } from "./entity-canvas";
+import { EntityTagContext } from "./entity-card";
 import { EntityDetailPanel } from "./entity-detail";
 import type { Point } from "./layout";
 import {
@@ -23,7 +24,17 @@ import {
   persistEntityPosition,
   preloadEntityLayout,
 } from "./layout-store";
-import { buildEntityDetail, buildEntityView } from "./model";
+import {
+  buildEntityDetail,
+  buildEntityView,
+  type EntityFilter,
+  type TagOption,
+} from "./model";
+
+const EMPTY_POSITIONS: Readonly<Record<string, Point>> = {};
+const getEmptyPositions = () => EMPTY_POSITIONS;
+const CHEVRON_DOWN_ICON = <ChevronDown className="size-3.5" />;
+const CHIP_CLOSE_ICON = <X className="size-3" aria-hidden="true" />;
 
 function hasAnyKey(obj: Record<string, unknown> | undefined): boolean {
   if (!obj) return false;
@@ -95,7 +106,7 @@ const DimensionFilter = memo(function DimensionFilter({
         {activeLabel && (
           <span className="badge badge-xs badge-primary">{activeLabel}</span>
         )}
-        <ChevronDown className="size-3.5" />
+        {CHEVRON_DOWN_ICON}
       </summary>
       <ul className="menu menu-sm dropdown-content z-20 mt-1 max-h-72 w-48 overflow-auto rounded-box border border-base-300 bg-base-100 p-1 shadow-md">
         {sections.map((section, i) => (
@@ -122,6 +133,90 @@ const DimensionFilter = memo(function DimensionFilter({
             ))}
           </Fragment>
         ))}
+      </ul>
+    </details>
+  );
+});
+
+// 标签多选交集筛选下拉：勾选不自动收起，支持一次选多个标签
+const TagFilter = memo(function TagFilter({
+  label,
+  clearLabel,
+  options,
+  activeTagSet,
+  onToggle,
+  onClear,
+}: {
+  label: string;
+  clearLabel: string;
+  options: readonly TagOption[];
+  activeTagSet: ReadonlySet<string>;
+  onToggle: (tag: string) => void;
+  onClear: () => void;
+}) {
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
+  useDismissDetails(detailsRef, open);
+
+  const hasActive = activeTagSet.size > 0;
+  const summaryClass = `btn btn-sm btn-outline ${
+    hasActive ? "border-primary text-primary" : "border-base-300"
+  }${options.length === 0 ? " btn-disabled" : ""}`;
+
+  return (
+    <details
+      ref={detailsRef}
+      className="dropdown"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className={summaryClass}>
+        {label}
+        {hasActive && (
+          <span className="badge badge-xs badge-primary">
+            {activeTagSet.size}
+          </span>
+        )}
+        {CHEVRON_DOWN_ICON}
+      </summary>
+      <ul className="menu menu-sm dropdown-content z-20 mt-1 max-h-72 w-56 flex-nowrap overflow-auto rounded-box border border-base-300 bg-base-100 p-1 shadow-md">
+        {options.map(({ tag, count }) => {
+          const checked = activeTagSet.has(tag);
+          return (
+            <li key={tag}>
+              <button
+                type="button"
+                className={`flex items-center gap-2 ${checked ? "menu-active" : ""}`}
+                onClick={() => onToggle(tag)}
+              >
+                <input
+                  type="checkbox"
+                  className="checkbox checkbox-xs checkbox-primary pointer-events-none"
+                  checked={checked}
+                  readOnly
+                  tabIndex={-1}
+                />
+                <span className="min-w-0 flex-1 truncate text-left">{tag}</span>
+                <span className="text-xs opacity-60">{count}</span>
+              </button>
+            </li>
+          );
+        })}
+        {hasActive && (
+          <>
+            <li aria-hidden="true" className="my-1 border-t border-base-300" />
+            <li>
+              <button
+                type="button"
+                onClick={() => {
+                  onClear();
+                  if (detailsRef.current) detailsRef.current.open = false;
+                }}
+              >
+                {clearLabel}
+              </button>
+            </li>
+          </>
+        )}
       </ul>
     </details>
   );
@@ -180,10 +275,7 @@ function EntityViewInner({
   onRevealInEditor: (kind: WeftDeclKind, name: string) => void;
 }) {
   const t = strings[lang];
-  const [filter, setFilter] = useState<{
-    dim: "belong" | "link";
-    pick: string;
-  } | null>(null);
+  const [filter, setFilter] = useState<EntityFilter | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusTarget, setFocusTarget] = useState<{
     id: string;
@@ -198,13 +290,7 @@ function EntityViewInner({
   const view = useMemo(
     () =>
       hasEntities && savedLayout.ready
-        ? buildEntityView(
-            doc,
-            lang,
-            filter?.dim ?? null,
-            filter?.pick ?? null,
-            savedLayout.getPositions(),
-          )
+        ? buildEntityView(doc, lang, filter, savedLayout.getPositions())
         : null,
     [
       doc,
@@ -249,6 +335,34 @@ function EntityViewInner({
     });
   }, []);
 
+  const toggleTag = useCallback((tag: string) => {
+    startTransition(() => {
+      setFilter((prev) => {
+        const current = prev?.dim === "tags" ? prev.picks : [];
+        const next = current.includes(tag)
+          ? current.filter((item) => item !== tag)
+          : [...current, tag];
+        return next.length > 0 ? { dim: "tags", picks: next } : null;
+      });
+    });
+  }, []);
+
+  const clearTags = useCallback(() => {
+    startTransition(() => {
+      setFilter((prev) => (prev?.dim === "tags" ? null : prev));
+    });
+  }, []);
+
+  const activeTagsKey = view?.activeTags.join("\0") ?? "";
+  const activeTagSet = useMemo(
+    () => new Set(activeTagsKey ? activeTagsKey.split("\0") : []),
+    [activeTagsKey],
+  );
+  const tagContextValue = useMemo(
+    () => ({ activeTags: activeTagSet, onToggleTag: toggleTag }),
+    [activeTagSet, toggleTag],
+  );
+
   if (!hasEntities)
     return <EmptyState icon={Waypoints}>{t.entityEmpty}</EmptyState>;
   if (!view) return <EmptyState>{t.loading}</EmptyState>;
@@ -257,10 +371,13 @@ function EntityViewInner({
     nodes,
     edges,
     layoutMode,
+    useSavedPositions,
     activePick,
     activeLink,
+    activeTags,
     belongSections,
     linkSections,
+    tagOptions,
     nameOf,
   } = view;
   const canvasKey = `${path}|${activePick ?? ""}|${activeLink ?? ""}`;
@@ -282,29 +399,83 @@ function EntityViewInner({
           activeLabel={activeLink}
           onChoose={chooseLink}
         />
+        <TagFilter
+          label={t.tags}
+          clearLabel={t.clearFilter}
+          options={tagOptions}
+          activeTagSet={activeTagSet}
+          onToggle={toggleTag}
+          onClear={clearTags}
+        />
+        {activeTags.map((tag) => (
+          <button
+            key={tag}
+            type="button"
+            className="badge badge-sm badge-primary cursor-pointer gap-1"
+            onClick={() => toggleTag(tag)}
+          >
+            <span>{tag}</span>
+            {CHIP_CLOSE_ICON}
+          </button>
+        ))}
+        {activeTags.length > 1 && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs"
+            onClick={clearTags}
+          >
+            {t.clearFilter}
+          </button>
+        )}
       </div>
       <div className="flex min-h-0 flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/60">
-        <div className="min-h-0 min-w-0 flex-1">
-          <EntityCanvas
-            key={canvasKey}
-            initialNodes={nodes}
-            edges={edges}
-            layoutMode={layoutMode}
-            getSavedPositions={savedLayout.getPositions}
-            selectedId={selectedDetail?.id ?? null}
-            focusTarget={focusTarget}
-            lang={lang}
-            onSelect={setSelectedId}
-            onJumpToEntity={handleJumpToEntity}
-            onPersist={layoutMode === "grid" ? savedLayout.persist : undefined}
-          />
-        </div>
+        <EntityTagContext.Provider value={tagContextValue}>
+          <div className="min-h-0 min-w-0 flex-1">
+            {activeTags.length > 0 && nodes.length === 0 ? (
+              <EmptyState
+                icon={Tag}
+                action={
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline border-base-300"
+                    onClick={clearTags}
+                  >
+                    {t.clearFilter}
+                  </button>
+                }
+              >
+                {t.entityTagEmpty}
+              </EmptyState>
+            ) : (
+              <EntityCanvas
+                key={canvasKey}
+                initialNodes={nodes}
+                edges={edges}
+                layoutMode={layoutMode}
+                viewKey={activeTagsKey}
+                getSavedPositions={
+                  useSavedPositions
+                    ? savedLayout.getPositions
+                    : getEmptyPositions
+                }
+                selectedId={selectedDetail?.id ?? null}
+                focusTarget={focusTarget}
+                lang={lang}
+                onSelect={setSelectedId}
+                onJumpToEntity={handleJumpToEntity}
+                onPersist={useSavedPositions ? savedLayout.persist : undefined}
+              />
+            )}
+          </div>
+        </EntityTagContext.Provider>
         {selectedDetail && (
           <EntityDetailPanel
             detail={selectedDetail}
             lang={lang}
+            activeTags={activeTagSet}
             onClose={handleCloseDetail}
             onSelectEntity={handleJumpToEntity}
+            onToggleTag={toggleTag}
             onRevealInEditor={onRevealInEditor}
           />
         )}

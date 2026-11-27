@@ -32,6 +32,7 @@ pub enum FieldValueKind {
     StringMap,
     Time,
     EntityList,
+    TagList,
     CalcPropList,
 }
 
@@ -161,6 +162,16 @@ pub const ENTITY_FIELDS: &[FieldSpec] = &[
         doc_en: "Parent entity list forming an acyclic ownership DAG.",
     },
     FieldSpec {
+        name: "tags",
+        value_kind: FieldValueKind::TagList,
+        required: false,
+        snippet: "tags = [$1]",
+        short_zh: "实体标签列表",
+        short_en: "Entity tags",
+        doc_zh: "实体的标签列表，用于分类与前端多选筛选；免声明，支持裸标识符或字符串。",
+        doc_en: "List of tags for categorization and multi-select filtering; no declaration required.",
+    },
+    FieldSpec {
         name: "calculable_props",
         value_kind: FieldValueKind::CalcPropList,
         required: false,
@@ -247,9 +258,9 @@ pub fn keyword_doc(word: &str, lang: &str) -> Option<&'static str> {
             "`entity <name> { ... }` — Entity declaration (character, group, place, item); extra keys pass through as `extra_props`."
         }),
         "link" => Some(if zh {
-            "`link <组名> { A -- \"关系\" -- B }` — 按组声明实体之间的有向关系边。"
+            "`link <组名> { A -- \"关系\" -- B / A -- \"关系\" -> B }` — 按组声明实体之间的无向或有向关系边。"
         } else {
-            "`link <group> { A -- \"relation\" -- B }` — Grouped pairwise entity relation edges."
+            "`link <group> { A -- \"rel\" -- B / A -- \"rel\" -> B }` — Grouped undirected or directed entity relation edges."
         }),
         "event" => Some(if zh {
             "`event <名称> { ... }` — 事件声明，必填 `start`，支持跨事件/实体相对时间偏移。"

@@ -8,12 +8,15 @@ const DAISY_THEME: Record<ResolvedTheme, string> = {
 
 const DARK_MEDIA_QUERY = "(prefers-color-scheme: dark)";
 const NOOP_UNSUBSCRIBE = () => {};
+let darkColorSchemeQuery: MediaQueryList | null | undefined;
 
 function getDarkColorSchemeQuery(): MediaQueryList | null {
-  return typeof window !== "undefined" &&
-    typeof window.matchMedia === "function"
-    ? window.matchMedia(DARK_MEDIA_QUERY)
-    : null;
+  if (darkColorSchemeQuery !== undefined) return darkColorSchemeQuery;
+  darkColorSchemeQuery =
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia(DARK_MEDIA_QUERY)
+      : null;
+  return darkColorSchemeQuery;
 }
 
 export function asThemeMode(value: unknown): ThemeMode | undefined {

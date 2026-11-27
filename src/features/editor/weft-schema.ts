@@ -92,6 +92,13 @@ export const BLOCK_FIELDS: Record<AttrBlockKind, readonly FieldDocSpec[]> = {
       },
     },
     {
+      name: "tags",
+      docDesc: {
+        zh: "实体标签列表（免声明），可用于前端多选交集筛选",
+        en: "Entity tag list (no declaration needed) for multi-select intersection filtering",
+      },
+    },
+    {
       name: "calculable_props",
       docDesc: {
         zh: "要计算的可计算属性 ID 列表",

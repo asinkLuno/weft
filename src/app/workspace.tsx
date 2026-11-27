@@ -23,7 +23,11 @@ import type {
 import type { WeftDeclKind } from "@/features/editor/weft-ls-client";
 import { type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
-import { settings } from "@/lib/settings";
+import {
+  consumeWorkspaceLayout,
+  settings,
+  WORKSPACE_LAYOUT_KEY,
+} from "@/lib/settings";
 import type { ResolvedTheme } from "@/lib/theme";
 import { DOCUMENT_TONE_STYLE, documentToneOf } from "@/lib/ui";
 import {
@@ -47,8 +51,6 @@ import {
   WorkspaceWatermark,
 } from "./workspace-panels";
 import "dockview-react/dist/styles/dockview.css";
-
-const LAYOUT_SETTINGS_KEY = "workspaceLayout:v1";
 
 const FOOTER_FILE_ICON = (
   <FileText className="size-3.5 shrink-0" aria-hidden="true" />
@@ -161,7 +163,7 @@ const WorkspaceFooter = memo(function WorkspaceFooter({
   );
 });
 
-export function Workspace({
+export const Workspace = memo(function Workspace({
   path,
   doc,
   draftStore,
@@ -208,10 +210,8 @@ export function Workspace({
   const persistTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
-  // 挂载即预取布局，与 Dockview 初始化并行消除 onReady 瀑布
-  const [initialLayoutPromise] = useState(() =>
-    settings.get<unknown>(LAYOUT_SETTINGS_KEY),
-  );
+  // 优先消费打开前预热的布局 Promise，与 Dockview 初始化并行消除 onReady 瀑布
+  const [initialLayoutPromise] = useState(consumeWorkspaceLayout);
   const initialLayoutConsumedRef = useRef(false);
 
   // 快捷键回调读最新动作：渲染期不写 ref，放到提交阶段同步
@@ -268,7 +268,9 @@ export function Workspace({
     if (restoringLayout.current) return;
     clearTimeout(persistTimer.current);
     persistTimer.current = setTimeout(() => {
-      void settings.set(LAYOUT_SETTINGS_KEY, api.toJSON()).catch(console.error);
+      void settings
+        .set(WORKSPACE_LAYOUT_KEY, api.toJSON())
+        .catch(console.error);
     }, 300);
   }, []);
 
@@ -290,7 +292,7 @@ export function Workspace({
       };
 
       const layoutPromise = initialLayoutConsumedRef.current
-        ? settings.get<unknown>(LAYOUT_SETTINGS_KEY)
+        ? settings.get<unknown>(WORKSPACE_LAYOUT_KEY)
         : initialLayoutPromise;
       initialLayoutConsumedRef.current = true;
 
@@ -396,4 +398,4 @@ export function Workspace({
       />
     </div>
   );
-}
+});

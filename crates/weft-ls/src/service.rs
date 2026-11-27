@@ -75,6 +75,7 @@ pub enum LsCompletionKind {
     Event,
     TimeAnchor,
     CalculableProp,
+    Tag,
     Relation,
 }
 
@@ -408,6 +409,20 @@ fn build_completion_items(
                 ),
                 documentation: None,
                 insert_text: apply_name(p, in_string, ""),
+                is_snippet: false,
+                sort_priority: 0,
+            })
+            .collect(),
+        CursorContext::TagRef { exclude } => symbols
+            .tags
+            .iter()
+            .filter(|tag| !exclude.contains(*tag))
+            .map(|tag| LsCompletionItem {
+                label: tag.clone(),
+                kind: LsCompletionKind::Tag,
+                detail: Some(if zh { "已有标签" } else { "tag" }.to_owned()),
+                documentation: None,
+                insert_text: apply_name(tag, in_string, ""),
                 is_snippet: false,
                 sort_priority: 0,
             })
@@ -837,6 +852,10 @@ fn format_symbol_hover(
                     let k = if zh { "归属" } else { "Belongs to" };
                     lines.push(format!("- **{k}**: {}", d.belong_to.join(", ")));
                 }
+                if !ent.tags.is_empty() {
+                    let k = if zh { "标签" } else { "Tags" };
+                    lines.push(format!("- **{k}**: {}", ent.tags.join(", ")));
+                }
             } else if let Some(d) = decl {
                 if let Some(desc) = &d.description {
                     lines.push(desc.clone());
@@ -844,6 +863,10 @@ fn format_symbol_hover(
                 if !d.belong_to.is_empty() {
                     let k = if zh { "归属" } else { "Belongs to" };
                     lines.push(format!("- **{k}**: {}", d.belong_to.join(", ")));
+                }
+                if !d.tags.is_empty() {
+                    let k = if zh { "标签" } else { "Tags" };
+                    lines.push(format!("- **{k}**: {}", d.tags.join(", ")));
                 }
             }
         }
@@ -913,6 +936,30 @@ fn format_symbol_hover(
                 lines.push(format!("- **{k}**: `{script}`"));
             }
         }
+        SymbolKind::Tag => {
+            let label = if zh { "标签" } else { "Tag" };
+            lines.push(format!("**{label}** `{name}`"));
+            let mut tagged: Vec<&str> = if let Some(doc) = compiled {
+                doc.entity
+                    .values()
+                    .filter(|e| e.tags.iter().any(|t| t == name))
+                    .map(|e| e.id.as_str())
+                    .collect()
+            } else {
+                idx.declarations
+                    .values()
+                    .filter(|d| {
+                        d.kind == SymbolKind::Entity && d.tags.iter().any(|t| t == name)
+                    })
+                    .map(|d| d.name.as_str())
+                    .collect()
+            };
+            tagged.sort_unstable();
+            if !tagged.is_empty() {
+                let k = if zh { "标记实体" } else { "Entities" };
+                lines.push(format!("- **{k}**: {}", tagged.join(", ")));
+            }
+        }
     }
 
     lines.join("\n\n")
@@ -951,8 +998,10 @@ pub fn prepare_rename(src: &str, byte_offset: usize) -> Option<LsPrepareRename> 
     let pos = clamp_char_boundary(src, byte_offset);
     let idx = DocumentIndex::build(src);
     let occ = idx.occurrence_at(pos)?;
-    // 只有已在文档中声明的符号才允许重命名
-    idx.declaration(occ.kind, &occ.name)?;
+    // 只有已在文档中声明的符号或免声明标签才允许重命名
+    if occ.kind != SymbolKind::Tag {
+        idx.declaration(occ.kind, &occ.name)?;
+    }
     Some(LsPrepareRename {
         span: occ.span,
         utf16: span_to_utf16(src, occ.span),
@@ -968,7 +1017,9 @@ pub fn rename(src: &str, byte_offset: usize, new_name: &str) -> Option<Vec<LsTex
     let pos = clamp_char_boundary(src, byte_offset);
     let idx = DocumentIndex::build(src);
     let occ = idx.occurrence_at(pos)?;
-    idx.declaration(occ.kind, &occ.name)?;
+    if occ.kind != SymbolKind::Tag {
+        idx.declaration(occ.kind, &occ.name)?;
+    }
 
     let formatted = format_weft_name(trimmed);
     let mut edits: Vec<LsTextEdit> = idx

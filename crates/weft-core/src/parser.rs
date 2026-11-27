@@ -58,11 +58,22 @@ pub struct Attr {
     pub value: Spanned<Expr>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkSyntax {
+    /// `A -- "rel" -- B`
+    Undirected,
+    /// `A -- "rel" -> B`
+    Forward,
+    /// `A <- "rel" -- B`
+    Backward,
+}
+
 #[derive(Clone, Debug)]
 pub struct LinkEdge {
     pub left: Spanned<String>,
     pub relation: Spanned<String>,
     pub right: Spanned<String>,
+    pub syntax: LinkSyntax,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,6 +124,8 @@ enum Token {
     Str(String),
     Ident(String),
     LinkDash,
+    LinkArrowRight,
+    LinkArrowLeft,
     Plus,
     Minus,
     Eq,
@@ -135,6 +148,8 @@ impl fmt::Display for Token {
             Token::Str(s) => write!(f, "\"{s}\""),
             Token::Ident(s) => write!(f, "{s}"),
             Token::LinkDash => write!(f, "--"),
+            Token::LinkArrowRight => write!(f, "->"),
+            Token::LinkArrowLeft => write!(f, "<-"),
             Token::Plus => write!(f, "+"),
             Token::Minus => write!(f, "-"),
             Token::Eq => write!(f, "="),
@@ -376,6 +391,8 @@ fn lexer<'src>()
 
     let punct = choice((
         just("--").to(Token::LinkDash),
+        just("->").to(Token::LinkArrowRight),
+        just("<-").to(Token::LinkArrowLeft),
         just('+').to(Token::Plus),
         just('-').to(Token::Minus),
         just('=').to(Token::Eq),
@@ -621,14 +638,24 @@ where
 
     let link_edge = name
         .clone()
-        .then_ignore(just(Token::LinkDash))
+        .then(choice((
+            just(Token::LinkDash)
+                .ignore_then(name.clone())
+                .then(choice((
+                    just(Token::LinkDash).to(LinkSyntax::Undirected),
+                    just(Token::LinkArrowRight).to(LinkSyntax::Forward),
+                ))),
+            just(Token::LinkArrowLeft)
+                .ignore_then(name.clone())
+                .then_ignore(just(Token::LinkDash))
+                .map(|relation| (relation, LinkSyntax::Backward)),
+        )))
         .then(name.clone())
-        .then_ignore(just(Token::LinkDash))
-        .then(name.clone())
-        .map(|((left, relation), right)| LinkEdge {
+        .map(|((left, (relation, syntax)), right)| LinkEdge {
             left,
             relation,
             right,
+            syntax,
         })
         .map_with(|edge, e| Some((edge, e.span())))
         .labelled("link edge")

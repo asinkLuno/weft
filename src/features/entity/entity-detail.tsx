@@ -1,4 +1,11 @@
-import { GitBranch, Link2, Users, Waypoints } from "lucide-react";
+import {
+  ArrowRight,
+  GitBranch,
+  Link2,
+  Tag,
+  Users,
+  Waypoints,
+} from "lucide-react";
 import { memo, useCallback } from "react";
 import {
   DetailBadgeList,
@@ -10,6 +17,13 @@ import {
 import type { WeftDeclKind } from "@/features/editor/weft-ls-client";
 import { type Lang, strings } from "@/i18n";
 import type { EntityDetail, EntityEventEntry, EntityLinkEntry } from "./model";
+
+const LINK_ARROW_ICON = (
+  <ArrowRight
+    className="size-3.5 shrink-0 text-primary/70"
+    aria-hidden="true"
+  />
+);
 
 function EntityLinksSection({
   title,
@@ -40,14 +54,35 @@ function EntityLinksSection({
             >
               {item.group}
             </button>
-            <span className="font-medium text-primary">{item.relation}</span>
-            <button
-              type="button"
-              className="link link-hover min-w-0 break-words font-medium"
-              onClick={() => onSelectEntity(item.peerId)}
-            >
-              {item.peerName}
-            </button>
+            {item.direction === "incoming" ? (
+              <>
+                <button
+                  type="button"
+                  className="link link-hover min-w-0 break-words font-medium"
+                  onClick={() => onSelectEntity(item.peerId)}
+                >
+                  {item.peerName}
+                </button>
+                <span className="font-medium text-primary">
+                  {item.relation}
+                </span>
+                {LINK_ARROW_ICON}
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-primary">
+                  {item.relation}
+                </span>
+                {item.direction === "outgoing" && LINK_ARROW_ICON}
+                <button
+                  type="button"
+                  className="link link-hover min-w-0 break-words font-medium"
+                  onClick={() => onSelectEntity(item.peerId)}
+                >
+                  {item.peerName}
+                </button>
+              </>
+            )}
           </li>
         ))}
       </ul>
@@ -101,14 +136,18 @@ function EntityEventsSection({
 export const EntityDetailPanel = memo(function EntityDetailPanel({
   detail,
   lang,
+  activeTags,
   onClose,
   onSelectEntity,
+  onToggleTag,
   onRevealInEditor,
 }: {
   detail: EntityDetail;
   lang: Lang;
+  activeTags: ReadonlySet<string>;
   onClose: () => void;
   onSelectEntity: (id: string) => void;
+  onToggleTag: (tag: string) => void;
   onRevealInEditor: (kind: WeftDeclKind, name: string) => void;
 }) {
   const t = strings[lang];
@@ -119,6 +158,7 @@ export const EntityDetailPanel = memo(function EntityDetailPanel({
   const isEmpty =
     !detail.description &&
     !detail.baseTime &&
+    detail.tags.length === 0 &&
     detail.extraProps.length === 0 &&
     detail.parents.length === 0 &&
     detail.children.length === 0 &&
@@ -146,6 +186,27 @@ export const EntityDetailPanel = memo(function EntityDetailPanel({
         </p>
       )}
       {detail.baseTime && <DetailTimeRow value={detail.baseTime} />}
+
+      {detail.tags.length > 0 && (
+        <DetailSection title={t.tags} icon={Tag}>
+          <div className="flex flex-wrap gap-1.5">
+            {detail.tags.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                className={`badge badge-sm h-auto cursor-pointer whitespace-normal break-words transition-colors ${
+                  activeTags.has(tag)
+                    ? "badge-primary"
+                    : "badge-soft badge-primary"
+                }`}
+                onClick={() => onToggleTag(tag)}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        </DetailSection>
+      )}
 
       {detail.extraProps.length > 0 && (
         <DetailSection title={t.entityProps}>

@@ -1,9 +1,9 @@
 # WEFT 故事文档示例（.weft 语法）
 
 story {
-  title  = "哈利·波特与魔法石"
-  author = "J.K. 罗琳"
-  description = """
+  title            = "哈利·波特与魔法石"
+  author           = "J.K. 罗琳"
+  description      = """
     十一岁的哈利·波特进入霍格沃茨魔法学校，
     与同伴一起揭开魔法石的秘密。
   """
@@ -17,33 +17,39 @@ story {
 entity 霍格沃茨魔法学校 {
   # avatar = "images/hogwarts.png" # 相对本 .weft 的图片路径；省略时显示 ID 缩写
   description = "英国的魔法学校，下设四大学院。"
+  tags        = [地点, 魔法界]
 }
 
 entity 格兰芬多 {
   description = "以勇气著称的学院，院徽为狮子。"
   belong_to   = [霍格沃茨魔法学校]
+  tags        = [学院, 魔法界]
 }
 
 entity 斯莱特林 {
   description = "以野心著称的学院，院徽为蛇。"
   belong_to   = [霍格沃茨魔法学校]
+  tags        = [学院, 魔法界]
 }
 
 entity 拉文克劳 {
   description = "以智慧著称的学院，院徽为鹰。"
   belong_to   = [霍格沃茨魔法学校]
+  tags        = [学院, 魔法界]
 }
 
 entity 赫奇帕奇 {
   description = "以忠诚著称的学院，院徽为獾。"
   belong_to   = [霍格沃茨魔法学校]
+  tags        = [学院, 魔法界]
 }
 
 entity 阿不思·邓布利多 {
   description = "霍格沃茨校长，巧克力蛙卡片上的著名巫师，开学致辞常常只有几个词。"
   base_time   = 1881
   # 多父归属示例：既是格兰芬多出身，也直属霍格沃茨
-  belong_to   = [格兰芬多, 霍格沃茨魔法学校]
+  belong_to = [格兰芬多, 霍格沃茨魔法学校]
+  tags      = [巫师, 教师]
 }
 
 # 霍格沃茨教师
@@ -51,6 +57,7 @@ entity 米勒娃·麦格 {
   description      = "霍格沃茨副校长，格兰芬多学院院长，开学宴上主持分院。"
   base_time        = [1935, 10, 4]
   belong_to        = [霍格沃茨魔法学校, 格兰芬多]
+  tags             = [巫师, 教师]
   calculable_props = [constellation]
 }
 
@@ -58,18 +65,21 @@ entity 西弗勒斯·斯内普 {
   description      = "魔药课教师，讲话阴阳怪气，上课处处刁难哈利。"
   base_time        = [1960, 1, 9]
   belong_to        = [霍格沃茨魔法学校, 斯莱特林]
+  tags             = [巫师, 教师]
   calculable_props = [constellation]
 }
 
 entity 奇洛 {
   description = "黑魔法防御术课教师，说话结巴，缠着头巾的头颅下另有乾坤。"
   belong_to   = [霍格沃茨魔法学校]
+  tags        = [巫师, 教师, 反派]
 }
 
 entity 鲁伯·海格 {
   description      = "钥匙保管员兼狩猎场看守，骑着摩托车把襁褓中的哈利送到女贞路。"
   base_time        = [1928, 12, 6]
   belong_to        = [霍格沃茨魔法学校]
+  tags             = [巫师, 教职工]
   calculable_props = [constellation]
 }
 
@@ -78,6 +88,7 @@ entity 詹姆·波特 {
   base_time        = [1960, 3, 27]
   calculable_props = [constellation]
   belong_to        = [格兰芬多]
+  tags             = [巫师]
 }
 
 entity 莉莉·波特 {
@@ -85,12 +96,14 @@ entity 莉莉·波特 {
   base_time        = [1960, 1, 30]
   calculable_props = [constellation]
   belong_to        = [格兰芬多]
+  tags             = [巫师]
 }
 
 entity 哈利·波特 {
-  description      = "大难不死的男孩，入学当晚被分院帽分入格兰芬多。"
-  base_time        = [1980, 7, 31]
-  belong_to        = [格兰芬多]
+  description = "大难不死的男孩，入学当晚被分院帽分入格兰芬多。"
+  base_time   = [1980, 7, 31]
+  belong_to   = [格兰芬多]
+  tags        = [巫师, 学生, 主角]
   # 可计算属性：按 base_time 计算，结果写进 extra_props
   calculable_props = [constellation]
   # 内置 key 之外的任意字段收进 extra_props 原样透传
@@ -102,6 +115,7 @@ entity 罗恩·韦斯莱 {
   description      = "哈利在火车上结识的好友，韦斯莱家幼子。"
   base_time        = [1980, 3, 1]
   belong_to        = [格兰芬多]
+  tags             = [巫师, 学生, 主角]
   calculable_props = [constellation]
 }
 
@@ -109,6 +123,7 @@ entity 赫敏·格兰杰 {
   description      = "麻瓜出身、成绩拔尖的女巫，与哈利罗恩同寝。"
   base_time        = [1979, 9, 19]
   belong_to        = [格兰芬多]
+  tags             = [巫师, 学生, 主角]
   calculable_props = [constellation]
 }
 
@@ -117,6 +132,7 @@ entity 纳威·隆巴顿 {
   base_time        = [1980, 7, 30]
   calculable_props = [constellation]
   belong_to        = [格兰芬多]
+  tags             = [巫师, 学生]
 }
 
 entity 金妮·韦斯莱 {
@@ -124,64 +140,76 @@ entity 金妮·韦斯莱 {
   base_time        = [1981, 8, 11]
   calculable_props = [constellation]
   belong_to        = [格兰芬多]
+  tags             = [巫师, 学生]
 }
 
 entity 德拉科·马尔福 {
   description      = "纯血世家出身的傲慢男生，入学前就想拉拢哈利。"
   base_time        = [1980, 6, 5]
   belong_to        = [斯莱特林]
+  tags             = [巫师, 学生]
   calculable_props = [constellation]
 }
 
 entity 文森特·克拉布 {
   description = "德拉科的跟班，胳膊粗脑子钝。"
   belong_to   = [斯莱特林]
+  tags        = [巫师, 学生]
 }
 
 entity 格雷戈里·高尔 {
   description = "德拉科的跟班，与克拉布形影不离。"
   belong_to   = [斯莱特林]
+  tags        = [巫师, 学生]
 }
 
 entity 帕德玛·佩蒂尔 {
   description = "帕瓦蒂的双胞胎妹妹，分院礼上被分入拉文克劳。"
   belong_to   = [拉文克劳]
+  tags        = [巫师, 学生]
 }
 
 entity 汉娜·艾博 {
   description = "分院礼上被分入赫奇帕奇的女生。"
   belong_to   = [赫奇帕奇]
+  tags        = [巫师, 学生]
 }
 
 entity 苏珊·博恩斯 {
   description = "分院礼上被分入赫奇帕奇的女生。"
   belong_to   = [赫奇帕奇]
+  tags        = [巫师, 学生]
 }
 
 entity 贾斯廷·芬列里 {
   description = "放弃麻瓜私立名校来读霍格沃茨的赫奇帕奇学生。"
   belong_to   = [赫奇帕奇]
+  tags        = [巫师, 学生]
 }
 
 # 麻瓜世界；德思礼一家是独立归属树根
 entity 德思礼一家 {
   description = "住在萨里郡女贞路四号的麻瓜家庭，哈利寒暑假的落脚处。"
+  tags        = [家庭, 麻瓜]
 }
 
 entity 佩妮·德思礼 {
   description = "哈利的姨妈，莉莉的姐姐，绝口不提自家有女巫亲戚。"
   belong_to   = [德思礼一家]
+  tags        = [麻瓜]
 }
 
 entity 弗农·德思礼 {
   description = "哈利的姨父，一家之主，视一切不寻常之事为灾祸。"
   belong_to   = [德思礼一家]
+  tags        = [麻瓜]
 }
 
 entity 达力·德思礼 {
   description      = "德思礼夫妇的儿子，哈利的表哥，从小被惯得无法无天。"
   base_time        = [1980, 6, 23]
   belong_to        = [德思礼一家]
+  tags             = [麻瓜]
   calculable_props = [constellation]
 }
 
@@ -190,6 +218,7 @@ entity 伏地魔 {
   description      = "杀死哈利父母的黑魔王，人称「神秘人」，附在奇洛身上潜回霍格沃茨。"
   base_time        = [1926, 12, 31]
   real_name        = "汤姆·里德尔"
+  tags             = [巫师, 反派]
   calculable_props = [constellation]
 }
 
@@ -205,6 +234,14 @@ link 格兰芬多伙伴 {
   哈利·波特 -- "同学与朋友" -- 罗恩·韦斯莱
   哈利·波特 -- "同学与朋友" -- 赫敏·格兰杰
   罗恩·韦斯莱 -- "同学与朋友" -- 赫敏·格兰杰
+}
+
+link 宿敌与羁绊 {
+  伏地魔 -- "追杀" -> 哈利·波特
+  奇洛 -- "效忠" -> 伏地魔
+  西弗勒斯·斯内普 -- "暗中保护" -> 哈利·波特
+  哈利·波特 <- "庇护" -- 阿不思·邓布利多
+  哈利·波特 -- "死对头" -- 德拉科·马尔福
 }
 
 # ---- 事件 ----
