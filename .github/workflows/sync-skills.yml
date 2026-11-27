@@ -17,4 +17,4 @@ jobs:
       - uses: actions/checkout@v4
       # pi 以分支 HEAD 判断包是否有更新：skills 分支只在 skill 变更时移动，
       # 这样 pi 只在 skill 真的变了才提示更新。
-      - run: git push --force origin HEAD:refs/heads/skills
+      - run: git push --force origin HEAD:refs/heads/pi-skills
