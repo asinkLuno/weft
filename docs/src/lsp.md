@@ -4,17 +4,17 @@
 
 功能覆盖：
 
-| 能力           | LSP 方法                              | 说明                                              |
-| -------------- | ------------------------------------- | ------------------------------------------------- |
-| 实时诊断       | `textDocument/publishDiagnostics`     | 语法 / 语义 / lint 三层，带 Quick Fix              |
-| 补全           | `textDocument/completion`             | 上下文感知，带片段与文档                           |
-| 悬停           | `textDocument/hover`                  | 符号说明、字段文档、历法求解后的时间               |
-| 跳转定义       | `textDocument/definition`             | 跳到当前文件内的声明                               |
-| 查找引用       | `textDocument/references`             | 当前文件内所有引用                                 |
-| 重命名         | `textDocument/rename`                 | 支持 `prepareRename`，自动加引号 / 转义            |
-| 文档大纲       | `textDocument/documentSymbol`         | 顶层声明，供大纲、面包屑与“跳转到符号”             |
-| 快速修复       | `textDocument/codeAction`             | 仅 `quickfix`                                     |
-| 格式化         | `textDocument/formatting`             | 整篇格式化，与 `weft fmt` 同一引擎                 |
+| 能力     | LSP 方法                          | 说明                                    |
+| -------- | --------------------------------- | --------------------------------------- |
+| 实时诊断 | `textDocument/publishDiagnostics` | 语法 / 语义 / lint 三层，带 Quick Fix   |
+| 补全     | `textDocument/completion`         | 上下文感知，带片段与文档                |
+| 悬停     | `textDocument/hover`              | 符号说明、字段文档、历法求解后的时间    |
+| 跳转定义 | `textDocument/definition`         | 跳到当前文件内的声明                    |
+| 查找引用 | `textDocument/references`         | 当前文件内所有引用                      |
+| 重命名   | `textDocument/rename`             | 支持 `prepareRename`，自动加引号 / 转义 |
+| 文档大纲 | `textDocument/documentSymbol`     | 顶层声明，供大纲、面包屑与“跳转到符号”  |
+| 快速修复 | `textDocument/codeAction`         | 仅 `quickfix`                           |
+| 格式化   | `textDocument/formatting`         | 整篇格式化，与 `weft fmt` 同一引擎      |
 
 补全的触发字符是 `.`、`"`、`[`；主动请求（如 `Ctrl+Space`）不受触发字符限制。
 
@@ -89,12 +89,12 @@ Zed、Sublime LSP、Emacs `lsp-mode` 等只要能把 `.weft` 关联到一个语�
 
 Weft 桌面应用内嵌同一个 `LspServer`（经 Tauri 的 `lsp_send` 与 CodeMirror 的 LSP 客户端通信），无需安装或配置。快捷键：
 
-| 操作     | 快捷键      |
-| -------- | ----------- |
+| 操作     | 快捷键        |
+| -------- | ------------- |
 | 格式化   | `Shift+Alt+F` |
-| 重命名   | `F2`        |
-| 跳转定义 | `F12`       |
-| 查找引用 | `Shift+F12` |
+| 重命名   | `F2`          |
+| 跳转定义 | `F12`         |
+| 查找引用 | `Shift+F12`   |
 
 界面语言切换会同步切换诊断与 Hover 语言；编辑器底部显示实时的错误 / 警告计数。
 
@@ -126,14 +126,14 @@ Weft 桌面应用内嵌同一个 `LspServer`（经 Tauri 的 `lsp_send` 与 Code
 
 ## 补全
 
-| 光标位置                       | 内容                                                                                                 |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| 文件顶层                       | `story` / `entity` / `event` / `link` / `events` / `time` 片段；已有 `story` 时片段更短且降权          |
-| 块内属性名                     | 该块允许的字段，附字段说明与值片段；已写过的字段降权                                                  |
-| `事件名.` / `实体名.`          | 事件的 `start` / `end`（事件没声明 `end` 时 `end` 降权），实体的 `base_time`                            |
-| 实体、事件、可计算属性、关系引用 | 当前文档已声明的对应符号，排除自引用；文档里带描述时会显示                              |
+| 光标位置                                           | 内容                                                                                                       |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| 文件顶层                                           | `story` / `entity` / `event` / `link` / `events` / `time` 片段；已有 `story` 时片段更短且降权              |
+| 块内属性名                                         | 该块允许的字段，附字段说明与值片段；已写过的字段降权                                                       |
+| `事件名.` / `实体名.`                              | 事件的 `start` / `end`（事件没声明 `end` 时 `end` 降权），实体的 `base_time`                               |
+| 实体、事件、可计算属性、关系引用                   | 当前文档已声明的对应符号，排除自引用；文档里带描述时会显示                                                 |
 | 时间字段（`start` / `end` / `base_time` / `time`） | `start + [...]`（仅事件的 `end`）、`start`、已有时间锚点、`事件名.start`、`事件名.end`、`实体名.base_time` |
-| 字符串内                       | 自动补齐引号并转义内容，避免名字里出现引号时破坏语法                                                  |
+| 字符串内                                           | 自动补齐引号并转义内容，避免名字里出现引号时破坏语法                                                       |
 
 片段使用 `${1:占位符}` 语法，编辑器的 `Tab` 可以逐个跳转。补全项带 `detail`（如“实体”“事件开始时间”）和 `documentation`。
 

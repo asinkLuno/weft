@@ -8,8 +8,13 @@ repos:
         args: [--number]
         additional_dependencies:
           - mdformat-gfm==1.0.0
+          - mdformat-front-matters==2.0.0
 
-  - repo: https://github.com/hougesen/mdsf
-    rev: v0.12.1
+  - repo: local
     hooks:
       - id: mdsf-format
+        name: mdsf format
+        entry: mdsf format
+        language: system
+        types: [markdown]
+        require_serial: true

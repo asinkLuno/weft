@@ -38,14 +38,14 @@ events 主线 = [开场]
 
 ## 顶层声明
 
-| 声明                              | 作用                                 |
-| --------------------------------- | ------------------------------------ |
-| `story { ... }`                   | 故事元信息，只能有一个               |
-| `time <name> = <expr>`            | 命名时间锚点，可在任意时间字段里复用 |
-| `entity <name> { ... }`           | 实体：人物、团体、地点、道具都算     |
-| `link <group> { ... }`            | 一组实体关系                         |
-| `event <name> { ... }`            | 事件                                 |
-| `events <name> = [event, ...]`    | 事件列表：有序的事件列表             |
+| 声明                           | 作用                                 |
+| ------------------------------ | ------------------------------------ |
+| `story { ... }`                | 故事元信息，只能有一个               |
+| `time <name> = <expr>`         | 命名时间锚点，可在任意时间字段里复用 |
+| `entity <name> { ... }`        | 实体：人物、团体、地点、道具都算     |
+| `link <group> { ... }`         | 一组实体关系                         |
+| `event <name> { ... }`         | 事件                                 |
+| `events <name> = [event, ...]` | 事件列表：有序的事件列表             |
 
 ### story
 
@@ -196,10 +196,10 @@ event 后续 {
 | `duplicate-attr`     | 同一块里重复写同一个键                      |
 | `unused-time-anchor` | `time` 锚点声明了但没人用                   |
 | `unused-entity`      | 实体没有被任何事件、关系或 `belong_to` 引用 |
-| `unreferenced-event` | 声明了事件列表，但事件不在任何事件列表里            |
+| `unreferenced-event` | 声明了事件列表，但事件不在任何事件列表里    |
 | `self-link`          | 关系边两端是同一个实体                      |
 | `duplicate-link`     | 同一组里重复声明同一条边                    |
-| `empty-block`        | 空的 `link` 或 `events`                  |
+| `empty-block`        | 空的 `link` 或 `events`                     |
 
 `weft rules` 会打印当前规则清单。
 
@@ -218,18 +218,18 @@ event 后续 {
 
 ## 常见错误
 
-| 诊断                                                                       | 原因 / 处理                                                         |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `syntax-error`                                                             | 少 `}` / `]`、属性缺 `=`、字符串没闭合。先看行号附近                |
-| `missing-story`                                                            | 没有 `story` 块                                                     |
-| `missing-field`                                                            | 缺必填字段，例如 `story.title`、`event.start`                       |
-| `unknown-field`                                                            | `story` / `event` 写了表外字段；`entity` 不会报，会进 `extra_props` |
-| `invalid-field`                                                            | 类型不对，例如 `description` 写成了裸标识符或列表                   |
-| `unknown-time-ref`                                                         | 时间引用拼错，或引用了不存在的事件/实体/锚点                        |
-| `time-cycle`                                                               | 两个事件互相 `start = 对方.start + ...`                             |
-| `entity-cycle`                                                             | `belong_to` 成环；归属必须是有向无环图                              |
+| 诊断                                                                    | 原因 / 处理                                                         |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `syntax-error`                                                          | 少 `}` / `]`、属性缺 `=`、字符串没闭合。先看行号附近                |
+| `missing-story`                                                         | 没有 `story` 块                                                     |
+| `missing-field`                                                         | 缺必填字段，例如 `story.title`、`event.start`                       |
+| `unknown-field`                                                         | `story` / `event` 写了表外字段；`entity` 不会报，会进 `extra_props` |
+| `invalid-field`                                                         | 类型不对，例如 `description` 写成了裸标识符或列表                   |
+| `unknown-time-ref`                                                      | 时间引用拼错，或引用了不存在的事件/实体/锚点                        |
+| `time-cycle`                                                            | 两个事件互相 `start = 对方.start + ...`                             |
+| `entity-cycle`                                                          | `belong_to` 成环；归属必须是有向无环图                              |
 | `unknown-link-entity` / `unknown-event-entity` / `unknown-events-event` | 引用了未声明的名字，诊断通常会给 `did you mean` 建议                |
-| `invalid-avatar-path`                                                      | 头像不存在或扩展名不支持                                            |
-| `unknown-calculable-prop`                                                  | 实体用了没在 `story.calculable_props` 注册的 ID                     |
+| `invalid-avatar-path`                                                   | 头像不存在或扩展名不支持                                            |
+| `unknown-calculable-prop`                                               | 实体用了没在 `story.calculable_props` 注册的 ID                     |
 
 下一步：[用 `weft check` / `weft fmt` 检查与格式化](weft-cli.md)。

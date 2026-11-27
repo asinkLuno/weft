@@ -1,6 +1,6 @@
 ---
 name: weft-writer
-description: >
+description: >-
   Author, edit, validate, and format `.weft` timeline documents and accompanying `.rn` Rune
   plugins (custom time axes/calendars via `date_mode` and derived entity properties via
   `calculable_props`), using the `weft` CLI (`weft check`, `weft fmt`, `weft rules`) to enforce
@@ -22,16 +22,17 @@ Weft is a general declarative HCL-like language for **anything expressible on a 
 
 A `.weft` file is a sequence of top-level declarations in any order, separated by whitespace/newlines:
 
-| Declaration | Syntax | Required / Allowed Fields | Notes |
-| --- | --- | --- | --- |
-| `story` | `story { ... }` | **Req**: `title` (str). **Opt**: `author` (str), `description` (str), `date_mode` (str `.rn`), `calculable_props` (`{ id = "path.rn" }`) | Exactly one per file; unknown keys fail (`unknown-field`). |
-| `time` | `time <name> = <time_expr>` | — | Reusable time coordinate anchor. Keep `<name>` a valid bare identifier so it can be referenced directly. |
-| `entity` | `entity <name> { ... }` | **Opt**: `description` (str), `base_time` (time_expr), `avatar` (str image path), `belong_to` (`[entity, ...]`), `calculable_props` (`[prop_id, ...]`), **plus any custom key** | Globally unique name. `belong_to` must be a DAG (multi-parent OK, cycles fail). Arbitrary extra keys pass into `extra_props` (scalars/lists/objects only; no time refs or `+/-`). |
-| `link` | `link <group> { ... }` | Edges: `<entity> -- "<relation>" -- <entity>` | Both endpoints must be declared entities. Same `<group>` across multiple blocks merges edges. |
-| `event` | `event <name> { ... }` | **Req**: `start` (time_expr). **Opt**: `end` (time_expr), `entities` (`[entity, ...]`), `description` (str) | Globally unique name. Must satisfy `end >= start`. Unknown keys fail (`unknown-field`). |
-| `events` | `events <name> = [ev1, ev2]` | Ordered list of declared event names | Defines an ordered track/view. Repeating an event is allowed. |
+| Declaration | Syntax                       | Required / Allowed Fields                                                                                                                                                       | Notes                                                                                                                                                                             |
+| ----------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `story`     | `story { ... }`              | **Req**: `title` (str). **Opt**: `author` (str), `description` (str), `date_mode` (str `.rn`), `calculable_props` (`{ id = "path.rn" }`)                                        | Exactly one per file; unknown keys fail (`unknown-field`).                                                                                                                        |
+| `time`      | `time <name> = <time_expr>`  | —                                                                                                                                                                               | Reusable time coordinate anchor. Keep `<name>` a valid bare identifier so it can be referenced directly.                                                                          |
+| `entity`    | `entity <name> { ... }`      | **Opt**: `description` (str), `base_time` (time_expr), `avatar` (str image path), `belong_to` (`[entity, ...]`), `calculable_props` (`[prop_id, ...]`), **plus any custom key** | Globally unique name. `belong_to` must be a DAG (multi-parent OK, cycles fail). Arbitrary extra keys pass into `extra_props` (scalars/lists/objects only; no time refs or `+/-`). |
+| `link`      | `link <group> { ... }`       | Edges: `<entity> -- "<relation>" -- <entity>`                                                                                                                                   | Both endpoints must be declared entities. Same `<group>` across multiple blocks merges edges.                                                                                     |
+| `event`     | `event <name> { ... }`       | **Req**: `start` (time_expr). **Opt**: `end` (time_expr), `entities` (`[entity, ...]`), `description` (str)                                                                     | Globally unique name. Must satisfy `end >= start`. Unknown keys fail (`unknown-field`).                                                                                           |
+| `events`    | `events <name> = [ev1, ev2]` | Ordered list of declared event names                                                                                                                                            | Defines an ordered track/view. Repeating an event is allowed.                                                                                                                     |
 
 **Time expressions** (valid in `time`, `entity.base_time`, `event.start`, `event.end`):
+
 - **Absolute**: integer (`2026` == `[2026]`) or non-empty integer list (`[2026, 3, 15, 14, 30, 0]`). Omitted trailing components default to the calendar's `minimums`.
 - **Reference**: bare time anchor (`t0`), member ref (`ev.start`, `ev.end`, `ent.base_time`, `"v2/cutover".start`), or intra-event `start` / `end`.
 - **Offset**: left-associative `+` / `-` with an integer or integer list (`start + [0, 0, 0, 2]`, `t0 - [0, 1] + [0, 0, 3]`). Carries/borrows normalize automatically through the active calendar.

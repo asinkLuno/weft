@@ -11,7 +11,7 @@ Complete language reference for authoring, debugging, and formatting `.weft` fil
 5. [Diagnostics & Lint Reference](#diagnostics--lint-reference)
 6. [Formatting Specification (`weft fmt`)](#formatting-specification-weft-fmt)
 
----
+______________________________________________________________________
 
 ## Lexical Rules
 
@@ -37,7 +37,7 @@ Complete language reference for authoring, debugging, and formatting `.weft` fil
   - Name lists (`belong_to`, `entities`, `calculable_props`, `events`) resolve both bare and quoted names as symbol references.
   - In `entity` extra fields (`extra_props`), a bare identifier evaluates to a string value, though quoting strings explicitly is clearer.
 
----
+______________________________________________________________________
 
 ## Top-Level Declarations
 
@@ -47,13 +47,13 @@ Top-level items may appear in any order; forward references across `time`, `enti
 
 Document header and plugin registry.
 
-| Field | Required | Type | Notes |
-| --- | --- | --- | --- |
-| `title` | Yes | String | Document / timeline title |
-| `author` | No | String | Author or owner |
-| `description` | No | String | Overview / summary |
-| `date_mode` | No | String | Relative path to `.rn` calendar / time-axis script; defaults to built-in Gregorian |
-| `calculable_props` | No | Object `{ id = "path.rn" }` | Maps prop IDs to relative `.rn` script paths |
+| Field              | Required | Type                        | Notes                                                                              |
+| ------------------ | -------- | --------------------------- | ---------------------------------------------------------------------------------- |
+| `title`            | Yes      | String                      | Document / timeline title                                                          |
+| `author`           | No       | String                      | Author or owner                                                                    |
+| `description`      | No       | String                      | Overview / summary                                                                 |
+| `date_mode`        | No       | String                      | Relative path to `.rn` calendar / time-axis script; defaults to built-in Gregorian |
+| `calculable_props` | No       | Object `{ id = "path.rn" }` | Maps prop IDs to relative `.rn` script paths                                       |
 
 Unknown fields in `story` are compile errors (`unknown-field`).
 
@@ -73,14 +73,14 @@ time 恢复窗口 = 故障起点 + [0, 0, 0, 1]
 
 Models any subject, node, component, person, organization, place, artifact, or concept on the timeline. Names must be globally unique (`duplicate-entity`).
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `description` | String | Entity summary |
-| `base_time` | Time expr | Origin, creation, birth, or launch coordinate |
-| `avatar` | String | Relative path to an existing `.bmp`/`.gif`/`.ico`/`.jpeg`/`.jpg`/`.png`/`.svg`/`.webp` file |
-| `belong_to` | List of entity names | Parent entities forming a DAG (multiple parents allowed; cycles fail with `entity-cycle`) |
-| `calculable_props` | List of prop IDs | IDs registered in `story.calculable_props`; outputs merge into `extra_props` |
-| *any other key* | Scalar / list / object | Stored verbatim in `extra_props` (time refs and `+`/`-` expressions are rejected here) |
+| Field              | Type                   | Notes                                                                                       |
+| ------------------ | ---------------------- | ------------------------------------------------------------------------------------------- |
+| `description`      | String                 | Entity summary                                                                              |
+| `base_time`        | Time expr              | Origin, creation, birth, or launch coordinate                                               |
+| `avatar`           | String                 | Relative path to an existing `.bmp`/`.gif`/`.ico`/`.jpeg`/`.jpg`/`.png`/`.svg`/`.webp` file |
+| `belong_to`        | List of entity names   | Parent entities forming a DAG (multiple parents allowed; cycles fail with `entity-cycle`)   |
+| `calculable_props` | List of prop IDs       | IDs registered in `story.calculable_props`; outputs merge into `extra_props`                |
+| *any other key*    | Scalar / list / object | Stored verbatim in `extra_props` (time refs and `+`/`-` expressions are rejected here)      |
 
 ### `link <group> { ... }`
 
@@ -102,12 +102,12 @@ link 架构依赖 {
 
 Models a point-in-time occurrence or time interval on the timeline. Names must be globally unique (`duplicate-event`). Unknown keys fail with `unknown-field`.
 
-| Field | Required | Type | Notes |
-| --- | --- | --- | --- |
-| `start` | Yes | Time expr | Start coordinate |
-| `end` | No | Time expr | End coordinate; must satisfy `end >= start` by calendar tick (`event-end-before-start`) |
-| `entities` | No | List of entity names | Entities participating in or affected by the event |
-| `description` | No | String | Event details |
+| Field         | Required | Type                 | Notes                                                                                   |
+| ------------- | -------- | -------------------- | --------------------------------------------------------------------------------------- |
+| `start`       | Yes      | Time expr            | Start coordinate                                                                        |
+| `end`         | No       | Time expr            | End coordinate; must satisfy `end >= start` by calendar tick (`event-end-before-start`) |
+| `entities`    | No       | List of entity names | Entities participating in or affected by the event                                      |
+| `description` | No       | String               | Event details                                                                           |
 
 ### `events <name> = [event1, event2, ...]`
 
@@ -117,7 +117,7 @@ Declares an ordered list of event names representing a track, reading order, cau
 - Repeating an event inside an `events` list is valid.
 - When at least one `events` declaration exists, any declared `event` absent from every `events` list triggers `unreferenced-event`.
 
----
+______________________________________________________________________
 
 ## Time Expressions & Resolution
 
@@ -135,13 +135,13 @@ Time expressions are valid only in `time`, `entity.base_time`, `event.start`, an
 
 ### 2. References
 
-| Form | Target | Quoting rule |
-| --- | --- | --- |
-| `anchor_name` | `time anchor_name` | Must be a bare identifier |
-| `ev.start` / `"ev name".start` | `event`'s `start` | Base may be bare or quoted |
-| `ev.end` / `"ev name".end` | `event`'s `end` (must exist) | Base may be bare or quoted |
+| Form                                | Target                              | Quoting rule               |
+| ----------------------------------- | ----------------------------------- | -------------------------- |
+| `anchor_name`                       | `time anchor_name`                  | Must be a bare identifier  |
+| `ev.start` / `"ev name".start`      | `event`'s `start`                   | Base may be bare or quoted |
+| `ev.end` / `"ev name".end`          | `event`'s `end` (must exist)        | Base may be bare or quoted |
 | `ent.base_time` / `"ent".base_time` | `entity`'s `base_time` (must exist) | Base may be bare or quoted |
-| `start` / `end` (inside an `event`) | Current event's own `start` / `end` | Bare `start` / `end` only |
+| `start` / `end` (inside an `event`) | Current event's own `start` / `end` | Bare `start` / `end` only  |
 
 ### 3. Relative Offsets (`+` / `-`)
 
@@ -153,59 +153,59 @@ Time expressions are valid only in `time`, `entity.base_time`, `event.start`, an
 - Resulting precision is `max(base_precision, offset_length)`.
 - Reference cycles fail (`time-cycle`); maximum nesting depth is `64` (`time-nesting-too-deep`).
 
----
+______________________________________________________________________
 
 ## Mapping Timeline Domains to Weft
 
 Because the grammar provides general graph + timeline primitives, any time-indexed domain maps cleanly without changing syntax:
 
-| Domain | `entity` (+ `belong_to` DAG) | `link` | `event` | `events` | Optional `.rn` plugin |
-| --- | --- | --- | --- | --- | --- |
-| **Incident postmortem** | Services, infra clusters, teams, on-call roles | Traffic/data dependencies, escalation paths | Alerts, mitigations, rollbacks, recovery windows | Full timeline, root-cause chain, customer impact | Elapsed incident clock `[Hour, Min, Sec]` |
-| **Project / product roadmap** | Teams, workstreams, modules, deliverables | Blocking / upstream dependencies | Sprints, launches, freezes, milestones | Release track, per-team track, critical path | `[Year, Quarter, Week]` or `[Release, Sprint, Day]` |
-| **Historical chronology** | Polities, institutions, figures, treaties, regions | Alliances, rivalries, successions | Battles, reforms, eras, discoveries | Global chronology, regional or thematic threads | Historical era / lunar calendar |
-| **Biography / org chronicle** | Person, companies, schools, projects, awards | Mentors, co-founders, affiliations | Education, roles, publications, transitions | Career arc, research thread | Derived age/tenure/phase prop |
-| **Fiction / script** | Characters, factions, locations, items | Family, mentorship, conflicts | Scenes, plot beats, arcs | Chronological order, POV or flashback order | Fictional world calendar |
+| Domain                        | `entity` (+ `belong_to` DAG)                       | `link`                                      | `event`                                          | `events`                                         | Optional `.rn` plugin                               |
+| ----------------------------- | -------------------------------------------------- | ------------------------------------------- | ------------------------------------------------ | ------------------------------------------------ | --------------------------------------------------- |
+| **Incident postmortem**       | Services, infra clusters, teams, on-call roles     | Traffic/data dependencies, escalation paths | Alerts, mitigations, rollbacks, recovery windows | Full timeline, root-cause chain, customer impact | Elapsed incident clock `[Hour, Min, Sec]`           |
+| **Project / product roadmap** | Teams, workstreams, modules, deliverables          | Blocking / upstream dependencies            | Sprints, launches, freezes, milestones           | Release track, per-team track, critical path     | `[Year, Quarter, Week]` or `[Release, Sprint, Day]` |
+| **Historical chronology**     | Polities, institutions, figures, treaties, regions | Alliances, rivalries, successions           | Battles, reforms, eras, discoveries              | Global chronology, regional or thematic threads  | Historical era / lunar calendar                     |
+| **Biography / org chronicle** | Person, companies, schools, projects, awards       | Mentors, co-founders, affiliations          | Education, roles, publications, transitions      | Career arc, research thread                      | Derived age/tenure/phase prop                       |
+| **Fiction / script**          | Characters, factions, locations, items             | Family, mentorship, conflicts               | Scenes, plot beats, arcs                         | Chronological order, POV or flashback order      | Fictional world calendar                            |
 
 Tip: When an `entity` set mixes heterogeneous types (e.g. teams, services, and regions), add a consistent custom attribute like `kind = "service"` or `category = "team"` in `extra_props` so consumers can filter and group cleanly.
 
----
+______________________________________________________________________
 
 ## Diagnostics & Lint Reference
 
 ### Compile Errors (exit code 1)
 
-| Rule | Cause & Fix |
-| --- | --- |
-| `syntax-error` | Missing `}`/`]`/`=`/`,` in a list, unclosed string, or invalid bare name (quote names with spaces, `/`, `-`, punctuation, or leading digits). |
-| `missing-story` / `duplicate-story` | Ensure exactly one `story { ... }` block exists. |
-| `duplicate-entity` / `duplicate-event` / `duplicate-events` / `duplicate-time-anchor` | Rename colliding top-level declarations. |
-| `missing-field` | Add required `story.title` or `event.start`. |
-| `unknown-field` | Remove unsupported key from `story` or `event` (only `entity` accepts arbitrary extra keys). |
-| `invalid-field` | Wrong value type (most commonly an unquoted bare identifier in a string field, or a time expression in `entity` extra props). |
-| `unknown-time-ref` | Typo in anchor/event/entity name, quoting a `time` anchor name, or referencing `.end` / `.base_time` when not defined on the target. |
-| `time-cycle` / `time-nesting-too-deep` | Break cyclic time references; keep offset/ref depth `<= 64`. |
-| `event-end-before-start` | Ensure `end` resolves to a tick `>= start`. |
-| `time-nonempty-list` / `time-integer-component` / `too-many-time-components` / `time-component-below-minimum` / `time-offset-out-of-range` | Fix empty/malformed time list, non-integer elements, excess components, values `< minimums[i]` (for `i > 0`), or integer negation overflow. |
-| `unknown-link-entity` / `unknown-event-entity` / `unknown-events-event` / `entity-unknown-parent` | Declare the referenced entity/event or fix typo (CLI prints `did you mean` hints). |
-| `entity-cycle` | Break cycles in `belong_to` chains. |
-| `invalid-avatar-path` | Check relative path from the `.weft` file and image extension (`bmp/gif/ico/jpeg/jpg/png/svg/webp`). |
-| `invalid-calendar-path` / `invalid-calculable-prop-path` / `unknown-calculable-prop` | Verify `.rn` file exists relative to `.weft`, ends with `.rn`, and ID is registered in `story.calculable_props`. |
-| `calendar-*` / `calculable-prop-*` | Rune script compile/interface/runtime/return/round-trip error; see [`rune-plugins.md`](rune-plugins.md). |
+| Rule                                                                                                                                       | Cause & Fix                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `syntax-error`                                                                                                                             | Missing `}`/`]`/`=`/`,` in a list, unclosed string, or invalid bare name (quote names with spaces, `/`, `-`, punctuation, or leading digits). |
+| `missing-story` / `duplicate-story`                                                                                                        | Ensure exactly one `story { ... }` block exists.                                                                                              |
+| `duplicate-entity` / `duplicate-event` / `duplicate-events` / `duplicate-time-anchor`                                                      | Rename colliding top-level declarations.                                                                                                      |
+| `missing-field`                                                                                                                            | Add required `story.title` or `event.start`.                                                                                                  |
+| `unknown-field`                                                                                                                            | Remove unsupported key from `story` or `event` (only `entity` accepts arbitrary extra keys).                                                  |
+| `invalid-field`                                                                                                                            | Wrong value type (most commonly an unquoted bare identifier in a string field, or a time expression in `entity` extra props).                 |
+| `unknown-time-ref`                                                                                                                         | Typo in anchor/event/entity name, quoting a `time` anchor name, or referencing `.end` / `.base_time` when not defined on the target.          |
+| `time-cycle` / `time-nesting-too-deep`                                                                                                     | Break cyclic time references; keep offset/ref depth `<= 64`.                                                                                  |
+| `event-end-before-start`                                                                                                                   | Ensure `end` resolves to a tick `>= start`.                                                                                                   |
+| `time-nonempty-list` / `time-integer-component` / `too-many-time-components` / `time-component-below-minimum` / `time-offset-out-of-range` | Fix empty/malformed time list, non-integer elements, excess components, values `< minimums[i]` (for `i > 0`), or integer negation overflow.   |
+| `unknown-link-entity` / `unknown-event-entity` / `unknown-events-event` / `entity-unknown-parent`                                          | Declare the referenced entity/event or fix typo (CLI prints `did you mean` hints).                                                            |
+| `entity-cycle`                                                                                                                             | Break cycles in `belong_to` chains.                                                                                                           |
+| `invalid-avatar-path`                                                                                                                      | Check relative path from the `.weft` file and image extension (`bmp/gif/ico/jpeg/jpg/png/svg/webp`).                                          |
+| `invalid-calendar-path` / `invalid-calculable-prop-path` / `unknown-calculable-prop`                                                       | Verify `.rn` file exists relative to `.weft`, ends with `.rn`, and ID is registered in `story.calculable_props`.                              |
+| `calendar-*` / `calculable-prop-*`                                                                                                         | Rune script compile/interface/runtime/return/round-trip error; see [`rune-plugins.md`](rune-plugins.md).                                      |
 
 ### Lint Warnings (exit code 1 under `--deny-warnings`)
 
-| Rule | Trigger & Fix |
-| --- | --- |
-| `duplicate-attr` | Same key repeated in one block -> remove duplicate. |
-| `unused-time-anchor` | Declared `time` anchor never referenced -> use or delete it. |
-| `unused-entity` | Entity unreferenced by any `event`, `link`, or `belong_to` (checked when the file has `>= 1` event or link) -> connect or remove it. |
-| `unreferenced-event` | File has `>= 1` `events`, but this event is in none -> add it to an `events` list. |
-| `self-link` | `A -- "rel" -- A` -> remove or fix target entity. |
-| `duplicate-link` | Same `(left, relation, right)` edge repeated within a `link` group -> deduplicate. |
-| `empty-block` | Empty `link` block or empty `events` list -> populate or delete. |
+| Rule                 | Trigger & Fix                                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `duplicate-attr`     | Same key repeated in one block -> remove duplicate.                                                                                  |
+| `unused-time-anchor` | Declared `time` anchor never referenced -> use or delete it.                                                                         |
+| `unused-entity`      | Entity unreferenced by any `event`, `link`, or `belong_to` (checked when the file has `>= 1` event or link) -> connect or remove it. |
+| `unreferenced-event` | File has `>= 1` `events`, but this event is in none -> add it to an `events` list.                                                   |
+| `self-link`          | `A -- "rel" -- A` -> remove or fix target entity.                                                                                    |
+| `duplicate-link`     | Same `(left, relation, right)` edge repeated within a `link` group -> deduplicate.                                                   |
+| `empty-block`        | Empty `link` block or empty `events` list -> populate or delete.                                                                     |
 
----
+______________________________________________________________________
 
 ## Formatting Specification (`weft fmt`)
 

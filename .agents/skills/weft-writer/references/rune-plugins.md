@@ -31,18 +31,18 @@ When writing non-trivial logic or hitting unfamiliar Rune syntax, consult the [R
   - Wrap conditional `panic(message)` inside `match` rather than `if` inside functions returning a non-unit value—in Rune, an `if` branch with `panic` can trigger unit-type inference errors and hide the message.
   - Use explicit floor division / positive modulo helpers when `tick` or offsets can be negative, because `/` and `%` truncate toward zero in Rune (as in Rust).
 
----
+______________________________________________________________________
 
 ## 1. Custom Calendar / Time-Axis Script (`date_mode`)
 
 A `date_mode` `.rn` script MUST export four `pub fn` entry points:
 
-| Function | Signature | Purpose |
-| --- | --- | --- |
-| `meta(ctx)` | `ctx: #{ api, language }` -> `#{ id, name, description?, components, minimums }` | Axis metadata, arity, and per-component minimums |
-| `to_tick(values)` | `values: Vec<i64>` (len = `components`) -> `i64` | Map component tuple (including unnormalized offset sums!) to a linear integer tick |
-| `from_tick(tick)` | `tick: i64` -> `Vec<i64>` (len = `components`) | Map linear tick back to normalized components |
-| `humanizer(ctx)` | `ctx: #{ api, values, precision, language }` -> `String` | Format normalized components respecting `ctx.precision` |
+| Function                            | Signature                                                                                                   | Purpose                                                                                                                       |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `meta(ctx)`                         | `ctx: #{ api, language }` -> `#{ id, name, description?, components, minimums }`                            | Axis metadata, arity, and per-component minimums                                                                              |
+| `to_tick(values)`                   | `values: Vec<i64>` (len = `components`) -> `i64`                                                            | Map component tuple (including unnormalized offset sums!) to a linear integer tick                                            |
+| `from_tick(tick)`                   | `tick: i64` -> `Vec<i64>` (len = `components`)                                                              | Map linear tick back to normalized components                                                                                 |
+| `humanizer(ctx)`                    | `ctx: #{ api, values, precision, language }` -> `String`                                                    | Format normalized components respecting `ctx.precision`                                                                       |
 | `delta_humanizer(ctx)` *(optional)* | `ctx: #{ api, language, from: #{ values, tick, precision }, to: #{ values, tick, precision } }` -> `String` | Format signed duration `to - from` (used for event-to-entity `base_time` deltas; falls back to signed tick diff when omitted) |
 
 ### Critical Invariants Enforced by `weft check`
@@ -136,7 +136,7 @@ pub fn humanizer(ctx) {
 
 For irregular calendars (leap years, variable month lengths), compute `to_tick` / `from_tick` via cycle math (see `examples/lunar.rn` or `crates/weft-core/rune/gregorian.rn` in the Weft repo if available).
 
----
+______________________________________________________________________
 
 ## 2. Calculable Property Script (`calculable_props`)
 
@@ -162,31 +162,33 @@ entity "api/v2" {
 
 Export `pub fn calculable_prop(ctx)`:
 
-- **`ctx` structure**:
-  ```json
-  {
-    "api": 1,
-    "language": "zh",
-    "calendar": {
-      "id": "gregorian",
-      "components": 6,
-      "minimums": [0, 1, 1, 0, 0, 0]
+`ctx` structure:
+
+```json
+{
+  "api": 1,
+  "language": "zh",
+  "calendar": {
+    "id": "gregorian",
+    "components": 6,
+    "minimums": [0, 1, 1, 0, 0, 0]
+  },
+  "entity": {
+    "id": "api/v2",
+    "base_time": {
+      "values": [2025, 4, 10, 0, 0, 0],
+      "precision": 3,
+      "tick": 63911462400
     },
-    "entity": {
-      "id": "api/v2",
-      "base_time": {
-        "values": [2025, 4, 10, 0, 0, 0],
-        "precision": 3,
-        "tick": 63911462400
-      },
-      "description": "...",
-      "belong_to": ["平台组"],
-      "extra_props": { "kind": "service" }
-    }
+    "description": "...",
+    "belong_to": ["平台组"],
+    "extra_props": { "kind": "service" }
   }
-  ```
-  - `ctx.entity.base_time` and `ctx.entity.description` are `()` (unit) when omitted on the entity.
-  - `ctx.entity.extra_props` contains the entity's raw static extra fields (not outputs of other calculable props).
+}
+```
+
+- `ctx.entity.base_time` and `ctx.entity.description` are `()` (unit) when omitted on the entity.
+- `ctx.entity.extra_props` contains the entity's raw static extra fields (not outputs of other calculable props).
 - **Return value**:
   - Return `()` to omit the key (recommended when required input like `base_time` is absent or lacks precision).
   - Otherwise return any JSON-serializable value: string, int, float, bool, array `[...]`, or object `#{ ... }`. The host merges it into `entity.extra_props[<registered_id>]`.
