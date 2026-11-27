@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "weft",
+        "title": "WEFT",
         "width": 1280,
         "height": 800
       }
@@ -28,6 +28,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "license": "Apache-2.0",
+    "licenseFile": "../LICENSE",
+    "copyright": "Copyright © 2026 WEFT Contributors",
     "externalBin": [
       "binaries/weft"
     ],

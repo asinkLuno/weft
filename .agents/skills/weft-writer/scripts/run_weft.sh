@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Resolve and invoke the `weft` CLI:
 # 1. Global `weft` on PATH
-# 2. Bundled CLI inside an installed Weft desktop app (macOS / Linux / Windows)
+# 2. Bundled CLI inside an installed WEFT desktop app (macOS / Linux / Windows)
 # 3. Prebuilt binary in the weft workspace (target/release/weft or target/debug/weft)
 # 4. `cargo run --manifest-path <repo>/Cargo.toml -p weft-cli -q --`
 
@@ -46,8 +46,8 @@ else
 fi
 
 if [[ -z "$REPO_ROOT" ]]; then
-  echo "error: weft CLI not found on PATH, in installed Weft app locations, or in a local weft repository." >&2
-  echo "hint: install the Weft desktop app (on macOS, run Settings -> Install 'weft' CLI in PATH), or install via 'cargo install --git https://github.com/asinkLuno/weft weft-cli'." >&2
+  echo "error: weft CLI not found on PATH, in installed WEFT app locations, or in a local weft repository." >&2
+  echo "hint: install the WEFT desktop app (on macOS, run Settings -> Install 'weft' CLI in PATH), or install via 'cargo install --git https://github.com/asinkLuno/weft weft-cli'." >&2
   exit 2
 fi
 

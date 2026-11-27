@@ -25,7 +25,7 @@ use crate::render::{
 #[command(
     name = "weft",
     version,
-    about = "Fast syntax/semantic linter and formatter for the Weft story language"
+    about = "Fast syntax/semantic linter and formatter for the WEFT story language"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -93,7 +93,7 @@ enum Command {
         #[arg(long)]
         no_color: bool,
     },
-    /// Start the Weft Language Server over stdio (LSP 3.17)
+    /// Start the WEFT Language Server over stdio (LSP 3.17)
     Lsp {
         /// Default diagnostic / hover locale (`zh` or `en`; defaults to system locale)
         #[arg(long)]

@@ -87,7 +87,7 @@ Zed、Sublime LSP、Emacs `lsp-mode` 等只要能把 `.weft` 关联到一个语�
 
 ### 桌面端
 
-Weft 桌面应用内嵌同一个 `LspServer`（经 Tauri 的 `lsp_send` 与 CodeMirror 的 LSP 客户端通信），无需安装或配置。快捷键：
+WEFT 桌面应用内嵌同一个 `LspServer`（经 Tauri 的 `lsp_send` 与 CodeMirror 的 LSP 客户端通信），无需安装或配置。快捷键：
 
 | 操作     | 快捷键        |
 | -------- | ------------- |

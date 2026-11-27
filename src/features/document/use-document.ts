@@ -93,7 +93,7 @@ function createFlashStore() {
   };
 }
 
-const WEFT_FILTER = { name: "Weft", extensions: ["weft"] };
+const WEFT_FILTER = { name: "WEFT", extensions: ["weft"] };
 
 // 编辑草稿与已保存视图分离：草稿诊断由 @codemirror/lsp-client 自动维护，
 // 保存后才编译更新可视化视图；外部文件与 .rn 脚本变更在窗口回到焦点及保存前探测。

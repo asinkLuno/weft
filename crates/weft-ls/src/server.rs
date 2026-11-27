@@ -32,7 +32,7 @@ struct OpenDoc {
     version: Option<i32>,
 }
 
-/// 传输无关的 Weft LSP 状态机。
+/// 传输无关的 WEFT LSP 状态机。
 pub struct LspServer {
     lang: String,
     documents: HashMap<Uri, OpenDoc>,

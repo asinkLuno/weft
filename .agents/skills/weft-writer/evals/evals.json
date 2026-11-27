@@ -3,7 +3,7 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "请用 Weft 语言写一份线上故障复盘时间轴 `incident.weft`，记录 2026 年一次核心支付链路 502 故障：包含核心集群与两个子系统（网关层、结算层）的归属层级、至少 4 个服务或值班实体（带上线/创建基准时间 `base_time` 和自定义 `kind`/`owner` 字段，名称中需包含带斜杠或数字开头的实体如「api/v2」或「502-网关」）、服务依赖关系网、1 个故障起点时间锚点、至少 4 个按相对时间串联的事件（其中至少 2 个带持续区间 `end`），以及 1 条完整时间轴 `events` 和 1 条根因链路 `events`。确保零错误、零 lint 警告且格式规范。",
+      "prompt": "请用 WEFT 语言写一份线上故障复盘时间轴 `incident.weft`，记录 2026 年一次核心支付链路 502 故障：包含核心集群与两个子系统（网关层、结算层）的归属层级、至少 4 个服务或值班实体（带上线/创建基准时间 `base_time` 和自定义 `kind`/`owner` 字段，名称中需包含带斜杠或数字开头的实体如「api/v2」或「502-网关」）、服务依赖关系网、1 个故障起点时间锚点、至少 4 个按相对时间串联的事件（其中至少 2 个带持续区间 `end`），以及 1 条完整时间轴 `events` 和 1 条根因链路 `events`。确保零错误、零 lint 警告且格式规范。",
       "expected_output": "A formatted `incident.weft` passing `weft check --deny-warnings` and `weft fmt --check` with all requested entities, DAG `belong_to`, quoted special-character entity, `extra_props`, `link` block, `time` anchor, >=4 chained events (>=2 with `end`), and 2 `events` tracks.",
       "files": [],
       "expectations": [
@@ -16,7 +16,7 @@
     },
     {
       "id": 2,
-      "prompt": "帮我用 Weft 建模一个研发路线图样例，包含三个文件：1) 自定义时间轴脚本 `sprint_axis.rn`，定义三坐标 `[发布周期, 迭代, 天]`，每个发布周期固定 6 个迭代、每个迭代 14 天（共 84 天），支持中英文格式化并尊重精度；2) 可计算属性脚本 `maturity.rn`，根据实体 `base_time` 的发布周期判断成熟度（周期 < 2 为「探索期」/Exploration，2-4 为「成长期」/Growth，>= 5 为「稳定期」/Mature；未设置 `base_time` 时返回 unit 不写入）；3) `roadmap.weft` 文档，启用该时间轴与可计算属性，包含至少 3 个实体（其中至少 1 个刻意不写 `base_time`）、1 组依赖关系、至少 2 个带跨迭代偏移（如 `+ [0, 0, 20]`）的事件和 1 条路线图 `events`。用 weft 工具跑通中英文校验且零警告、已格式化。",
+      "prompt": "帮我用 WEFT 建模一个研发路线图样例，包含三个文件：1) 自定义时间轴脚本 `sprint_axis.rn`，定义三坐标 `[发布周期, 迭代, 天]`，每个发布周期固定 6 个迭代、每个迭代 14 天（共 84 天），支持中英文格式化并尊重精度；2) 可计算属性脚本 `maturity.rn`，根据实体 `base_time` 的发布周期判断成熟度（周期 < 2 为「探索期」/Exploration，2-4 为「成长期」/Growth，>= 5 为「稳定期」/Mature；未设置 `base_time` 时返回 unit 不写入）；3) `roadmap.weft` 文档，启用该时间轴与可计算属性，包含至少 3 个实体（其中至少 1 个刻意不写 `base_time`）、1 组依赖关系、至少 2 个带跨迭代偏移（如 `+ [0, 0, 20]`）的事件和 1 条路线图 `events`。用 weft 工具跑通中英文校验且零警告、已格式化。",
       "expected_output": "Three working files (`sprint_axis.rn`, `maturity.rn`, `roadmap.weft`) that pass `weft check --deny-warnings --lang zh`, `weft check --deny-warnings --lang en`, and `weft fmt --check`, demonstrating custom time-axis carry/borrow and unit return for omitted `base_time`.",
       "files": [],
       "expectations": [

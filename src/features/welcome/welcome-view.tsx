@@ -40,7 +40,7 @@ export const WelcomeView = memo(function WelcomeView({
           <header className="flex flex-col gap-5">
             <div className="flex flex-col gap-2">
               <h1 className="text-5xl font-black uppercase leading-none tracking-tighter md:text-6xl">
-                weft
+                WEFT
               </h1>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-base-content/55">
                 <span className="inline-flex items-center gap-1.5">

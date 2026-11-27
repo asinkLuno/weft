@@ -30,7 +30,7 @@ export function activate(_context: vscode.ExtensionContext): void {
 
   client = new LanguageClient(
     "weftLanguageServer",
-    "Weft Language Server",
+    "WEFT Language Server",
     serverOptions,
     clientOptions,
   );

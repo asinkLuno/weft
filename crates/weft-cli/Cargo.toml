@@ -2,7 +2,8 @@
 name = "weft-cli"
 version = "0.2.0"
 edition = "2024"
-description = "CLI linter and formatter for the Weft story language"
+description = "CLI linter and formatter for the WEFT story language"
+license = "Apache-2.0"
 
 [[bin]]
 name = "weft"

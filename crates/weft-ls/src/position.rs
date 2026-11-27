@@ -149,7 +149,7 @@ pub fn escape_string_inner(raw: &str) -> String {
     out
 }
 
-/// 按 Weft 标识符规则格式化名字：合法裸标识符不加引号，否则加双引号并转义。
+/// 按 WEFT 标识符规则格式化名字：合法裸标识符不加引号，否则加双引号并转义。
 pub fn format_weft_name(name: &str) -> String {
     if is_valid_bare_name(name) {
         name.to_owned()

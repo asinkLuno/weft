@@ -1,6 +1,6 @@
-# Weft Rune (`.rn`) Plugin Reference
+# WEFT Rune (`.rn`) Plugin Reference
 
-Weft extends `.weft` documents with two kinds of sandboxed [Rune](https://rune-rs.github.io/) scripts (`.rn`, embedded `rune` 0.14.x), referenced relative to the `.weft` file:
+WEFT extends `.weft` documents with two kinds of sandboxed [Rune](https://rune-rs.github.io/) scripts (`.rn`, embedded `rune` 0.14.x), referenced relative to the `.weft` file:
 
 1. **Custom time axes / calendars** (`story.date_mode = "my_axis.rn"`) — define any discrete linear coordinate system: fiscal calendars (`[FY, Q, Week]`), sprint cycles (`[Release, Sprint, Day]`), elapsed experiment/mission time (`[Day, Hour, Minute]`), historical/lunar calendars, or custom world calendars.
 2. **Calculable properties** (`story.calculable_props = { my_prop = "my_prop.rn" }`) — compute derived entity metadata from `base_time`, `belong_to`, `extra_props`, and `calendar` metadata (e.g. era/cohort tags, lifecycle phases, tier labels).
@@ -16,7 +16,7 @@ When writing non-trivial logic or hitting unfamiliar Rune syntax, consult the [R
 - [Anonymous objects](https://rune-rs.github.io/book/objects.html) (`#{ key: value }` returned by `meta(ctx)` or `calculable_prop(ctx)`)
 - [Template literals](https://rune-rs.github.io/book/template_literals.html) (`` `${expr}` `` string interpolation used in `humanizer(ctx)`)
 
-> **Important difference from Rune Book snippets**: Weft constructs its VM with `Context::with_config(false)` (no I/O). Do **not** use `println!`, `print!`, or `dbg!`—they fail to compile in Weft's sandbox.
+> **Important difference from Rune Book snippets**: WEFT constructs its VM with `Context::with_config(false)` (no I/O). Do **not** use `println!`, `print!`, or `dbg!`—they fail to compile in WEFT's sandbox.
 
 ## Sandbox & Runtime Constraints
 
@@ -134,7 +134,7 @@ pub fn humanizer(ctx) {
 }
 ```
 
-For irregular calendars (leap years, variable month lengths), compute `to_tick` / `from_tick` via cycle math (see `examples/lunar.rn` or `crates/weft-core/rune/gregorian.rn` in the Weft repo if available).
+For irregular calendars (leap years, variable month lengths), compute `to_tick` / `from_tick` via cycle math (see `examples/lunar.rn` or `crates/weft-core/rune/gregorian.rn` in the WEFT repo if available).
 
 ______________________________________________________________________
 

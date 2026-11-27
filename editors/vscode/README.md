@@ -1,4 +1,4 @@
-# Weft VS Code Extension
+# WEFT VS Code Extension
 
 Provides syntax highlighting (`.weft` TextMate grammar) and full LSP support powered by `weft lsp`:
 
@@ -10,7 +10,7 @@ Provides syntax highlighting (`.weft` TextMate grammar) and full LSP support pow
 
 ## Prerequisites
 
-Install the `weft` CLI (bundled with the Weft desktop app, or via `cargo install --path crates/weft-cli`). The extension runs `weft lsp` as a language server; see [Language Server (LSP)](../../docs/src/lsp.md) for the full feature list.
+Install the `weft` CLI (bundled with the WEFT desktop app, or via `cargo install --path crates/weft-cli`). The extension runs `weft lsp` as a language server; see [Language Server (LSP)](../../docs/src/lsp.md) for the full feature list.
 
 Settings:
 

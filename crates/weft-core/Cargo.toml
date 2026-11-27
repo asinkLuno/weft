@@ -2,7 +2,8 @@
 name = "weft-core"
 version = "0.2.0"
 edition = "2024"
-description = "Core parser, compiler, linter, and formatter for the Weft story language"
+description = "Core parser, compiler, linter, and formatter for the WEFT story language"
+license = "Apache-2.0"
 
 [dependencies]
 chumsky = "0.14.2"

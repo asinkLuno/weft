@@ -1,8 +1,9 @@
 {
   "name": "weft-language",
-  "displayName": "Weft Language Support",
-  "description": "Syntax highlighting and LSP support (diagnostics, completions, hover, goto-definition, rename, formatting) for the Weft (.weft) story language.",
+  "displayName": "WEFT Language Support",
+  "description": "Syntax highlighting and LSP support (diagnostics, completions, hover, goto-definition, rename, formatting) for the WEFT (.weft) story language.",
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "publisher": "weft",
   "engines": {
     "vscode": "^1.85.0"
@@ -21,7 +22,7 @@
       {
         "id": "weft",
         "aliases": [
-          "Weft",
+          "WEFT",
           "weft"
         ],
         "extensions": [
@@ -38,7 +39,7 @@
       }
     ],
     "configuration": {
-      "title": "Weft",
+      "title": "WEFT",
       "properties": {
         "weft.executablePath": {
           "type": "string",

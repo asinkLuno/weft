@@ -5,18 +5,18 @@ description: >-
   plugins (custom time axes/calendars via `date_mode` and derived entity properties via
   `calculable_props`), using the `weft` CLI (`weft check`, `weft fmt`, `weft rules`) to enforce
   syntax, semantic, script, and lint correctness. Trigger this skill whenever the user wants to
-  write or edit a `.weft` file, model any timeline-based subject in Weft (historical chronologies,
+  write or edit a `.weft` file, model any timeline-based subject in WEFT (historical chronologies,
   project/product roadmaps, incident postmortems, technical or organizational evolutions,
   biographies, event logs, stories/scripts, etc.), convert notes or outlines into `.weft`, write
-  or debug `.rn` calendar/time-axis or calculable-property scripts for Weft, or lint/format/fix
+  or debug `.rn` calendar/time-axis or calculable-property scripts for WEFT, or lint/format/fix
   diagnostics in `.weft` documents—even if they do not explicitly mention "weft check" or "weft fmt".
 ---
 
-# Weft Language Authoring & Validation
+# WEFT Language Authoring & Validation
 
 Write syntactically and semantically valid `.weft` documents (and optional `.rn` Rune plugins), then verify and format them with the `weft` CLI until both `check --deny-warnings` and `fmt --check` pass.
 
-Weft is a general declarative HCL-like language for **anything expressible on a timeline**—entities, hierarchical membership (DAG), typed relationships, reusable time coordinates, timestamped point/interval events, and ordered event tracks. Two top-level keywords are named `story` and `events` in the grammar; treat them strictly as structural primitives (`story` = document header & plugin registry, `events` = named ordered view over events), applicable to any domain.
+WEFT is a general declarative HCL-like language for **anything expressible on a timeline**—entities, hierarchical membership (DAG), typed relationships, reusable time coordinates, timestamped point/interval events, and ordered event tracks. Two top-level keywords are named `story` and `events` in the grammar; treat them strictly as structural primitives (`story` = document header & plugin registry, `events` = named ordered view over events), applicable to any domain.
 
 ## Grammar Quick Reference
 

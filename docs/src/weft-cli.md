@@ -1,12 +1,12 @@
 # weft CLI：检查、编译、格式化与 LSP
 
-`crates/weft-cli` 提供 `weft` 命令，负责五件事：编译检查（`check`）、编译导出 JSON（`build`）、格式化（`fmt`）、启动语言服务器（`lsp`）、列出 lint 规则（`rules`）。语言本身见 [Weft 语言指南](weft-syntax.md)。
+`crates/weft-cli` 提供 `weft` 命令，负责五件事：编译检查（`check`）、编译导出 JSON（`build`）、格式化（`fmt`）、启动语言服务器（`lsp`）、列出 lint 规则（`rules`）。语言本身见 [WEFT 语言指南](weft-syntax.md)。
 
 ## 安装与调用
 
-### 方式一：随 Weft 桌面端自动附带（推荐）
+### 方式一：随 WEFT 桌面端自动附带（推荐）
 
-安装 Weft 桌面端安装包时会自动附带独立的 `weft` CLI 二进制：
+安装 WEFT 桌面端安装包时会自动附带独立的 `weft` CLI 二进制：
 
 - **Windows（`.exe` / `.msi`）**：安装程序会自动将 `weft` 所在目录加入 `PATH`，重开终端即可直接运行 `weft check` / `weft fmt`。
 - **Linux（`.deb` / `.rpm`）**：安装后直接提供 `/usr/bin/weft`。如使用 **AppImage**，在应用菜单点击 **设置 → 安装 weft 命令行工具…**（会复制到 `~/.local/bin/weft`）。

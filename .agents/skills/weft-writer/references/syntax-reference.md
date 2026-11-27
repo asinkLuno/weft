@@ -1,4 +1,4 @@
-# Weft Syntax, Semantics & Diagnostics Reference
+# WEFT Syntax, Semantics & Diagnostics Reference
 
 Complete language reference for authoring, debugging, and formatting `.weft` files with `weft check` and `weft fmt`.
 
@@ -7,7 +7,7 @@ Complete language reference for authoring, debugging, and formatting `.weft` fil
 1. [Lexical Rules](#lexical-rules)
 2. [Top-Level Declarations](#top-level-declarations)
 3. [Time Expressions & Resolution](#time-expressions--resolution)
-4. [Mapping Timeline Domains to Weft](#mapping-timeline-domains-to-weft)
+4. [Mapping Timeline Domains to WEFT](#mapping-timeline-domains-to-weft)
 5. [Diagnostics & Lint Reference](#diagnostics--lint-reference)
 6. [Formatting Specification (`weft fmt`)](#formatting-specification-weft-fmt)
 
@@ -155,7 +155,7 @@ Time expressions are valid only in `time`, `entity.base_time`, `event.start`, an
 
 ______________________________________________________________________
 
-## Mapping Timeline Domains to Weft
+## Mapping Timeline Domains to WEFT
 
 Because the grammar provides general graph + timeline primitives, any time-indexed domain maps cleanly without changing syntax:
 

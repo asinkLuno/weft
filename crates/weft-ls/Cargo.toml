@@ -2,7 +2,8 @@
 name = "weft-ls"
 version = "0.2.0"
 edition = "2024"
-description = "Language service and LSP server for the Weft story language"
+description = "Language service and LSP server for the WEFT story language"
+license = "Apache-2.0"
 
 [dependencies]
 lsp-server = "0.10.0"

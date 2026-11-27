@@ -114,7 +114,7 @@ events year_one = [sorting_feast]`,
 const copy: Record<Lang, Copy> = {
   zh: {
     intro:
-      "Weft 使用类 HCL 的 .weft 声明式语言描述故事：元信息、时间锚点、实体、实体关系、事件与事件列表。除 story 外其余声明均可省略；保存后视图自动更新。",
+      "WEFT 使用类 HCL 的 .weft 声明式语言描述故事：元信息、时间锚点、实体、实体关系、事件与事件列表。除 story 外其余声明均可省略；保存后视图自动更新。",
     topLevelTitle: "顶层声明",
     topLevel: [
       {
@@ -204,7 +204,7 @@ const copy: Record<Lang, Copy> = {
   },
   en: {
     intro:
-      "Weft describes a story in a single HCL-style .weft file: story metadata, time anchors, entities, links, events and event lists. Every declaration except story is optional; views refresh when the file is saved.",
+      "WEFT describes a story in a single HCL-style .weft file: story metadata, time anchors, entities, links, events and event lists. Every declaration except story is optional; views refresh when the file is saved.",
     topLevelTitle: "Top-level declarations",
     topLevel: [
       {
@@ -361,7 +361,7 @@ export const InfoView = memo(function InfoView({ lang }: { lang: Lang }) {
           <span>{strings[lang].tabInfo}</span>
         </div>
         <h1 className="text-2xl font-bold tracking-tight text-base-content">
-          Weft DSL (.weft)
+          WEFT DSL (.weft)
         </h1>
         <p className="max-w-2xl text-sm leading-6 text-base-content/70">
           {t.intro}

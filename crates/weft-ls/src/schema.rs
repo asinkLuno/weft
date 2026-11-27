@@ -1,4 +1,4 @@
-//! Weft 块与内置字段 Schema：补全与 Hover 文档的单一事实来源。
+//! WEFT 块与内置字段 Schema：补全与 Hover 文档的单一事实来源。
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AttrBlockKind {

@@ -1,7 +1,7 @@
 [book]
-title = "Weft 用户文档"
-description = "Weft 故事文档的写法与工具使用"
-authors = ["Weft contributors"]
+title = "WEFT 用户文档"
+description = "WEFT 故事文档的写法与工具使用"
+authors = ["WEFT contributors"]
 language = "zh"
 src = "src"
 

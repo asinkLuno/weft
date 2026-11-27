@@ -4,7 +4,7 @@
     "name": "asinkLuno"
   },
   "metadata": {
-    "description": "Official Weft timeline language skills and tooling plugins.",
+    "description": "Official WEFT timeline language skills and tooling plugins.",
     "version": "0.1.0"
   },
   "plugins": [

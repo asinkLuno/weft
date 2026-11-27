@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "Weft",
+  "name": "WEFT",
   "scopeName": "source.weft",
   "patterns": [
     { "include": "#comments" },

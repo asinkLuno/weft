@@ -11,7 +11,7 @@
 
 ## 前置条件：装好 `weft` 命令
 
-技能里的检查都通过 `weft` 命令执行。安装 Weft 桌面端即已自动附带 `weft` CLI（各平台 `PATH` 配置见 [weft CLI 安装说明](weft-cli.md#%E5%AE%89%E8%A3%85%E4%B8%8E%E8%B0%83%E7%94%A8)；macOS 下即使未手动加入 `PATH`，技能脚本也会自动发现 `/Applications/weft.app` 内的 `weft`）。
+技能里的检查都通过 `weft` 命令执行。安装 WEFT 桌面端即已自动附带 `weft` CLI（各平台 `PATH` 配置见 [weft CLI 安装说明](weft-cli.md#%E5%AE%89%E8%A3%85%E4%B8%8E%E8%B0%83%E7%94%A8)；macOS 下即使未手动加入 `PATH`，技能脚本也会自动发现 `/Applications/weft.app` 内的 `weft`）。
 
 如果不装桌面端，也可以直接用 Cargo 单独安装 CLI：
 

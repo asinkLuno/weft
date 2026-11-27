@@ -1,4 +1,4 @@
-//! Weft 领域语言核心库：解析器、编译器、静态检查与格式化器。
+//! WEFT 领域语言核心库：解析器、编译器、静态检查与格式化器。
 
 pub mod calculable_prop;
 pub mod calendar;
