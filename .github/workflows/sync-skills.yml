@@ -1,0 +1,20 @@
+name: Sync skills branch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".agents/skills/**"
+      - "package.json"
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # pi 以分支 HEAD 判断包是否有更新：skills 分支只在 skill 变更时移动，
+      # 这样 pi 只在 skill 真的变了才提示更新。
+      - run: git push --force origin HEAD:refs/heads/skills
