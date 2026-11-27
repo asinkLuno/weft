@@ -45,20 +45,28 @@ export type FlashStore = {
 
 function createDraftStore() {
   let value = "";
+  let pendingReader: (() => string) | null = null;
   const externalListeners = new Set<() => void>();
 
   return {
-    getSnapshot: () => value,
+    getSnapshot: () => {
+      if (pendingReader) {
+        value = pendingReader();
+        pendingReader = null;
+      }
+      return value;
+    },
     subscribeExternal: (listener: () => void) => {
       externalListeners.add(listener);
       return () => {
         externalListeners.delete(listener);
       };
     },
-    setFromEditor: (next: string) => {
-      value = next;
+    setFromEditor: (read: () => string) => {
+      pendingReader = read;
     },
     setExternal: (next: string) => {
+      pendingReader = null;
       value = next;
       for (const listener of externalListeners) listener();
     },
@@ -298,10 +306,18 @@ export function useDocument(lang: Lang) {
   );
 
   const updateDraft = useCallback(
-    (next: string) => {
-      draftStore.setFromEditor(next);
+    (docLength: number, read: () => string) => {
+      draftStore.setFromEditor(read);
       const saved = savedContentRef.current;
-      setDirty(saved !== null && next !== saved);
+      if (saved === null) {
+        setDirty(false);
+        return;
+      }
+      if (docLength !== saved.length) {
+        setDirty(true);
+        return;
+      }
+      setDirty(draftStore.getSnapshot() !== saved);
     },
     [draftStore],
   );

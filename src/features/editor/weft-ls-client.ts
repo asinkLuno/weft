@@ -82,6 +82,9 @@ export function createWeftLspClient(
   lang: Lang,
   onDiagnosticCounts: (counts: DiagnosticCounts) => void,
 ): LSPClient {
+  let lastErrors = 0;
+  let lastWarnings = 0;
+
   return new LSPClient({
     initializationOptions: { lang },
     extensions: [
@@ -106,7 +109,11 @@ export function createWeftLspClient(
           if ((diag.severity ?? 1) === 1) errors += 1;
           else warnings += 1;
         }
-        onDiagnosticCounts({ errors, warnings });
+        if (errors !== lastErrors || warnings !== lastWarnings) {
+          lastErrors = errors;
+          lastWarnings = warnings;
+          onDiagnosticCounts({ errors, warnings });
+        }
         // 返回 false，继续交由内置 serverDiagnostics() 渲染编辑器下划线与提示
         return false;
       },

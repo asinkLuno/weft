@@ -1,10 +1,10 @@
 //! 事件字典：键为事件 ID，值为解析后的事件。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::Serialize;
 
-use crate::calendar::Calendar;
+use crate::calendar::{Calendar, Moment};
 use crate::entity::RawEntity;
 use crate::errors::{ByteSpan, Diagnostic, ValidationError};
 use crate::lint::suggest_similar;
@@ -19,6 +19,17 @@ pub(crate) struct RawEvent {
     pub description: Option<String>,
 }
 
+/// 事件起止时间相对某个参与实体 `base_time` 的差值。
+#[derive(Debug, Serialize)]
+pub struct EntityTimeDelta {
+    pub start_tick: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_tick: Option<i64>,
+    pub start_display: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_display: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Event {
     pub start_time: Phase,
@@ -31,6 +42,8 @@ pub struct Event {
     pub start_display: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_display: Option<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub entity_deltas: BTreeMap<String, EntityTimeDelta>,
 }
 
 pub(crate) fn check_collecting(
@@ -58,9 +71,10 @@ pub(crate) fn check_collecting(
     }
 }
 
-/// 一步完成事件时间解析、先后校验与展示格式化，收集全部历法与起止时间错误。
+/// 一步完成事件时间解析、先后校验、展示格式化与实体基准时间差计算，收集全部历法与起止时间错误。
 pub(crate) fn build_events_collecting(
     events: BTreeMap<String, RawEvent>,
+    entity_base_times: &HashMap<String, Moment>,
     cal: &Calendar,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> BTreeMap<String, Event> {
@@ -116,6 +130,14 @@ pub(crate) fn build_events_collecting(
             },
             None => None,
         };
+        let entity_deltas = compute_entity_deltas(
+            &raw.entities,
+            entity_base_times,
+            &start,
+            end.as_ref(),
+            cal,
+            diagnostics,
+        );
         out.insert(
             id,
             Event {
@@ -127,8 +149,45 @@ pub(crate) fn build_events_collecting(
                 end_tick: end.map(|m| m.tick),
                 start_display,
                 end_display,
+                entity_deltas,
             },
         );
     }
     out
+}
+
+fn compute_entity_deltas(
+    entities: &[(String, ByteSpan)],
+    entity_base_times: &HashMap<String, Moment>,
+    start: &Moment,
+    end: Option<&Moment>,
+    cal: &Calendar,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> BTreeMap<String, EntityTimeDelta> {
+    let mut deltas = BTreeMap::new();
+    for (entity_id, entity_span) in entities {
+        if deltas.contains_key(entity_id) {
+            continue;
+        }
+        let Some(base_moment) = entity_base_times.get(entity_id) else {
+            continue;
+        };
+        match cal.humanize_delta_pair(base_moment, start, end) {
+            Ok((start_display, end_display)) => {
+                deltas.insert(
+                    entity_id.clone(),
+                    EntityTimeDelta {
+                        start_tick: start.tick.saturating_sub(base_moment.tick),
+                        end_tick: end.map(|m| m.tick.saturating_sub(base_moment.tick)),
+                        start_display,
+                        end_display,
+                    },
+                );
+            }
+            Err(err) => {
+                diagnostics.push(err.into_diagnostic(Some(*entity_span)));
+            }
+        }
+    }
+    deltas
 }

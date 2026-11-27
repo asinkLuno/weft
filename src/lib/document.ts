@@ -38,6 +38,13 @@ export type WeftDoc = {
 
 export type Events = string[];
 
+export type EntityTimeDelta = {
+  start_tick: number;
+  end_tick?: number;
+  start_display: string;
+  end_display?: string;
+};
+
 export type Event = {
   start_time: Phase;
   end_time?: Phase | null;
@@ -47,4 +54,5 @@ export type Event = {
   end_tick?: number;
   start_display?: string;
   end_display?: string;
+  entity_deltas?: Record<string, EntityTimeDelta>;
 };

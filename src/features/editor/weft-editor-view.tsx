@@ -60,6 +60,10 @@ const REVERT_ICON = <RotateCcw className="size-3.5" />;
 const SAVE_ICON = <Save className="size-3.5" />;
 const REFRESH_ICON = <RefreshCw className="size-3.5" />;
 const FORMAT_ICON = <Sparkles className="size-3.5" />;
+const ERROR_BADGE_ICON = <AlertCircle className="size-3" aria-hidden="true" />;
+const WARNING_BADGE_ICON = (
+  <AlertTriangle className="size-3" aria-hidden="true" />
+);
 
 const EMPTY_COUNTS: DiagnosticCounts = { errors: 0, warnings: 0 };
 
@@ -110,7 +114,7 @@ const WeftCodeMirror = memo(function WeftCodeMirror({
   lang: Lang;
   draftStore: DraftStore;
   revealRequest: EditorRevealRequest | null;
-  onChange: (next: string) => void;
+  onChange: (docLength: number, read: () => string) => void;
   onDiagnosticCounts: (counts: DiagnosticCounts) => void;
   onViewReady: (view: EditorView | null) => void;
 }) {
@@ -160,7 +164,8 @@ const WeftCodeMirror = memo(function WeftCodeMirror({
           lspClient.plugin(fileUri, "weft"),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
-              onChangeRef.current(update.state.doc.toString());
+              const doc = update.state.doc;
+              onChangeRef.current(doc.length, () => doc.toString());
             }
           }),
           EditorView.domEventHandlers({
@@ -256,13 +261,13 @@ function WeftEditorViewInner({
   diskStatus: DiskStatus;
   revealRequest: EditorRevealRequest | null;
   lang: Lang;
-  onChange: (next: string) => void;
+  onChange: (docLength: number, read: () => string) => void;
   onSave: () => Promise<boolean>;
   onForceSave: () => Promise<boolean>;
   onReloadFromDisk: () => Promise<void>;
 }) {
   const t = strings[lang];
-  const fileName = useMemo(() => fileNameOf(path), [path]);
+  const fileName = fileNameOf(path);
   const canSave = (dirty || diskStatus === "deleted") && !saving;
   const viewRef = useRef<EditorView | null>(null);
   const [counts, setCounts] = useState<DiagnosticCounts>(EMPTY_COUNTS);
@@ -289,13 +294,13 @@ function WeftEditorViewInner({
         </span>
         {counts.errors > 0 ? (
           <span className="badge badge-xs badge-error gap-1 shrink-0">
-            <AlertCircle className="size-3" aria-hidden="true" />
+            {ERROR_BADGE_ICON}
             {counts.errors}
           </span>
         ) : null}
         {counts.warnings > 0 ? (
           <span className="badge badge-xs badge-warning gap-1 shrink-0">
-            <AlertTriangle className="size-3" aria-hidden="true" />
+            {WARNING_BADGE_ICON}
             {counts.warnings}
           </span>
         ) : null}

@@ -185,6 +185,7 @@ pub(crate) struct EntityBuildContext<'a> {
 }
 
 /// 将静态校验通过的实体表结合历法与可计算属性构建成运行时模型，继续收集运行时错误。
+/// 同时返回各实体解析后的基准时间 `Moment`，供事件构建阶段计算相对时间差。
 pub(crate) fn build_entities_runtime(
     raw_entities: BTreeMap<String, RawEntity>,
     raw_links: &BTreeMap<String, Vec<RawEntityLink>>,
@@ -195,6 +196,7 @@ pub(crate) fn build_entities_runtime(
     HashMap<String, Entity>,
     Vec<BelongNode>,
     HashMap<String, Vec<EntityLink>>,
+    HashMap<String, Moment>,
 ) {
     let parents_by_id: HashMap<&str, Vec<String>> = belong_graph
         .graph()
@@ -211,6 +213,7 @@ pub(crate) fn build_entities_runtime(
         .collect();
 
     let mut entities = HashMap::with_capacity(raw_entities.len());
+    let mut base_time_moments = HashMap::new();
     for (id, input) in raw_entities {
         let belong_to = parents_by_id.get(id.as_str()).cloned().unwrap_or_default();
         let base_time_moment = input
@@ -255,6 +258,9 @@ pub(crate) fn build_entities_runtime(
             &context,
             diagnostics,
         );
+        if let Some(moment) = base_time_moment {
+            base_time_moments.insert(id.clone(), moment);
+        }
         entities.insert(id, entity);
     }
 
@@ -283,7 +289,7 @@ pub(crate) fn build_entities_runtime(
         })
         .collect();
 
-    (entities, belong_dag, entity_link)
+    (entities, belong_dag, entity_link, base_time_moments)
 }
 
 fn apply_calculable_props(

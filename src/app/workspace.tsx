@@ -30,6 +30,7 @@ import {
   type EditorRevealRequest,
   WorkspaceDocContext,
   WorkspaceEditorContext,
+  WorkspaceMetaContext,
   WorkspaceThemeContext,
   WorkspaceToneContext,
 } from "./workspace-context";
@@ -187,7 +188,7 @@ export function Workspace({
   lang: Lang;
   theme: ResolvedTheme;
   formatOnSave: boolean;
-  onDraftChange: (next: string) => void;
+  onDraftChange: (docLength: number, read: () => string) => void;
   onSave: () => Promise<boolean>;
   onForceSave: () => Promise<boolean>;
   onReloadFromDisk: () => Promise<void>;
@@ -216,7 +217,7 @@ export function Workspace({
   // 快捷键回调读最新动作：渲染期不写 ref，放到提交阶段同步
   useEffect(() => {
     saveActionRef.current = { dirty, saving, diskStatus, formatOnSave, onSave };
-  });
+  }, [dirty, saving, diskStatus, formatOnSave, onSave]);
 
   useEffect(() => {
     langRef.current = lang;
@@ -326,9 +327,9 @@ export function Workspace({
     }
   }, []);
 
-  const docContextValue = useMemo(
-    () => ({ path, doc, lang, revealInEditor }),
-    [path, doc, lang, revealInEditor],
+  const metaContextValue = useMemo(
+    () => ({ path, lang, revealInEditor }),
+    [path, lang, revealInEditor],
   );
 
   const editorContextValue = useMemo(
@@ -371,15 +372,17 @@ export function Workspace({
       lang={lang === "zh" ? "zh-CN" : "en"}
     >
       <main className="min-h-0 flex-1 overflow-hidden">
-        <WorkspaceDocContext.Provider value={docContextValue}>
-          <WorkspaceEditorContext.Provider value={editorContextValue}>
-            <WorkspaceToneContext.Provider value={tone}>
-              <WorkspaceThemeContext.Provider value={theme}>
-                <WorkspaceDockview theme={theme} onReady={onReady} />
-              </WorkspaceThemeContext.Provider>
-            </WorkspaceToneContext.Provider>
-          </WorkspaceEditorContext.Provider>
-        </WorkspaceDocContext.Provider>
+        <WorkspaceMetaContext.Provider value={metaContextValue}>
+          <WorkspaceDocContext.Provider value={doc}>
+            <WorkspaceEditorContext.Provider value={editorContextValue}>
+              <WorkspaceToneContext.Provider value={tone}>
+                <WorkspaceThemeContext.Provider value={theme}>
+                  <WorkspaceDockview theme={theme} onReady={onReady} />
+                </WorkspaceThemeContext.Provider>
+              </WorkspaceToneContext.Provider>
+            </WorkspaceEditorContext.Provider>
+          </WorkspaceDocContext.Provider>
+        </WorkspaceMetaContext.Provider>
       </main>
 
       <WorkspaceFooter

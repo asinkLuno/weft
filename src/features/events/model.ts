@@ -4,11 +4,18 @@ import { formatTimeRange } from "@/lib/ui";
 
 export type EventItem = Event & { id: string };
 
+export type EventEntityDelta = {
+  start: string;
+  /** 仅当结束差值存在且不同于开始差值时有值 */
+  end?: string;
+};
+
 export type EventEntityRef = {
   id: string;
   name: string;
   avatar?: string;
   description?: string;
+  baseTimeDelta?: EventEntityDelta;
 };
 
 export type EventDetail = {
@@ -121,13 +128,25 @@ export function buildEventDetail(
   if (!event) return null;
 
   const entityMap = doc?.entity ?? {};
+  const entityDeltas = event.entity_deltas;
   const entities: EventEntityRef[] = (event.entities ?? []).map((id) => {
     const entity = entityMap[id];
+    const delta = entityDeltas?.[id];
+    const baseTimeDelta = delta
+      ? {
+          start: delta.start_display,
+          end:
+            delta.end_display && delta.end_display !== delta.start_display
+              ? delta.end_display
+              : undefined,
+        }
+      : undefined;
     return {
       id,
       name: entity?.id ?? id,
       avatar: entity?.avatar ? convertFileSrc(entity.avatar) : undefined,
       description: entity?.description,
+      baseTimeDelta,
     };
   });
 

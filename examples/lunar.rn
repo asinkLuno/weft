@@ -154,3 +154,85 @@ pub fn humanizer(ctx) {
     }
     `${date} ${hh}:${mm}:${ss}`
 }
+
+fn diff_components(a, b) {
+    let diff_secs = (b[3] * 3600 + b[4] * 60 + b[5]) - (a[3] * 3600 + a[4] * 60 + a[5]);
+    let borrow_day = 0;
+    if diff_secs < 0 {
+        diff_secs += DAY_SECONDS;
+        borrow_day = 1;
+    }
+
+    let day = b[2] - a[2] - borrow_day;
+    let cur_mi = months_before_year(b[0]) + b[1] - 1;
+    let borrow_month = 0;
+    while day < 0 {
+        cur_mi -= 1;
+        day += month_length(cur_mi);
+        borrow_month += 1;
+    }
+
+    let month = b[1] - a[1] - borrow_month;
+    let cur_y = b[0];
+    let borrow_year = 0;
+    while month < 0 {
+        cur_y -= 1;
+        month += months_in_year(cur_y);
+        borrow_year += 1;
+    }
+
+    [
+        b[0] - a[0] - borrow_year,
+        month,
+        day,
+        diff_secs / 3600,
+        diff_secs % 3600 / 60,
+        diff_secs % 60,
+    ]
+}
+
+fn format_delta(parts, units, neg, zh) {
+    let sign = if neg { "-" } else { "+" };
+    let sep = if zh { "" } else { " " };
+    let out = "";
+    let first = true;
+    let i = 0;
+    while i < 6 {
+        if parts[i] > 0 {
+            out = if first {
+                first = false;
+                `${parts[i]}${units[i]}`
+            } else {
+                `${out}${sep}${parts[i]}${units[i]}`
+            };
+        }
+        i += 1;
+    }
+    `${sign}${out}`
+}
+
+pub fn delta_humanizer(ctx) {
+    let from = ctx.from;
+    let to = ctx.to;
+    let zh = ctx.language == "zh";
+    let units = if zh {
+        ["年", "个月", "日", "小时", "分", "秒"]
+    } else {
+        ["y", "mo", "d", "h", "m", "s"]
+    };
+
+    if to.tick == from.tick {
+        let p = if from.precision >= to.precision { from.precision } else { to.precision };
+        let idx = if p < 1 { 0 } else if p > 6 { 5 } else { p - 1 };
+        let zero = `0${units[idx]}`;
+        return zero;
+    }
+
+    let neg = to.tick < from.tick;
+    let parts = if neg {
+        diff_components(to.values, from.values)
+    } else {
+        diff_components(from.values, to.values)
+    };
+    format_delta(parts, units, neg, zh)
+}

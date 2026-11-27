@@ -29,12 +29,14 @@ import {
   useState,
 } from "react";
 import { EmptyState } from "@/components/empty-state";
+import { preloadEntityLayout } from "@/features/entity/layout-store";
 import { StoryView } from "@/features/story/story-view";
 import { type Lang, strings } from "@/i18n";
 import { DOCUMENT_TONE_STYLE } from "@/lib/ui";
 import {
   useWorkspaceDoc,
   useWorkspaceEditor,
+  useWorkspaceMeta,
   useWorkspaceTone,
 } from "./workspace-context";
 
@@ -69,8 +71,13 @@ const PANEL_PRELOADERS: Partial<Record<PanelId, () => Promise<unknown>>> = {
   info: loadInfoView,
 };
 
-function preloadPanel(kind: PanelId | null): void {
+const TAB_CLOSE_ICON = <XIcon className="size-3" />;
+
+function preloadPanel(kind: PanelId | null, path?: string): void {
   if (!kind) return;
+  if (kind === "entity" && path) {
+    void preloadEntityLayout(path);
+  }
   void PANEL_PRELOADERS[kind]?.();
 }
 
@@ -150,7 +157,7 @@ function addPanelInGroup(
 }
 
 function EditorPanel() {
-  const { path, lang } = useWorkspaceDoc();
+  const { path, lang } = useWorkspaceMeta();
   const {
     draftStore,
     dirty,
@@ -183,7 +190,8 @@ function EditorPanel() {
 }
 
 function StoryPanel() {
-  const { doc, lang } = useWorkspaceDoc();
+  const doc = useWorkspaceDoc();
+  const { lang } = useWorkspaceMeta();
   const t = strings[lang];
 
   return (
@@ -221,7 +229,8 @@ function useMountWhenVisible(api: IDockviewPanelProps["api"]): boolean {
 }
 
 function EntityPanel({ api }: IDockviewPanelProps) {
-  const { doc, lang, path, revealInEditor } = useWorkspaceDoc();
+  const doc = useWorkspaceDoc();
+  const { lang, path, revealInEditor } = useWorkspaceMeta();
   const mountedOnce = useMountWhenVisible(api);
 
   return (
@@ -241,7 +250,7 @@ function EntityPanel({ api }: IDockviewPanelProps) {
 }
 
 function InfoPanel() {
-  const { lang } = useWorkspaceDoc();
+  const { lang } = useWorkspaceMeta();
   return (
     <div className="h-full overflow-auto bg-base-100 p-4">
       <Suspense fallback={null}>
@@ -252,7 +261,8 @@ function InfoPanel() {
 }
 
 function EventsPanel({ api }: IDockviewPanelProps) {
-  const { doc, lang, revealInEditor } = useWorkspaceDoc();
+  const doc = useWorkspaceDoc();
+  const { lang, revealInEditor } = useWorkspaceMeta();
   const mountedOnce = useMountWhenVisible(api);
 
   return (
@@ -289,7 +299,7 @@ function EditorDirtyDot() {
 }
 
 export function WorkspaceTab({ api, params }: IDockviewPanelHeaderProps) {
-  const { lang } = useWorkspaceDoc();
+  const { lang, path } = useWorkspaceMeta();
   const kind = panelKindOf({ id: api.id, params });
   const Icon = kind ? PANEL_META[kind].icon : null;
   const title = kind ? panelTitle(kind, lang) : (api.title ?? api.id);
@@ -298,7 +308,7 @@ export function WorkspaceTab({ api, params }: IDockviewPanelHeaderProps) {
   useEffect(() => {
     const target = tabRef.current?.parentElement;
     if (!target || !kind || !PANEL_PRELOADERS[kind]) return;
-    const warm = () => preloadPanel(kind);
+    const warm = () => preloadPanel(kind, path);
     target.addEventListener("pointerenter", warm, {
       passive: true,
       once: true,
@@ -308,7 +318,7 @@ export function WorkspaceTab({ api, params }: IDockviewPanelHeaderProps) {
       target.removeEventListener("pointerenter", warm);
       target.removeEventListener("focusin", warm);
     };
-  }, [kind]);
+  }, [kind, path]);
 
   return (
     <div
@@ -328,7 +338,7 @@ export function WorkspaceTab({ api, params }: IDockviewPanelHeaderProps) {
           api.close();
         }}
       >
-        <XIcon className="size-3" />
+        {TAB_CLOSE_ICON}
       </button>
     </div>
   );
@@ -338,12 +348,14 @@ function GroupActionMenu({
   label,
   icon: TriggerIcon,
   lang,
+  path,
   align = "end",
   onSelect,
 }: {
   label: string;
   icon: LucideIcon;
   lang: Lang;
+  path: string;
   align?: "auto" | "end";
   onSelect: (kind: PanelId) => void;
 }) {
@@ -378,8 +390,8 @@ function GroupActionMenu({
             <li key={kind}>
               <button
                 type="button"
-                onPointerEnter={() => preloadPanel(kind)}
-                onFocus={() => preloadPanel(kind)}
+                onPointerEnter={() => preloadPanel(kind, path)}
+                onFocus={() => preloadPanel(kind, path)}
                 onClick={(event) => {
                   onSelect(kind);
                   event.currentTarget
@@ -402,7 +414,7 @@ export function WorkspaceAddTabAction({
   containerApi,
   group,
 }: IDockviewHeaderActionsProps) {
-  const { lang } = useWorkspaceDoc();
+  const { lang, path } = useWorkspaceMeta();
   const t = strings[lang];
 
   return (
@@ -411,6 +423,7 @@ export function WorkspaceAddTabAction({
         label={t.addTab}
         icon={Plus}
         lang={lang}
+        path={path}
         align="auto"
         onSelect={(kind) => addPanelInGroup(containerApi, kind, lang, group)}
       />
@@ -422,7 +435,7 @@ export function WorkspaceGroupActions({
   containerApi,
   group,
 }: IDockviewHeaderActionsProps) {
-  const { lang } = useWorkspaceDoc();
+  const { lang, path } = useWorkspaceMeta();
   const t = strings[lang];
 
   return (
@@ -431,6 +444,7 @@ export function WorkspaceGroupActions({
         label={t.splitRight}
         icon={Columns2}
         lang={lang}
+        path={path}
         onSelect={(kind) =>
           addPanelInGroup(containerApi, kind, lang, group, "right")
         }
@@ -439,6 +453,7 @@ export function WorkspaceGroupActions({
         label={t.splitDown}
         icon={Rows2}
         lang={lang}
+        path={path}
         onSelect={(kind) =>
           addPanelInGroup(containerApi, kind, lang, group, "below")
         }
@@ -448,7 +463,7 @@ export function WorkspaceGroupActions({
 }
 
 export function WorkspaceWatermark({ containerApi }: IWatermarkPanelProps) {
-  const { lang } = useWorkspaceDoc();
+  const { lang, path } = useWorkspaceMeta();
   const t = strings[lang];
 
   return (
@@ -462,8 +477,8 @@ export function WorkspaceWatermark({ containerApi }: IWatermarkPanelProps) {
               key={id}
               type="button"
               className="btn btn-outline btn-sm border-base-300"
-              onPointerEnter={() => preloadPanel(id)}
-              onFocus={() => preloadPanel(id)}
+              onPointerEnter={() => preloadPanel(id, path)}
+              onFocus={() => preloadPanel(id, path)}
               onClick={() => focusOrOpenPanel(containerApi, id, lang)}
             >
               <Icon className="size-3.5" />

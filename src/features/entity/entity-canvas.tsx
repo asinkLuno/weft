@@ -2,6 +2,7 @@ import {
   Background,
   type DefaultEdgeOptions,
   type Edge,
+  type NodeChange,
   Panel,
   ReactFlow,
   ReactFlowProvider,
@@ -174,6 +175,7 @@ function EntityCanvasInner({
   );
   const [nodes, setNodes, onNodesChange] =
     useNodesState<EntityFlowNode>(seedNodes);
+  const [measureVersion, setMeasureVersion] = useState(0);
   const nodesInitialized = useNodesInitialized();
   const { fitView, setCenter, getZoom, getNode } = useReactFlow();
 
@@ -185,6 +187,26 @@ function EntityCanvasInner({
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
+
+  // 仅在节点尺寸或增删替换变化时递增测量版本，拖拽（position）期间零指纹计算与字符串分配
+  const handleNodesChange = useCallback(
+    (changes: NodeChange<EntityFlowNode>[]) => {
+      onNodesChange(changes);
+      for (let i = 0; i < changes.length; i++) {
+        const type = changes[i].type;
+        if (
+          type === "dimensions" ||
+          type === "add" ||
+          type === "remove" ||
+          type === "replace"
+        ) {
+          setMeasureVersion((v) => v + 1);
+          break;
+        }
+      }
+    },
+    [onNodesChange],
+  );
 
   // 文档编辑或选中项变化时增量同步节点，保留已有位置与实测尺寸，不重置视口
   useEffect(() => {
@@ -198,17 +220,17 @@ function EntityCanvasInner({
     [edges],
   );
 
-  // 派生原始字符串指纹：拖拽期间宽高不变则指纹不变，避免每帧触发重排 effect 与 Map 分配
-  const measuredFingerprint = useMemo(
-    () =>
-      nodesInitialized
-        ? computeMeasuredFingerprint(nodes, layoutMode, edgeSignature)
-        : null,
-    [nodesInitialized, nodes, layoutMode, edgeSignature],
-  );
-
   // 测得真实宽高后按实测尺寸精准重排（hierarchy 模式下按需加载 dagre）；只在首次测量后 fitView
+  const nodeCount = nodes.length;
   useEffect(() => {
+    void measureVersion;
+    void nodeCount;
+    if (!nodesInitialized) return;
+    const measuredFingerprint = computeMeasuredFingerprint(
+      nodesRef.current,
+      layoutMode,
+      edgeSignature,
+    );
     if (
       !measuredFingerprint ||
       measuredFingerprint === lastLayoutFingerprintRef.current
@@ -240,8 +262,11 @@ function EntityCanvasInner({
       cancelled = true;
     };
   }, [
-    measuredFingerprint,
+    nodesInitialized,
+    measureVersion,
+    nodeCount,
     layoutMode,
+    edgeSignature,
     edges,
     setNodes,
     fitView,
@@ -284,7 +309,7 @@ function EntityCanvasInner({
         colorMode={theme}
         nodes={nodes}
         edges={edges}
-        onNodesChange={onNodesChange}
+        onNodesChange={handleNodesChange}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}

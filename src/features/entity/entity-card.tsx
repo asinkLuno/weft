@@ -16,6 +16,9 @@ import type { EntityData } from "./model";
 const PREVIEW_WIDTH = 280;
 const PREVIEW_GAP = 10;
 const VIEWPORT_MARGIN = 12;
+const CALENDAR_ICON = (
+  <CalendarDays className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+);
 
 export const EntitySelectContext = createContext<((id: string) => void) | null>(
   null,
@@ -85,10 +88,7 @@ export function EntityCard({
         <div className="flex flex-col gap-2 border-t border-base-300 px-4 py-3">
           {data.baseTime && (
             <div className="flex items-start gap-1.5 text-xs text-base-content/60">
-              <CalendarDays
-                className="mt-0.5 size-3.5 shrink-0"
-                aria-hidden="true"
-              />
+              {CALENDAR_ICON}
               <span className="break-words font-mono leading-5">
                 {data.baseTime}
               </span>

@@ -43,6 +43,7 @@ A `date_mode` `.rn` script MUST export four `pub fn` entry points:
 | `to_tick(values)` | `values: Vec<i64>` (len = `components`) -> `i64` | Map component tuple (including unnormalized offset sums!) to a linear integer tick |
 | `from_tick(tick)` | `tick: i64` -> `Vec<i64>` (len = `components`) | Map linear tick back to normalized components |
 | `humanizer(ctx)` | `ctx: #{ api, values, precision, language }` -> `String` | Format normalized components respecting `ctx.precision` |
+| `delta_humanizer(ctx)` *(optional)* | `ctx: #{ api, language, from: #{ values, tick, precision }, to: #{ values, tick, precision } }` -> `String` | Format signed duration `to - from` (used for event-to-entity `base_time` deltas; falls back to signed tick diff when omitted) |
 
 ### Critical Invariants Enforced by `weft check`
 

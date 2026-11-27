@@ -15,11 +15,21 @@ import { EmptyState } from "@/components/empty-state";
 import type { WeftDeclKind } from "@/features/editor/weft-ls-client";
 import { type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
-import { settings } from "@/lib/settings";
 import { EntityCanvas } from "./entity-canvas";
 import { EntityDetailPanel } from "./entity-detail";
 import type { Point } from "./layout";
+import {
+  getCachedEntityLayout,
+  persistEntityPosition,
+  preloadEntityLayout,
+} from "./layout-store";
 import { buildEntityDetail, buildEntityView } from "./model";
+
+function hasAnyKey(obj: Record<string, unknown> | undefined): boolean {
+  if (!obj) return false;
+  for (const _ in obj) return true;
+  return false;
+}
 
 function useDismissDetails(
   ref: RefObject<HTMLDetailsElement | null>,
@@ -118,38 +128,40 @@ const DimensionFilter = memo(function DimensionFilter({
 });
 
 function useSavedLayoutPositions(path: string) {
-  const layoutKey = `layout:${path}`;
-  const savedRef = useRef<Record<string, Point>>({});
-  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const [loadedPath, setLoadedPath] = useState<string | null>(() =>
+    getCachedEntityLayout(path) !== undefined ? path : null,
+  );
+  const ready =
+    loadedPath === path || getCachedEntityLayout(path) !== undefined;
 
   useEffect(() => {
+    if (getCachedEntityLayout(path) !== undefined) {
+      setLoadedPath(path);
+      return;
+    }
     let cancelled = false;
-    settings.get<Record<string, Point>>(layoutKey).then((v) => {
-      if (cancelled) return;
-      savedRef.current = v ?? {};
-      setLoadedKey(layoutKey);
+    void preloadEntityLayout(path).then(() => {
+      if (!cancelled) setLoadedPath(path);
     });
     return () => {
       cancelled = true;
     };
-  }, [layoutKey]);
+  }, [path]);
 
   const getPositions = useCallback(
-    (): Readonly<Record<string, Point>> => savedRef.current,
-    [],
+    (): Readonly<Record<string, Point>> => getCachedEntityLayout(path) ?? {},
+    [path],
   );
 
   const persist = useCallback(
     (id: string, pos: Point) => {
-      const next = { ...savedRef.current, [id]: pos };
-      savedRef.current = next;
-      void settings.set(layoutKey, next);
+      persistEntityPosition(path, id, pos);
     },
-    [layoutKey],
+    [path],
   );
 
   return {
-    ready: loadedKey === layoutKey,
+    ready,
     getPositions,
     persist,
   };
@@ -180,10 +192,7 @@ function EntityViewInner({
   const focusSeqRef = useRef(0);
 
   const savedLayout = useSavedLayoutPositions(path);
-  const hasEntities = useMemo(
-    () => Object.keys(doc?.entity ?? {}).length > 0,
-    [doc],
-  );
+  const hasEntities = hasAnyKey(doc?.entity);
 
   // 通过稳定的 getPositions 回调按需读取已保存坐标：拖拽节点后再点击选中不触发 buildEntityView 重建
   const view = useMemo(

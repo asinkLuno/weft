@@ -413,7 +413,7 @@ fn analyze_ast(
         diagnostics,
     )?;
 
-    let (entity, belong_dag, entity_link) = build_entities_runtime(
+    let (entity, belong_dag, entity_link, entity_base_times) = build_entities_runtime(
         raw_entities,
         &link_groups,
         belong_graph,
@@ -424,7 +424,8 @@ fn analyze_ast(
         },
         diagnostics,
     );
-    let event = build_events_collecting(raw_events, &story.calendar, diagnostics);
+    let event =
+        build_events_collecting(raw_events, &entity_base_times, &story.calendar, diagnostics);
     let events: BTreeMap<String, Events> = raw_event_lists
         .into_iter()
         .map(|(name, (_, refs))| (name, refs.into_iter().map(|(id, _)| id).collect()))

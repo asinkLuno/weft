@@ -5,6 +5,8 @@ import type {
   TooltipComponentOption,
 } from "echarts/components";
 import * as echarts from "echarts/core";
+import type { EntityTimeDelta } from "@/lib/document";
+import { formatTimeRange } from "@/lib/ui";
 import type { EventItem, GanttBreak, GanttChartModel } from "./model";
 
 export type GanttOption = echarts.ComposeOption<
@@ -137,22 +139,38 @@ function escapeHtml(text: string): string {
   return text.replace(HTML_ESCAPE_RE, (ch) => HTML_ESCAPE_MAP[ch] ?? ch);
 }
 
+function formatEntityPillHtml(
+  entity: string,
+  delta: EntityTimeDelta | undefined,
+  palette: ChartPalette,
+): string {
+  const deltaText = delta
+    ? formatTimeRange(delta.start_display, delta.end_display)
+    : undefined;
+  const deltaHtml = deltaText
+    ? `<span style="margin-left:4px;font-family:${palette.fontMono};font-size:10px;color:${palette.contentMuted};">${escapeHtml(deltaText)}</span>`
+    : "";
+  return `<span style="display:inline-flex;flex-wrap:wrap;align-items:baseline;padding:1px 6px;border-radius:4px;font-size:11px;background:${palette.base200};border:1px solid ${palette.base300};color:${palette.content};">${escapeHtml(entity)}${deltaHtml}</span>`;
+}
+
 function formatTooltipHtml(
   event: EventItem,
   palette: ChartPalette,
   entitiesLabel: string,
 ): string {
-  const timeText = event.end_display
-    ? `${event.start_display ?? ""} – ${event.end_display}`
-    : (event.start_display ?? "");
+  const timeText =
+    formatTimeRange(event.start_display, event.end_display) ?? "";
   const entitiesHtml =
     event.entities && event.entities.length > 0
       ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
           <span style="font-size:11px;color:${palette.contentMuted};margin-right:2px;">${escapeHtml(entitiesLabel)}:</span>
           ${event.entities
-            .map(
-              (entity) =>
-                `<span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:11px;background:${palette.base200};border:1px solid ${palette.base300};color:${palette.content};">${escapeHtml(entity)}</span>`,
+            .map((entity) =>
+              formatEntityPillHtml(
+                entity,
+                event.entity_deltas?.[entity],
+                palette,
+              ),
             )
             .join("")}
         </div>`
@@ -161,7 +179,7 @@ function formatTooltipHtml(
     ? `<div style="margin-top:8px;white-space:pre-wrap;line-height:1.5;font-size:12px;color:${palette.content};opacity:0.85;">${escapeHtml(event.description)}</div>`
     : "";
 
-  return `<div style="max-width:300px;font-family:${palette.fontSans};">
+  return `<div style="max-width:360px;font-family:${palette.fontSans};">
     <div style="font-size:13px;font-weight:600;color:${palette.content};">${escapeHtml(event.id)}</div>
     ${
       timeText

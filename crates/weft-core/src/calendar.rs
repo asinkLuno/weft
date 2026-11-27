@@ -46,6 +46,8 @@ pub struct Calendar {
     components: usize,
     // 各分量的起始值，用来补齐绝对时间里没写的尾部分量；长度等于 components。
     minimums: Vec<i64>,
+    // 脚本是否导出可选的 delta_humanizer(ctx) 接口。
+    has_delta_humanizer: bool,
 }
 
 /// 解析完成的时间点。
@@ -149,6 +151,9 @@ impl Calendar {
             .into());
         }
 
+        let has_delta_humanizer =
+            plugin_loader::missing_functions(&unit, &runtime, &["delta_humanizer"]).is_empty();
+
         Ok(Self {
             runtime,
             unit,
@@ -161,6 +166,7 @@ impl Calendar {
             },
             components,
             minimums: raw.minimums,
+            has_delta_humanizer,
         })
     }
 
@@ -220,6 +226,28 @@ impl Calendar {
     pub fn humanize(&self, moment: &Moment) -> Result<String, DocumentError> {
         let mut vm = self.vm();
         self.humanize_with(&mut vm, &moment.values, moment.precision)
+    }
+
+    /// 复用单个 VM 格式化同一基准时刻到事件起止时刻的差值对（`to - from`）。
+    /// 若历法脚本未导出 `delta_humanizer`，则退化为带符号的 tick 差值。
+    pub fn humanize_delta_pair(
+        &self,
+        from: &Moment,
+        start: &Moment,
+        end: Option<&Moment>,
+    ) -> Result<(String, Option<String>), DocumentError> {
+        if !self.has_delta_humanizer {
+            let start_display = format_tick_delta(from.tick, start.tick);
+            let end_display = end.map(|m| format_tick_delta(from.tick, m.tick));
+            return Ok((start_display, end_display));
+        }
+        let mut vm = self.vm();
+        let start_display = self.humanize_delta_with(&mut vm, from, start)?;
+        let end_display = match end {
+            Some(m) => Some(self.humanize_delta_with(&mut vm, from, m)?),
+            None => None,
+        };
+        Ok((start_display, end_display))
     }
 
     /// 批量将任意 tick 转换为当前历法的展示文案，复用同一 VM。
@@ -434,6 +462,37 @@ impl Calendar {
             .map_err(|_| self.invalid_return("humanizer").into())
     }
 
+    fn humanize_delta_with(
+        &self,
+        vm: &mut Vm,
+        from: &Moment,
+        to: &Moment,
+    ) -> Result<String, DocumentError> {
+        let ctx = plugin_loader::to_rune_value(&json!({
+            "api": plugin_loader::API_VERSION,
+            "language": &self.language,
+            "from": {
+                "values": from.values,
+                "tick": from.tick,
+                "precision": from.precision,
+            },
+            "to": {
+                "values": to.values,
+                "tick": to.tick,
+                "precision": to.precision,
+            },
+        }))
+        .map_err(|details| ValidationError::CalendarCall {
+            calendar: self.source_name.clone(),
+            entry: "delta_humanizer".to_owned(),
+            details,
+        })?;
+        self.call_vm(vm, "delta_humanizer", (ctx,))?
+            .into_string()
+            .map(|string| string.into_std())
+            .map_err(|_| self.invalid_return("delta_humanizer").into())
+    }
+
     fn from_tick_with(&self, vm: &mut Vm, tick: i64) -> Result<Vec<i64>, DocumentError> {
         let output = self.call_vm(vm, "from_tick", (tick,))?;
         let result: Vec<i64> =
@@ -558,4 +617,13 @@ fn nice_stride(approx_units: i128, target_count: i128) -> i64 {
         }
     }
     i64::try_from(raw).unwrap_or(i64::MAX)
+}
+
+fn format_tick_delta(from_tick: i64, to_tick: i64) -> String {
+    let delta = i128::from(to_tick) - i128::from(from_tick);
+    if delta > 0 {
+        format!("+{delta}")
+    } else {
+        delta.to_string()
+    }
 }

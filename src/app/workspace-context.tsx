@@ -12,9 +12,8 @@ export type EditorRevealRequest = {
   seq: number;
 };
 
-export type WorkspaceDocState = {
+export type WorkspaceMetaState = {
   path: string;
-  doc: WeftDoc | null;
   lang: Lang;
   revealInEditor: (kind: WeftDeclKind, name: string) => void;
 };
@@ -25,26 +24,31 @@ export type WorkspaceEditorState = {
   saving: boolean;
   diskStatus: DiskStatus;
   revealRequest: EditorRevealRequest | null;
-  onDraftChange: (next: string) => void;
+  onDraftChange: (docLength: number, read: () => string) => void;
   onSave: () => Promise<boolean>;
   onForceSave: () => Promise<boolean>;
   onReloadFromDisk: () => Promise<void>;
 };
 
-export const WorkspaceDocContext = createContext<WorkspaceDocState | null>(
+export const WorkspaceMetaContext = createContext<WorkspaceMetaState | null>(
   null,
 );
+export const WorkspaceDocContext = createContext<WeftDoc | null>(null);
 export const WorkspaceEditorContext =
   createContext<WorkspaceEditorState | null>(null);
 export const WorkspaceToneContext = createContext<DocumentTone>("synced");
 export const WorkspaceThemeContext = createContext<ResolvedTheme>("light");
 
-export function useWorkspaceDoc(): WorkspaceDocState {
-  const ctx = useContext(WorkspaceDocContext);
+export function useWorkspaceMeta(): WorkspaceMetaState {
+  const ctx = useContext(WorkspaceMetaContext);
   if (!ctx) {
-    throw new Error("useWorkspaceDoc must be used inside Workspace");
+    throw new Error("useWorkspaceMeta must be used inside Workspace");
   }
   return ctx;
+}
+
+export function useWorkspaceDoc(): WeftDoc | null {
+  return useContext(WorkspaceDocContext);
 }
 
 export function useWorkspaceEditor(): WorkspaceEditorState {
