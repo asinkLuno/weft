@@ -5081,7 +5081,7 @@ dependencies = [
 
 [[package]]
 name = "weft-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ariadne",
  "clap",
@@ -5095,7 +5095,7 @@ dependencies = [
 
 [[package]]
 name = "weft-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chumsky",
  "daggy",
@@ -5108,7 +5108,7 @@ dependencies = [
 
 [[package]]
 name = "weft-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5124,7 +5124,7 @@ dependencies = [
 
 [[package]]
 name = "weft-ls"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "lsp-server",
  "lsp-types",

@@ -1,6 +1,6 @@
 [package]
 name = "weft-desktop"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2024"
@@ -18,6 +18,6 @@ tauri-plugin-store = "2.5.0"
 sys-locale = "0.3.2"
 tauri-plugin-dialog = "2.8.3"
 tauri-plugin-log = "2"
-weft-core = { version = "0.1.0", path = "../crates/weft-core" }
-weft-ls = { version = "0.1.0", path = "../crates/weft-ls" }
+weft-core = { version = "0.2.0", path = "../crates/weft-core" }
+weft-ls = { version = "0.2.0", path = "../crates/weft-ls" }
 
