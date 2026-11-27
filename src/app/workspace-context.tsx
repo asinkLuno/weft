@@ -3,6 +3,7 @@ import type { DiskStatus, DraftStore } from "@/features/document/use-document";
 import type { WeftDeclKind } from "@/features/editor/weft-completion";
 import type { CompileDiagnostic, Lang } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
+import type { ResolvedTheme } from "@/lib/theme";
 import type { DocumentTone } from "@/lib/ui";
 
 export type EditorRevealRequest = {
@@ -37,6 +38,7 @@ export const WorkspaceDocContext = createContext<WorkspaceDocState | null>(
 export const WorkspaceEditorContext =
   createContext<WorkspaceEditorState | null>(null);
 export const WorkspaceToneContext = createContext<DocumentTone>("synced");
+export const WorkspaceThemeContext = createContext<ResolvedTheme>("light");
 
 export function useWorkspaceDoc(): WorkspaceDocState {
   const ctx = useContext(WorkspaceDocContext);
@@ -56,4 +58,8 @@ export function useWorkspaceEditor(): WorkspaceEditorState {
 
 export function useWorkspaceTone(): DocumentTone {
   return useContext(WorkspaceToneContext);
+}
+
+export function useWorkspaceTheme(): ResolvedTheme {
+  return useContext(WorkspaceThemeContext);
 }

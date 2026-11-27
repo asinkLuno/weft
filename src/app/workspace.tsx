@@ -2,6 +2,7 @@ import {
   type DockviewApi,
   DockviewReact,
   type DockviewReadyEvent,
+  themeDark,
   themeLight,
 } from "dockview-react";
 import { FileText, RotateCcw, X as XIcon } from "lucide-react";
@@ -11,11 +12,13 @@ import type { WeftDeclKind } from "@/features/editor/weft-completion";
 import { type CompileDiagnostic, type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 import { settings } from "@/lib/settings";
+import type { ResolvedTheme } from "@/lib/theme";
 import { DOCUMENT_TONE_STYLE, documentToneOf } from "@/lib/ui";
 import {
   type EditorRevealRequest,
   WorkspaceDocContext,
   WorkspaceEditorContext,
+  WorkspaceThemeContext,
   WorkspaceToneContext,
 } from "./workspace-context";
 import {
@@ -42,13 +45,15 @@ const FOOTER_CLOSE_ICON = <XIcon className="size-3.5" />;
 
 // 隔离 Dockview 宿主：flash / diagnostic / dirty 等状态更新时不触发 DockviewReact 重渲染
 const WorkspaceDockview = memo(function WorkspaceDockview({
+  theme,
   onReady,
 }: {
+  theme: ResolvedTheme;
   onReady: (event: DockviewReadyEvent) => void;
 }) {
   return (
     <DockviewReact
-      theme={themeLight}
+      theme={theme === "dark" ? themeDark : themeLight}
       disableDnd
       disableFloatingGroups
       components={WORKSPACE_COMPONENTS}
@@ -70,6 +75,7 @@ export function Workspace({
   saving,
   diskStatus,
   lang,
+  theme,
   flash,
   onDraftChange,
   onSave,
@@ -85,6 +91,7 @@ export function Workspace({
   saving: boolean;
   diskStatus: DiskStatus;
   lang: Lang;
+  theme: ResolvedTheme;
   flash: boolean;
   onDraftChange: (next: string) => void;
   onSave: () => Promise<boolean>;
@@ -279,7 +286,9 @@ export function Workspace({
         <WorkspaceDocContext.Provider value={docContextValue}>
           <WorkspaceEditorContext.Provider value={editorContextValue}>
             <WorkspaceToneContext.Provider value={tone}>
-              <WorkspaceDockview onReady={onReady} />
+              <WorkspaceThemeContext.Provider value={theme}>
+                <WorkspaceDockview theme={theme} onReady={onReady} />
+              </WorkspaceThemeContext.Provider>
             </WorkspaceToneContext.Provider>
           </WorkspaceEditorContext.Provider>
         </WorkspaceDocContext.Provider>

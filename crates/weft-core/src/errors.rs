@@ -4,6 +4,7 @@ use std::{fmt, ops::Range};
 
 use serde::Serialize;
 use thiserror::Error;
+#[cfg(feature = "ts-export")]
 use ts_rs::TS;
 
 /// UTF-8 字节区间（语言内核唯一位置真相；终端渲染和编辑器按需换算行列或 UTF-16）。
@@ -63,7 +64,8 @@ pub(crate) fn clamp_char_boundary(src: &str, offset: usize) -> usize {
 }
 
 /// 源码定位信息（UTF-16 偏移对齐 CodeMirror；1-based 行列号用于日志展示）。
-#[derive(Clone, Debug, Serialize, TS)]
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
 pub struct SourceSpan {
     pub start: usize,
     pub end: usize,
@@ -74,11 +76,12 @@ pub struct SourceSpan {
 }
 
 /// 交付给前端编辑器的单条编译诊断。
-#[derive(Clone, Debug, Serialize, TS)]
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
 pub struct CompileDiagnostic {
     pub error: ValidationError,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
+    #[cfg_attr(feature = "ts-export", ts(optional))]
     pub span: Option<SourceSpan>,
 }
 
@@ -165,7 +168,8 @@ impl Diagnostic {
 }
 
 // 校验错误的唯一代码定义。Serde 和 ts-rs 共用这些变体名与参数字段。
-#[derive(Clone, Debug, Error, Serialize, TS)]
+#[derive(Clone, Debug, Error, Serialize)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
 #[serde(tag = "code", content = "params", rename_all = "snake_case")]
 pub enum ValidationError {
     #[error("syntax error: {details}")]

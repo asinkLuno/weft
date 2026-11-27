@@ -13,7 +13,7 @@ function preloadWorkspace() {
 }
 
 export default function App() {
-  const { lang, recents, remember, forget } = useAppSettings();
+  const { lang, theme, recents, remember, forget } = useAppSettings();
   const {
     path,
     doc,
@@ -58,6 +58,7 @@ export default function App() {
         saving={saving}
         diskStatus={diskStatus}
         lang={lang}
+        theme={theme}
         flash={flash}
         onDraftChange={updateDraft}
         onSave={save}

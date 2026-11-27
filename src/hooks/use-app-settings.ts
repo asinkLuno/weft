@@ -1,35 +1,78 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { asLang, initialLang, type Lang } from "@/i18n";
 import { settings } from "@/lib/settings";
+import {
+  applyDocumentTheme,
+  asThemeMode,
+  getFalseSnapshot,
+  getSystemDarkSnapshot,
+  resolveTheme,
+  subscribeNoop,
+  subscribeSystemDark,
+  type ThemeMode,
+} from "@/lib/theme";
 
 export function useAppSettings() {
   const [lang, setLang] = useState<Lang>(initialLang);
+  const [themeMode, setThemeMode] = useState<ThemeMode>("system");
+  const followSystem = themeMode === "system";
+  // 仅在跟随系统时订阅 prefers-color-scheme，固定浅色/深色时系统切换不触发重渲染
+  const systemDark = useSyncExternalStore(
+    followSystem ? subscribeSystemDark : subscribeNoop,
+    followSystem ? getSystemDarkSnapshot : getFalseSnapshot,
+  );
   const [recents, setRecents] = useState<string[]>([]);
   const recentFiles = useRef<string[]>([]);
   const recentsChanged = useRef(false);
 
+  const theme = resolveTheme(themeMode, systemDark);
+
+  useLayoutEffect(() => {
+    applyDocumentTheme(theme);
+  }, [theme]);
+
   useEffect(() => {
     let cancelled = false;
     let languageChanged = false;
-    const subscription = listen<{ language?: Lang }>(
+    let themeChanged = false;
+    const subscription = listen<{ language?: unknown; theme?: unknown }>(
       "settings-changed",
       ({ payload }) => {
         if (cancelled) return;
-        const next = asLang(payload.language);
-        if (next) {
+        const nextLang = asLang(payload.language);
+        if (nextLang) {
           languageChanged = true;
-          setLang(next);
+          setLang(nextLang);
+        }
+        const nextTheme = asThemeMode(payload.theme);
+        if (nextTheme) {
+          themeChanged = true;
+          setThemeMode(nextTheme);
         }
       },
     );
-    // 与 listen 并行：languageChanged 已经挡住"事件先到、旧值后到"的覆盖
+    // 与 listen 并行：*Changed 已经挡住"事件先到、旧值后到"的覆盖
     void invoke<unknown>("get_language")
       .then((value) => {
         if (cancelled || languageChanged) return;
         const next = asLang(value);
         if (next) setLang(next);
+      })
+      .catch(console.error);
+    void invoke<unknown>("get_theme")
+      .then((value) => {
+        if (cancelled || themeChanged) return;
+        const next = asThemeMode(value);
+        if (next) setThemeMode(next);
       })
       .catch(console.error);
     void settings
@@ -76,5 +119,5 @@ export function useAppSettings() {
     [updateRecents],
   );
 
-  return { lang, recents, remember, forget };
+  return { lang, theme, recents, remember, forget };
 }

@@ -10,6 +10,7 @@ import { AxisBreak } from "echarts/features";
 import { CanvasRenderer } from "echarts/renderers";
 import { FoldHorizontal, RotateCcw, UnfoldHorizontal } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useWorkspaceTheme } from "@/app/workspace-context";
 import type { Lang, strings } from "@/i18n";
 import type { Events } from "@/lib/document";
 import {
@@ -48,6 +49,11 @@ function getSharedTickCache(calendarKey: string): Map<number, string> {
     sharedTickLabels.clear();
   }
   return sharedTickLabels;
+}
+
+function formatCachedTick(calendarKey: string, value: number): string {
+  const labels = getSharedTickCache(calendarKey);
+  return labels.get(value) ?? labels.get(Math.round(value)) ?? "";
 }
 
 function storeTickLabel(
@@ -124,6 +130,7 @@ export const EventsGantt = memo(function EventsGantt({
   t: (typeof strings)[Lang];
   onSelectEvent: (eventId: string, listName: string) => void;
 }) {
+  const theme = useWorkspaceTheme();
   const model = useMemo(() => buildGanttChartModel(ids, byId), [ids, byId]);
   const breakEdges = useMemo(() => {
     const ticks = model.breaks.flatMap((b) => [b.start, b.end]);
@@ -142,12 +149,31 @@ export const EventsGantt = memo(function EventsGantt({
     end: 100,
   });
   const gridPaddingRef = useRef(0);
+  const lastTicksRef = useRef<number[]>([]);
+  const themeRef = useRef(theme);
+  const appliedThemeRef = useRef(theme);
+  const latestOptionInputRef = useRef({
+    calendarKey,
+    model,
+    name,
+    entitiesLabel: t.ganttEntities,
+  });
   const fetchTimerRef = useRef<number | null>(null);
   const requestSeqRef = useRef(0);
 
   useEffect(() => {
     onSelectEventRef.current = onSelectEvent;
   }, [onSelectEvent]);
+
+  useEffect(() => {
+    themeRef.current = theme;
+    latestOptionInputRef.current = {
+      calendarKey,
+      model,
+      name,
+      entitiesLabel: t.ganttEntities,
+    };
+  }, [theme, calendarKey, model, name, t.ganttEntities]);
 
   const [isZoomed, setIsZoomed] = useState(false);
   const [hasExpandedBreak, setHasExpandedBreak] = useState(false);
@@ -204,6 +230,7 @@ export const EventsGantt = memo(function EventsGantt({
               : result.map((item) => item.tick);
           const chart = chartRef.current;
           if (!chart || chart.isDisposed()) return;
+          lastTicksRef.current = ticks;
           chart.setOption({
             xAxis: {
               axisTick: { customValues: ticks },
@@ -259,15 +286,14 @@ export const EventsGantt = memo(function EventsGantt({
     const fallbackTicks = Array.from(model.initialLabels.keys()).sort(
       (a, b) => a - b,
     );
+    lastTicksRef.current = fallbackTicks;
+    appliedThemeRef.current = themeRef.current;
     const option = buildGanttOption({
       name,
       model,
       palette: readDaisyPalette(container),
       entitiesLabel: t.ganttEntities,
-      formatExactTick: (value) => {
-        const labels = getSharedTickCache(calendarKey);
-        return labels.get(value) ?? labels.get(Math.round(value)) ?? "";
-      },
+      formatExactTick: (value) => formatCachedTick(calendarKey, value),
       customValues: fallbackTicks,
       expandedBreaks: expandedBreaksRef.current,
     });
@@ -373,6 +399,38 @@ export const EventsGantt = memo(function EventsGantt({
     refreshCalendarTicks,
     t.ganttEntities,
   ]);
+
+  // 主题切换时重读 daisyUI 色板并合并更新，保留当前缩放与空白折叠状态。
+  useEffect(() => {
+    if (appliedThemeRef.current === theme) return;
+    appliedThemeRef.current = theme;
+    const container = containerRef.current;
+    const chart = chartRef.current;
+    if (!container || !chart || chart.isDisposed()) return;
+    const {
+      calendarKey: currentCalendarKey,
+      model: currentModel,
+      name: currentName,
+      entitiesLabel,
+    } = latestOptionInputRef.current;
+    const option = buildGanttOption({
+      name: currentName,
+      model: currentModel,
+      palette: readDaisyPalette(container),
+      entitiesLabel,
+      formatExactTick: (value) => formatCachedTick(currentCalendarKey, value),
+      customValues: lastTicksRef.current,
+      expandedBreaks: expandedBreaksRef.current,
+    });
+    const dataZoom = Array.isArray(option.dataZoom)
+      ? option.dataZoom.map((dz) => {
+          if (dz.type !== "slider") return dz;
+          const { startValue: _sv, endValue: _ev, ...rest } = dz;
+          return rest;
+        })
+      : option.dataZoom;
+    chart.setOption({ ...option, dataZoom });
+  }, [theme]);
 
   // 滚轮直接左右平移时间轴（Ctrl + 滚轮交给 ECharts 缩放；未缩放时放行纵向页面滚动）。
   useEffect(() => {

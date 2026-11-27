@@ -16,7 +16,10 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { EditorRevealRequest } from "@/app/workspace-context";
+import {
+  type EditorRevealRequest,
+  useWorkspaceTheme,
+} from "@/app/workspace-context";
 import type { DiskStatus, DraftStore } from "@/features/document/use-document";
 import {
   type CompileDiagnostic,
@@ -87,6 +90,7 @@ const WeftCodeMirror = memo(function WeftCodeMirror({
   lang: Lang;
   onChange: (next: string) => void;
 }) {
+  const theme = useWorkspaceTheme();
   const value = useSyncExternalStore(
     draftStore.subscribe,
     draftStore.getSnapshot,
@@ -148,6 +152,7 @@ const WeftCodeMirror = memo(function WeftCodeMirror({
       className="h-full"
       value={value}
       height="100%"
+      theme={theme}
       basicSetup={BASIC_SETUP}
       extensions={extensions}
       onChange={onChange}

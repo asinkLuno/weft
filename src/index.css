@@ -8,3 +8,10 @@
   --color-primary: #002fa7;
   --color-primary-content: #ffffff;
 }
+@plugin "daisyui/theme" {
+  name: "dark";
+  prefersdark: true;
+  --color-primary: #3b71ff;
+  --color-primary-content: #ffffff;
+  --depth: 0;
+}

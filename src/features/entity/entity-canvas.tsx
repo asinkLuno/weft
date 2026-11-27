@@ -11,6 +11,7 @@ import {
 } from "@xyflow/react";
 import { Maximize, Minus, Plus } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useWorkspaceTheme } from "@/app/workspace-context";
 import type { Lang } from "@/i18n";
 import { EntityNode, EntitySelectContext } from "./entity-card";
 import { FloatingEdge } from "./floating-edge";
@@ -167,6 +168,7 @@ function EntityCanvasInner({
   onJumpToEntity,
   onPersist,
 }: EntityCanvasProps) {
+  const theme = useWorkspaceTheme();
   const [seedNodes] = useState<EntityFlowNode[]>(() =>
     initialNodes.map((n) => ({ ...n, selected: n.id === selectedId })),
   );
@@ -272,6 +274,7 @@ function EntityCanvasInner({
   return (
     <EntitySelectContext.Provider value={onJumpToEntity}>
       <ReactFlow
+        colorMode={theme}
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
