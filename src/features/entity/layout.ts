@@ -1,11 +1,19 @@
-import dagre from "@dagrejs/dagre";
-
 export type NodeSize = { width: number; height: number };
 export type Point = { x: number; y: number };
 export type LayoutEdge = { source: string; target: string };
 export type EntityLayoutMode = "grid" | "hierarchy" | "network";
 
 export const DEFAULT_NODE_SIZE: NodeSize = { width: 280, height: 180 };
+
+type DagreModule = typeof import("@dagrejs/dagre")["default"];
+let dagrePromise: Promise<DagreModule> | null = null;
+
+function loadDagre(): Promise<DagreModule> {
+  if (!dagrePromise) {
+    dagrePromise = import("@dagrejs/dagre").then((m) => m.default);
+  }
+  return dagrePromise;
+}
 
 function sizeOf(sizes: ReadonlyMap<string, NodeSize>, id: string): NodeSize {
   return sizes.get(id) ?? DEFAULT_NODE_SIZE;
@@ -50,13 +58,14 @@ export function gridLayout(
 }
 
 /**
- * 层级 DAG 布局（归属视图）：使用每个节点的真实宽高交给 dagre 分层。
+ * 层级 DAG 布局（归属视图）：仅在 hierarchy 模式下按需加载 dagre，按真实宽高分层。
  */
-export function dagreLayout(
+export async function dagreLayout(
   ids: readonly string[],
   edges: readonly LayoutEdge[],
   sizes: ReadonlyMap<string, NodeSize>,
-): Record<string, Point> {
+): Promise<Record<string, Point>> {
+  const dagre = await loadDagre();
   const g = new dagre.graphlib.Graph();
   g.setGraph({ rankdir: "TB", nodesep: 48, ranksep: 64 });
   g.setDefaultEdgeLabel(() => ({}));
@@ -392,12 +401,12 @@ export function networkLayout(
   return out;
 }
 
-export function computeEntityLayout(
+export async function computeEntityLayout(
   mode: EntityLayoutMode,
   ids: readonly string[],
   edges: readonly LayoutEdge[],
   sizes: ReadonlyMap<string, NodeSize>,
-): Record<string, Point> {
+): Promise<Record<string, Point>> {
   switch (mode) {
     case "hierarchy":
       return dagreLayout(ids, edges, sizes);

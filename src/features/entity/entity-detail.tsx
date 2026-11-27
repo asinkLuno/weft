@@ -7,7 +7,7 @@ import {
   DetailTimeRow,
   EntityAvatar,
 } from "@/components/detail-panel";
-import type { WeftDeclKind } from "@/features/editor/weft-completion";
+import type { WeftDeclKind } from "@/features/editor/weft-ls-client";
 import { type Lang, strings } from "@/i18n";
 import type { EntityDetail, EntityEventEntry, EntityLinkEntry } from "./model";
 
@@ -68,7 +68,10 @@ function EntityEventsSection({
     <DetailSection title={title} icon={GitBranch}>
       <ul className="flex flex-col gap-2">
         {events.map((ev) => (
-          <li key={ev.id}>
+          <li
+            key={ev.id}
+            className="[content-visibility:auto] [contain-intrinsic-size:auto_64px]"
+          >
             <button
               type="button"
               className="flex w-full cursor-pointer flex-col gap-1 rounded-box border border-base-300/80 bg-base-200/40 p-2.5 text-left transition-colors hover:border-primary/50 hover:bg-base-200/70"

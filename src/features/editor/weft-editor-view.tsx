@@ -1,170 +1,244 @@
-import { autocompletion } from "@codemirror/autocomplete";
+import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
+import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import {
-  type Diagnostic,
-  linter,
-  lintGutter,
-  setDiagnostics,
-} from "@codemirror/lint";
-import { EditorView } from "@codemirror/view";
-import CodeMirror from "@uiw/react-codemirror";
-import { RefreshCw, RotateCcw, Save } from "lucide-react";
+  bracketMatching,
+  defaultHighlightStyle,
+  foldGutter,
+  foldKeymap,
+  indentOnInput,
+  syntaxHighlighting,
+} from "@codemirror/language";
+import { lintGutter } from "@codemirror/lint";
+import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
+import { Compartment, EditorState } from "@codemirror/state";
+import { oneDark } from "@codemirror/theme-one-dark";
 import {
-  memo,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+  drawSelection,
+  dropCursor,
+  EditorView,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  highlightSpecialChars,
+  keymap,
+  lineNumbers,
+} from "@codemirror/view";
+import {
+  AlertCircle,
+  AlertTriangle,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Sparkles,
+} from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type EditorRevealRequest,
   useWorkspaceTheme,
 } from "@/app/workspace-context";
 import type { DiskStatus, DraftStore } from "@/features/document/use-document";
-import {
-  type CompileDiagnostic,
-  formatValidationError,
-  type Lang,
-  strings,
-} from "@/i18n";
-import {
-  createWeftCompletionSource,
-  findDeclarationRange,
-} from "./weft-completion";
+import { type Lang, strings } from "@/i18n";
 import { weftLanguage } from "./weft-language";
+import {
+  createTauriLspTransport,
+  createWeftLspClient,
+  type DiagnosticCounts,
+  formatDocument,
+  jumpToDefinition,
+  notifyLspLanguage,
+  pathToFileUri,
+  revealSymbolViaLsp,
+} from "./weft-ls-client";
 
 const PATH_SEP_RE = /[\\/]/;
-
-const BASIC_SETUP = {
-  lineNumbers: true,
-  foldGutter: true,
-  highlightActiveLine: true,
-  highlightActiveLineGutter: true,
-  bracketMatching: true,
-  closeBrackets: true,
-  autocompletion: false,
-  indentOnInput: true,
-  tabSize: 2,
-};
 
 function fileNameOf(filePath: string): string {
   const parts = filePath.split(PATH_SEP_RE);
   return parts[parts.length - 1] || filePath;
 }
 
-function toCodeMirrorDiagnostic(
-  diag: CompileDiagnostic,
-  view: EditorView,
-  lang: Lang,
-): Diagnostic {
-  const docLen = view.state.doc.length;
-  const message = formatValidationError(diag.error, lang);
-  if (diag.span) {
-    const from = Math.min(diag.span.start, docLen);
-    let to = Math.min(docLen, Math.max(from, diag.span.end));
-    if (from === to && from < docLen) to = from + 1;
-    return { from, to, severity: "error", message };
-  }
-  return {
-    from: 0,
-    to: docLen > 0 ? view.state.doc.line(1).to : 0,
-    severity: "error",
-    message,
-  };
-}
-
 const REVERT_ICON = <RotateCcw className="size-3.5" />;
 const SAVE_ICON = <Save className="size-3.5" />;
 const REFRESH_ICON = <RefreshCw className="size-3.5" />;
+const FORMAT_ICON = <Sparkles className="size-3.5" />;
+
+const EMPTY_COUNTS: DiagnosticCounts = { errors: 0, warnings: 0 };
+
+const BASE_EDITOR_THEME = EditorView.theme({
+  "&": { height: "100%" },
+  ".cm-scroller": { overflow: "auto" },
+});
+
+// 原生 CodeMirror 6 静态基础扩展（替代 @uiw/react-codemirror 包装层）
+const BASE_EDITOR_EXTENSIONS = [
+  BASE_EDITOR_THEME,
+  lineNumbers(),
+  highlightActiveLineGutter(),
+  highlightSpecialChars(),
+  history(),
+  foldGutter(),
+  drawSelection(),
+  dropCursor(),
+  indentOnInput(),
+  syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+  bracketMatching(),
+  closeBrackets(),
+  highlightActiveLine(),
+  highlightSelectionMatches(),
+  keymap.of([
+    ...closeBracketsKeymap,
+    ...defaultKeymap,
+    ...searchKeymap,
+    ...historyKeymap,
+    ...foldKeymap,
+  ]),
+  EditorState.tabSize.of(2),
+  EditorView.lineWrapping,
+  weftLanguage,
+  lintGutter(),
+];
 
 const WeftCodeMirror = memo(function WeftCodeMirror({
-  draftStore,
-  diagnostic,
-  revealRequest,
+  path,
   lang,
+  draftStore,
+  revealRequest,
   onChange,
+  onDiagnosticCounts,
+  onViewReady,
 }: {
-  draftStore: DraftStore;
-  diagnostic: CompileDiagnostic | null;
-  revealRequest: EditorRevealRequest | null;
+  path: string;
   lang: Lang;
+  draftStore: DraftStore;
+  revealRequest: EditorRevealRequest | null;
   onChange: (next: string) => void;
+  onDiagnosticCounts: (counts: DiagnosticCounts) => void;
+  onViewReady: (view: EditorView | null) => void;
 }) {
   const theme = useWorkspaceTheme();
-  const value = useSyncExternalStore(
-    draftStore.subscribe,
-    draftStore.getSnapshot,
-  );
-  const langRef = useRef(lang);
-  const [editorView, setEditorView] = useState<EditorView | null>(null);
+  const hostRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<EditorView | null>(null);
+  const themeCompartmentRef = useRef(new Compartment());
   const handledRevealSeqRef = useRef(0);
+  const initialLangRef = useRef(lang);
+  const initialThemeRef = useRef(theme);
+  const onChangeRef = useRef(onChange);
+  const onCountsRef = useRef(onDiagnosticCounts);
+  const onViewReadyRef = useRef(onViewReady);
 
   useEffect(() => {
-    langRef.current = lang;
-  }, [lang]);
+    onChangeRef.current = onChange;
+    onCountsRef.current = onDiagnosticCounts;
+    onViewReadyRef.current = onViewReady;
+  }, [onChange, onDiagnosticCounts, onViewReady]);
 
-  useEffect(() => {
-    if (!editorView) return;
-    const diagnostics = diagnostic
-      ? [toCodeMirrorDiagnostic(diagnostic, editorView, lang)]
-      : [];
-    editorView.dispatch(setDiagnostics(editorView.state, diagnostics));
-  }, [editorView, diagnostic, lang]);
+  const fileUri = useMemo(() => pathToFileUri(path), [path]);
 
-  useEffect(() => {
-    if (!editorView || !revealRequest) return;
-    if (revealRequest.seq === handledRevealSeqRef.current) return;
-    handledRevealSeqRef.current = revealRequest.seq;
-    const range = findDeclarationRange(
-      editorView.state.doc.toString(),
-      revealRequest.kind,
-      revealRequest.name,
-    );
-    if (!range) return;
-    const docLen = editorView.state.doc.length;
-    const from = Math.min(range.from, docLen);
-    const to = Math.min(range.to, docLen);
-    editorView.dispatch({
-      selection: { anchor: from, head: to },
-      effects: EditorView.scrollIntoView(from, { y: "center" }),
-    });
-    editorView.focus();
-  }, [editorView, revealRequest]);
-
-  const extensions = useMemo(
-    () => [
-      weftLanguage,
-      autocompletion({
-        override: [createWeftCompletionSource(() => langRef.current)],
-        activateOnTyping: true,
-        closeOnBlur: true,
-        maxRenderedOptions: 30,
-      }),
-      lintGutter(),
-      linter(null),
-      EditorView.lineWrapping,
-    ],
+  // 每个打开文件持有一个标准 @codemirror/lsp-client 实例（走进程内 Tauri JSON-RPC Transport）
+  const lspClient = useMemo(
+    () =>
+      createWeftLspClient(initialLangRef.current, (counts) =>
+        onCountsRef.current(counts),
+      ),
     [],
   );
 
-  return (
-    <CodeMirror
-      className="h-full"
-      value={value}
-      height="100%"
-      theme={theme}
-      basicSetup={BASIC_SETUP}
-      extensions={extensions}
-      onChange={onChange}
-      onCreateEditor={setEditorView}
-    />
-  );
+  // 原生挂载 EditorView：打字走非受控更新，零 React 重渲染与整篇字符串比对
+  useEffect(() => {
+    const parent = hostRef.current;
+    if (!parent) return;
+
+    const themeCompartment = themeCompartmentRef.current;
+    const view = new EditorView({
+      parent,
+      state: EditorState.create({
+        doc: draftStore.getSnapshot(),
+        extensions: [
+          ...BASE_EDITOR_EXTENSIONS,
+          themeCompartment.of(
+            initialThemeRef.current === "dark" ? oneDark : [],
+          ),
+          lspClient.plugin(fileUri, "weft"),
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              onChangeRef.current(update.state.doc.toString());
+            }
+          }),
+          EditorView.domEventHandlers({
+            mousedown(event, targetView) {
+              if (!(event.ctrlKey || event.metaKey) || event.button !== 0) {
+                return false;
+              }
+              const pos = targetView.posAtCoords({
+                x: event.clientX,
+                y: event.clientY,
+              });
+              if (pos === null) return false;
+              targetView.dispatch({ selection: { anchor: pos } });
+              return jumpToDefinition(targetView);
+            },
+          }),
+        ],
+      }),
+    });
+
+    viewRef.current = view;
+    onViewReadyRef.current(view);
+    lspClient.connect(createTauriLspTransport());
+
+    const unsubscribe = draftStore.subscribeExternal(() => {
+      const next = draftStore.getSnapshot();
+      if (next === view.state.doc.toString()) return;
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: next },
+      });
+    });
+
+    return () => {
+      unsubscribe();
+      lspClient.disconnect();
+      onViewReadyRef.current(null);
+      viewRef.current = null;
+      view.destroy();
+    };
+  }, [draftStore, fileUri, lspClient]);
+
+  // 动态切换深浅主题，无需重建 EditorView
+  useEffect(() => {
+    initialThemeRef.current = theme;
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: themeCompartmentRef.current.reconfigure(
+        theme === "dark" ? oneDark : [],
+      ),
+    });
+  }, [theme]);
+
+  useEffect(() => {
+    initialLangRef.current = lang;
+    notifyLspLanguage(lspClient, lang);
+  }, [lspClient, lang]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || !revealRequest) return;
+    if (revealRequest.seq === handledRevealSeqRef.current) return;
+    handledRevealSeqRef.current = revealRequest.seq;
+    void revealSymbolViaLsp(
+      lspClient,
+      view,
+      fileUri,
+      revealRequest.kind,
+      revealRequest.name,
+    );
+  }, [fileUri, lspClient, revealRequest]);
+
+  return <div ref={hostRef} className="h-full" />;
 });
 
 function WeftEditorViewInner({
   path,
   draftStore,
-  diagnostic,
   dirty,
   saving,
   diskStatus,
@@ -177,7 +251,6 @@ function WeftEditorViewInner({
 }: {
   path: string;
   draftStore: DraftStore;
-  diagnostic: CompileDiagnostic | null;
   dirty: boolean;
   saving: boolean;
   diskStatus: DiskStatus;
@@ -191,6 +264,19 @@ function WeftEditorViewInner({
   const t = strings[lang];
   const fileName = useMemo(() => fileNameOf(path), [path]);
   const canSave = (dirty || diskStatus === "deleted") && !saving;
+  const viewRef = useRef<EditorView | null>(null);
+  const [counts, setCounts] = useState<DiagnosticCounts>(EMPTY_COUNTS);
+
+  const handleViewReady = useCallback((view: EditorView | null) => {
+    viewRef.current = view;
+  }, []);
+
+  const handleFormat = useCallback(() => {
+    const view = viewRef.current;
+    if (view) {
+      formatDocument(view);
+    }
+  }, []);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-base-100">
@@ -201,13 +287,35 @@ function WeftEditorViewInner({
         >
           {fileName}
         </span>
-        {dirty && (
+        {counts.errors > 0 ? (
+          <span className="badge badge-xs badge-error gap-1 shrink-0">
+            <AlertCircle className="size-3" aria-hidden="true" />
+            {counts.errors}
+          </span>
+        ) : null}
+        {counts.warnings > 0 ? (
+          <span className="badge badge-xs badge-warning gap-1 shrink-0">
+            <AlertTriangle className="size-3" aria-hidden="true" />
+            {counts.warnings}
+          </span>
+        ) : null}
+        {dirty ? (
           <span className="badge badge-xs badge-outline shrink-0 border-primary text-primary">
             {t.unsaved}
           </span>
-        )}
+        ) : null}
         <div className="flex shrink-0 items-center gap-1">
-          {dirty && diskStatus !== "deleted" && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs"
+            disabled={saving}
+            title="Shift+Alt+F"
+            onClick={handleFormat}
+          >
+            {FORMAT_ICON}
+            {t.format}
+          </button>
+          {dirty && diskStatus !== "deleted" ? (
             <button
               type="button"
               className="btn btn-ghost btn-xs"
@@ -219,7 +327,7 @@ function WeftEditorViewInner({
               {REVERT_ICON}
               {t.revert}
             </button>
-          )}
+          ) : null}
           <button
             type="button"
             className="btn btn-primary btn-xs"
@@ -234,7 +342,7 @@ function WeftEditorViewInner({
         </div>
       </div>
 
-      {diskStatus === "modified" && (
+      {diskStatus === "modified" ? (
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-warning bg-warning/25 px-3 py-1.5 text-xs text-warning-content">
           <span>{t.externalChanged}</span>
           <div className="flex items-center gap-1">
@@ -262,9 +370,9 @@ function WeftEditorViewInner({
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {diskStatus === "deleted" && (
+      {diskStatus === "deleted" ? (
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-error bg-error/25 px-3 py-1.5 text-xs text-error-content">
           <span>{t.externalDeleted}</span>
           <div className="flex items-center gap-1">
@@ -281,15 +389,17 @@ function WeftEditorViewInner({
             </button>
           </div>
         </div>
-      )}
+      ) : null}
 
       <div className="min-h-0 flex-1 overflow-hidden">
         <WeftCodeMirror
-          draftStore={draftStore}
-          diagnostic={diagnostic}
-          revealRequest={revealRequest}
+          path={path}
           lang={lang}
+          draftStore={draftStore}
+          revealRequest={revealRequest}
           onChange={onChange}
+          onDiagnosticCounts={setCounts}
+          onViewReady={handleViewReady}
         />
       </div>
     </div>

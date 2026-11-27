@@ -46,10 +46,12 @@ const loadEntityView = () =>
   import("@/features/entity/entity-view").then((m) => ({
     default: m.EntityView,
   }));
-const loadEventsView = () =>
-  import("@/features/events/events-view").then((m) => ({
+const loadEventsView = () => {
+  void import("@/features/events/events-gantt");
+  return import("@/features/events/events-view").then((m) => ({
     default: m.EventsView,
   }));
+};
 const loadInfoView = () =>
   import("@/features/info/info-view").then((m) => ({
     default: m.InfoView,
@@ -151,7 +153,6 @@ function EditorPanel() {
   const { path, lang } = useWorkspaceDoc();
   const {
     draftStore,
-    diagnostic,
     dirty,
     saving,
     diskStatus,
@@ -167,7 +168,6 @@ function EditorPanel() {
       <WeftEditorView
         path={path}
         draftStore={draftStore}
-        diagnostic={diagnostic}
         dirty={dirty}
         saving={saving}
         diskStatus={diskStatus}

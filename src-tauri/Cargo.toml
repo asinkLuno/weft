@@ -19,4 +19,5 @@ sys-locale = "0.3.2"
 tauri-plugin-dialog = "2.8.3"
 tauri-plugin-log = "2"
 weft-core = { version = "0.1.0", path = "../crates/weft-core" }
+weft-ls = { version = "0.1.0", path = "../crates/weft-ls" }
 

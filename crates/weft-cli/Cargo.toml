@@ -16,3 +16,4 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 similar = "3.2.1"
 weft-core = { version = "0.1.0", path = "../weft-core" }
+weft-ls = { version = "0.1.0", path = "../weft-ls" }

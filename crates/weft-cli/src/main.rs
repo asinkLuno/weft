@@ -1,5 +1,6 @@
-//! `weft` 命令行工具：语法/语义检查（`weft check`）与源码格式化（`weft fmt`）。
+//! `weft` 命令行工具：检查（`weft check`）、格式化（`weft fmt`）、编译（`weft build`）与语言服务。
 
+mod build_cmd;
 mod files;
 mod fmt_cmd;
 mod render;
@@ -13,6 +14,7 @@ use weft_core::{
     lint::LINT_RULES,
 };
 
+use crate::build_cmd::{BuildArgs, run_build};
 use crate::files::{InputSource, collect_weft_paths, format_rel_path, is_stdin_arg};
 use crate::fmt_cmd::{FmtArgs, run_fmt};
 use crate::render::{
@@ -73,6 +75,30 @@ enum Command {
         #[arg(long)]
         no_color: bool,
     },
+    /// Compile a `.weft` file (with `.rn` scripts) to structured JSON
+    #[command(alias = "compile")]
+    Build {
+        /// `.weft` file to compile (pass `-` for stdin)
+        path: PathBuf,
+        /// Write JSON output to a file instead of stdout
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Calendar / script locale (`zh` or `en`; defaults to system locale)
+        #[arg(long)]
+        lang: Option<String>,
+        /// Emit compact single-line JSON instead of pretty-printed JSON
+        #[arg(long)]
+        compact: bool,
+        /// Disable ANSI colors in diagnostic output
+        #[arg(long)]
+        no_color: bool,
+    },
+    /// Start the Weft Language Server over stdio (LSP 3.17)
+    Lsp {
+        /// Default diagnostic / hover locale (`zh` or `en`; defaults to system locale)
+        #[arg(long)]
+        lang: Option<String>,
+    },
     /// List available lint warning rules
     Rules,
 }
@@ -124,6 +150,27 @@ fn main() -> ExitCode {
             stdin,
             no_color,
         }),
+        Command::Build {
+            path,
+            output,
+            lang,
+            compact,
+            no_color,
+        } => run_build(BuildArgs {
+            path,
+            output,
+            lang: lang.unwrap_or_else(default_lang),
+            compact,
+            no_color,
+        }),
+        Command::Lsp { lang } => {
+            if let Err(err) = weft_ls::stdio::run_stdio(lang.unwrap_or_else(default_lang)) {
+                eprintln!("error: weft lsp exited with failure: {err}");
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
         Command::Rules => {
             for rule in LINT_RULES {
                 println!("{rule}");

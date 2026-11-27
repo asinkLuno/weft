@@ -4,8 +4,8 @@ import { type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 import { formatTimeRange } from "@/lib/ui";
 import {
-  computeEntityLayout,
   type EntityLayoutMode,
+  gridLayout,
   type NodeSize,
   type Point,
 } from "./layout";
@@ -519,7 +519,8 @@ export function buildEntityView(
       : [];
 
   const entityData = createEntityDataBuilder(entityMap, parentsById, t);
-  const auto = computeEntityLayout(layoutMode, visibleIds, edges, EMPTY_SIZES);
+  // 首次测量前的占位坐标用 O(n) 网格布局，避免同步加载 dagre；测量完成后由 EntityCanvas 精准重排
+  const auto = gridLayout(visibleIds, EMPTY_SIZES);
   const nodes: EntityFlowNode[] = filtered.map(([id, e]) => ({
     id,
     type: "entity",

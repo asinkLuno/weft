@@ -207,7 +207,7 @@ function EntityCanvasInner({
     [nodesInitialized, nodes, layoutMode, edgeSignature],
   );
 
-  // 测得真实宽高后按实测尺寸精准重排；只在首次测量后 fitView，后续编辑不跳视角
+  // 测得真实宽高后按实测尺寸精准重排（hierarchy 模式下按需加载 dagre）；只在首次测量后 fitView
   useEffect(() => {
     if (
       !measuredFingerprint ||
@@ -217,21 +217,28 @@ function EntityCanvasInner({
     }
     lastLayoutFingerprintRef.current = measuredFingerprint;
 
+    let cancelled = false;
     const { sizes, ids } = extractMeasuredLayoutInput(nodesRef.current);
-    const computed = computeEntityLayout(layoutMode, ids, edges, sizes);
-    setNodes((current) =>
-      applyComputedPositions(
-        current,
-        computed,
-        layoutMode,
-        getSavedPositions(),
-      ),
-    );
+    void computeEntityLayout(layoutMode, ids, edges, sizes).then((computed) => {
+      if (cancelled) return;
+      setNodes((current) =>
+        applyComputedPositions(
+          current,
+          computed,
+          layoutMode,
+          getSavedPositions(),
+        ),
+      );
 
-    if (!didInitialFitRef.current) {
-      didInitialFitRef.current = true;
-      requestAnimationFrame(() => void fitView({ padding: 0.12 }));
-    }
+      if (!didInitialFitRef.current) {
+        didInitialFitRef.current = true;
+        requestAnimationFrame(() => void fitView({ padding: 0.12 }));
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     measuredFingerprint,
     layoutMode,

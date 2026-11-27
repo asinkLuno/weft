@@ -1,0 +1,72 @@
+{
+  "name": "weft-language",
+  "displayName": "Weft Language Support",
+  "description": "Syntax highlighting and LSP support (diagnostics, completions, hover, goto-definition, rename, formatting) for the Weft (.weft) story language.",
+  "version": "0.1.0",
+  "publisher": "weft",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters"
+  ],
+  "activationEvents": [
+    "onLanguage:weft"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "weft",
+        "aliases": [
+          "Weft",
+          "weft"
+        ],
+        "extensions": [
+          ".weft"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "weft",
+        "scopeName": "source.weft",
+        "path": "./syntaxes/weft.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Weft",
+      "properties": {
+        "weft.executablePath": {
+          "type": "string",
+          "default": "weft",
+          "description": "Path to the `weft` CLI executable."
+        },
+        "weft.lang": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "zh",
+            "en"
+          ],
+          "default": "auto",
+          "description": "Locale for diagnostics and hover documentation (`auto` follows VS Code / system locale)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.8.0"
+  }
+}

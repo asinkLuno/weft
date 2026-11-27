@@ -149,6 +149,7 @@ export const EventsGantt = memo(function EventsGantt({
     end: 100,
   });
   const gridPaddingRef = useRef(0);
+  const containerWidthRef = useRef(600);
   const lastTicksRef = useRef<number[]>([]);
   const themeRef = useRef(theme);
   const appliedThemeRef = useRef(theme);
@@ -461,7 +462,7 @@ export const EventsGantt = memo(function EventsGantt({
 
       const gridWidth = Math.max(
         120,
-        container.clientWidth - gridPaddingRef.current,
+        containerWidthRef.current - gridPaddingRef.current,
       );
       const deltaPx = wheelDeltaToPx(event, gridWidth);
       if (deltaPx === 0) return;
@@ -494,10 +495,12 @@ export const EventsGantt = memo(function EventsGantt({
     const container = containerRef.current;
     if (!container) return;
     let lastWidth = container.clientWidth;
+    if (lastWidth > 0) containerWidthRef.current = lastWidth;
 
     const observer = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect;
       if (!rect || rect.width <= 0 || rect.height <= 0) return;
+      containerWidthRef.current = rect.width;
       const chart = chartRef.current;
       if (!chart || chart.isDisposed()) return;
       chart.resize();

@@ -92,7 +92,7 @@ pub(crate) fn validate_entities_static(
                     Some(*span),
                 );
                 if let Some(suggestion) = suggest_similar(parent, &entity_names) {
-                    diag = diag.with_help(format!("did you mean `{suggestion}`?"));
+                    diag = diag.with_suggestion(suggestion);
                 }
                 diagnostics.push(diag);
             }
@@ -111,7 +111,7 @@ pub(crate) fn validate_entities_static(
                         Some(*span),
                     );
                     if let Some(suggestion) = suggest_similar(id, &entity_names) {
-                        diag = diag.with_help(format!("did you mean `{suggestion}`?"));
+                        diag = diag.with_suggestion(suggestion);
                     }
                     diagnostics.push(diag);
                 }

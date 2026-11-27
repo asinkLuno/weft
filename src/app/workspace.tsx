@@ -6,10 +6,22 @@ import {
   themeLight,
 } from "dockview-react";
 import { FileText, RotateCcw, X as XIcon } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { DiskStatus, DraftStore } from "@/features/document/use-document";
-import type { WeftDeclKind } from "@/features/editor/weft-completion";
-import { type CompileDiagnostic, type Lang, strings } from "@/i18n";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import type {
+  DiskStatus,
+  DraftStore,
+  FlashStore,
+} from "@/features/document/use-document";
+import type { WeftDeclKind } from "@/features/editor/weft-ls-client";
+import { type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 import { settings } from "@/lib/settings";
 import type { ResolvedTheme } from "@/lib/theme";
@@ -66,17 +78,99 @@ const WorkspaceDockview = memo(function WorkspaceDockview({
   );
 });
 
+// 仅底栏订阅保存闪烁状态，避免保存瞬间引起整个 Workspace 重渲染
+const WorkspaceFooter = memo(function WorkspaceFooter({
+  path,
+  flashStore,
+  dirty,
+  diskStatus,
+  lang,
+  onResetLayout,
+  onClose,
+}: {
+  path: string;
+  flashStore: FlashStore;
+  dirty: boolean;
+  diskStatus: DiskStatus;
+  lang: Lang;
+  onResetLayout: () => void;
+  onClose: () => void;
+}) {
+  const flash = useSyncExternalStore(
+    flashStore.subscribe,
+    flashStore.getSnapshot,
+  );
+  const t = strings[lang];
+  const tone = documentToneOf(dirty, diskStatus);
+  const toneStyle = DOCUMENT_TONE_STYLE[tone];
+  const isBadgeStatus = tone === "modified" || tone === "deleted";
+  const statusLabel =
+    diskStatus === "deleted"
+      ? t.statusDeleted
+      : diskStatus === "modified"
+        ? t.statusConflict
+        : dirty
+          ? t.unsaved
+          : t.saved;
+
+  return (
+    <footer
+      className={`flex h-8 shrink-0 items-center gap-2 border-t border-base-300 px-3 text-xs text-base-content/60 transition-colors ${
+        flash ? "bg-base-300" : "bg-base-200"
+      }`}
+    >
+      {FOOTER_FILE_ICON}
+      <span className="min-w-0 flex-1 truncate font-mono" title={path}>
+        {path}
+      </span>
+      {isBadgeStatus ? (
+        <span className={`shrink-0 whitespace-nowrap ${toneStyle.label}`}>
+          {statusLabel}
+        </span>
+      ) : (
+        <span
+          className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap ${toneStyle.label}`}
+        >
+          <span
+            className={`size-1.5 rounded-full ${toneStyle.dot}`}
+            aria-hidden="true"
+          />
+          {statusLabel}
+        </span>
+      )}
+      <button
+        type="button"
+        className="btn btn-ghost btn-xs btn-square"
+        aria-label={t.resetLayout}
+        title={t.resetLayout}
+        onClick={onResetLayout}
+      >
+        {FOOTER_RESET_ICON}
+      </button>
+      <button
+        type="button"
+        className="btn btn-ghost btn-xs btn-square"
+        aria-label={t.close}
+        title={t.close}
+        onClick={onClose}
+      >
+        {FOOTER_CLOSE_ICON}
+      </button>
+    </footer>
+  );
+});
+
 export function Workspace({
   path,
   doc,
-  diagnostic,
   draftStore,
+  flashStore,
   dirty,
   saving,
   diskStatus,
   lang,
   theme,
-  flash,
+  formatOnSave,
   onDraftChange,
   onSave,
   onForceSave,
@@ -85,26 +179,31 @@ export function Workspace({
 }: {
   path: string;
   doc: WeftDoc | null;
-  diagnostic: CompileDiagnostic | null;
   draftStore: DraftStore;
+  flashStore: FlashStore;
   dirty: boolean;
   saving: boolean;
   diskStatus: DiskStatus;
   lang: Lang;
   theme: ResolvedTheme;
-  flash: boolean;
+  formatOnSave: boolean;
   onDraftChange: (next: string) => void;
   onSave: () => Promise<boolean>;
   onForceSave: () => Promise<boolean>;
   onReloadFromDisk: () => Promise<void>;
   onClose: () => void;
 }) {
-  const t = strings[lang];
   const apiRef = useRef<DockviewApi | null>(null);
   const cleanupDockRef = useRef<(() => void) | null>(null);
   const langRef = useRef(lang);
   const restoringLayout = useRef(false);
-  const saveActionRef = useRef({ dirty, saving, diskStatus, onSave });
+  const saveActionRef = useRef({
+    dirty,
+    saving,
+    diskStatus,
+    formatOnSave,
+    onSave,
+  });
   const persistTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
@@ -116,7 +215,7 @@ export function Workspace({
 
   // 快捷键回调读最新动作：渲染期不写 ref，放到提交阶段同步
   useEffect(() => {
-    saveActionRef.current = { dirty, saving, diskStatus, onSave };
+    saveActionRef.current = { dirty, saving, diskStatus, formatOnSave, onSave };
   });
 
   useEffect(() => {
@@ -141,9 +240,10 @@ export function Workspace({
           dirty: isDirty,
           saving: isSaving,
           diskStatus: status,
+          formatOnSave: isFormatOnSave,
           onSave: save,
         } = saveActionRef.current;
-        if ((isDirty || status === "deleted") && !isSaving) {
+        if ((isDirty || status === "deleted" || isFormatOnSave) && !isSaving) {
           void save();
         }
       }
@@ -234,7 +334,6 @@ export function Workspace({
   const editorContextValue = useMemo(
     () => ({
       draftStore,
-      diagnostic,
       dirty,
       saving,
       diskStatus,
@@ -246,7 +345,6 @@ export function Workspace({
     }),
     [
       draftStore,
-      diagnostic,
       dirty,
       saving,
       diskStatus,
@@ -258,24 +356,14 @@ export function Workspace({
     ],
   );
 
-  function handleResetLayout() {
+  const handleResetLayout = useCallback(() => {
     const api = apiRef.current;
     if (!api) return;
-    applyDefaultLayout(api, lang);
+    applyDefaultLayout(api, langRef.current);
     schedulePersistLayout(api);
-  }
+  }, [schedulePersistLayout]);
 
   const tone = documentToneOf(dirty, diskStatus);
-  const toneStyle = DOCUMENT_TONE_STYLE[tone];
-  const isBadgeStatus = tone === "modified" || tone === "deleted";
-  const statusLabel =
-    diskStatus === "deleted"
-      ? t.statusDeleted
-      : diskStatus === "modified"
-        ? t.statusConflict
-        : dirty
-          ? t.unsaved
-          : t.saved;
 
   return (
     <div
@@ -294,49 +382,15 @@ export function Workspace({
         </WorkspaceDocContext.Provider>
       </main>
 
-      <footer
-        className={`flex h-8 shrink-0 items-center gap-2 border-t border-base-300 px-3 text-xs text-base-content/60 transition-colors ${
-          flash ? "bg-base-300" : "bg-base-200"
-        }`}
-      >
-        {FOOTER_FILE_ICON}
-        <span className="min-w-0 flex-1 truncate font-mono" title={path}>
-          {path}
-        </span>
-        {isBadgeStatus ? (
-          <span className={`shrink-0 whitespace-nowrap ${toneStyle.label}`}>
-            {statusLabel}
-          </span>
-        ) : (
-          <span
-            className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap ${toneStyle.label}`}
-          >
-            <span
-              className={`size-1.5 rounded-full ${toneStyle.dot}`}
-              aria-hidden="true"
-            />
-            {statusLabel}
-          </span>
-        )}
-        <button
-          type="button"
-          className="btn btn-ghost btn-xs btn-square"
-          aria-label={t.resetLayout}
-          title={t.resetLayout}
-          onClick={handleResetLayout}
-        >
-          {FOOTER_RESET_ICON}
-        </button>
-        <button
-          type="button"
-          className="btn btn-ghost btn-xs btn-square"
-          aria-label={t.close}
-          title={t.close}
-          onClick={onClose}
-        >
-          {FOOTER_CLOSE_ICON}
-        </button>
-      </footer>
+      <WorkspaceFooter
+        path={path}
+        flashStore={flashStore}
+        dirty={dirty}
+        diskStatus={diskStatus}
+        lang={lang}
+        onResetLayout={handleResetLayout}
+        onClose={onClose}
+      />
     </div>
   );
 }

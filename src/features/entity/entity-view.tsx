@@ -12,7 +12,7 @@ import {
   useState,
 } from "react";
 import { EmptyState } from "@/components/empty-state";
-import type { WeftDeclKind } from "@/features/editor/weft-completion";
+import type { WeftDeclKind } from "@/features/editor/weft-ls-client";
 import { type Lang, strings } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 import { settings } from "@/lib/settings";

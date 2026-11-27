@@ -2,13 +2,11 @@
 
 use std::{fmt, ops::Range};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
-#[cfg(feature = "ts-export")]
-use ts_rs::TS;
 
 /// UTF-8 字节区间（语言内核唯一位置真相；终端渲染和编辑器按需换算行列或 UTF-16）。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ByteSpan {
     pub start: usize,
     pub end: usize,
@@ -65,7 +63,6 @@ pub(crate) fn clamp_char_boundary(src: &str, offset: usize) -> usize {
 
 /// 源码定位信息（UTF-16 偏移对齐 CodeMirror；1-based 行列号用于日志展示）。
 #[derive(Clone, Debug, Serialize)]
-#[cfg_attr(feature = "ts-export", derive(TS))]
 pub struct SourceSpan {
     pub start: usize,
     pub end: usize,
@@ -77,11 +74,9 @@ pub struct SourceSpan {
 
 /// 交付给前端编辑器的单条编译诊断。
 #[derive(Clone, Debug, Serialize)]
-#[cfg_attr(feature = "ts-export", derive(TS))]
 pub struct CompileDiagnostic {
     pub error: ValidationError,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "ts-export", ts(optional))]
     pub span: Option<SourceSpan>,
 }
 
@@ -112,6 +107,8 @@ pub struct Diagnostic {
     pub related: Vec<RelatedSpan>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub help: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestion: Option<String>,
     #[serde(skip)]
     pub error: Option<ValidationError>,
 }
@@ -127,6 +124,7 @@ impl Diagnostic {
             span,
             related: Vec::new(),
             help: None,
+            suggestion: None,
             error: Some(error),
         }
     }
@@ -139,6 +137,7 @@ impl Diagnostic {
             span,
             related: Vec::new(),
             help: None,
+            suggestion: None,
             error: None,
         }
     }
@@ -156,8 +155,28 @@ impl Diagnostic {
         self
     }
 
+    pub fn with_suggestion(mut self, suggestion: impl Into<String>) -> Self {
+        let suggestion = suggestion.into();
+        self.help = Some(format!("did you mean `{suggestion}`?"));
+        self.suggestion = Some(suggestion);
+        self
+    }
+
     pub fn is_error(&self) -> bool {
         self.severity == Severity::Error
+    }
+
+    pub fn localize(&mut self, lang: &str) {
+        if let Some(err) = &self.error {
+            self.message = err.message_for(lang);
+        }
+        if let Some(suggestion) = &self.suggestion {
+            self.help = Some(if lang == "zh" {
+                format!("是不是想写 `{suggestion}`？")
+            } else {
+                format!("did you mean `{suggestion}`?")
+            });
+        }
     }
 
     pub fn to_compile_diagnostic(&self, src: &str) -> Option<CompileDiagnostic> {
@@ -167,9 +186,8 @@ impl Diagnostic {
     }
 }
 
-// 校验错误的唯一代码定义。Serde 和 ts-rs 共用这些变体名与参数字段。
+// 校验错误的唯一代码定义。
 #[derive(Clone, Debug, Error, Serialize)]
-#[cfg_attr(feature = "ts-export", derive(TS))]
 #[serde(tag = "code", content = "params", rename_all = "snake_case")]
 pub enum ValidationError {
     #[error("syntax error: {details}")]
@@ -349,6 +367,128 @@ impl ValidationError {
             Self::TimeOffsetOutOfRange => "time-offset-out-of-range",
             Self::TimeComponentBelowMinimum { .. } => "time-component-below-minimum",
             Self::CalendarRoundTripMismatch { .. } => "calendar-round-trip-mismatch",
+        }
+    }
+
+    /// 按语言（`zh` / `en`）渲染面向用户的错误消息，作为 CLI、LSP 与桌面端的单一事实来源。
+    pub fn message_for(&self, lang: &str) -> String {
+        if lang != "zh" {
+            return self.to_string();
+        }
+        match self {
+            Self::SyntaxError { details } => format!("语法错误：{details}"),
+            Self::MissingStory => "缺少必填的 story 块".to_owned(),
+            Self::DuplicateStory => "重复声明了 story 块".to_owned(),
+            Self::DuplicateEntity { entity } => format!("重复声明了实体 `{entity}`"),
+            Self::DuplicateEvent { event } => format!("重复声明了事件 `{event}`"),
+            Self::DuplicateEvents { events } => format!("重复声明了事件列表 `{events}`"),
+            Self::DuplicateTimeAnchor { name } => format!("重复声明了时间锚点 `{name}`"),
+            Self::MissingField { section, field } => {
+                format!("{section} 缺少必填字段 `{field}`")
+            }
+            Self::InvalidField {
+                section,
+                field,
+                reason,
+            } => format!("{section} 的字段 `{field}` 值无效：{reason}"),
+            Self::UnknownField { section, field } => {
+                format!("{section} 包含未知字段 `{field}`")
+            }
+            Self::UnknownTimeRef { reference } => format!("引用了不存在的时间 `{reference}`"),
+            Self::TimeCycle { target } => format!("时间引用 `{target}` 形成了循环"),
+            Self::UnknownLinkEntity { group, entity } => {
+                format!("link `{group}` 引用了不存在的实体 `{entity}`")
+            }
+            Self::UnknownEventEntity { event, entity } => {
+                format!("event `{event}` 引用了不存在的实体 `{entity}`")
+            }
+            Self::UnknownEventsEvent { events, event } => {
+                format!("事件列表 `{events}` 引用了不存在的事件 `{event}`")
+            }
+            Self::EntityUnknownParent { entity, target } => {
+                format!("entity `{entity}` belong_to 引用了不存在的实体 `{target}`")
+            }
+            Self::EntityCycle { entity } => {
+                format!("entity `{entity}` 的 belong_to 形成了循环")
+            }
+            Self::InvalidAvatarPath { entity, path } => {
+                format!("entity `{entity}` 的 avatar `{path}` 必须指向已存在的图片文件")
+            }
+            Self::TimeNonemptyList => "时间必须是非空整数列表或有效时间表达式".to_owned(),
+            Self::TimeIntegerComponent => "时间分量必须是整数".to_owned(),
+            Self::TimeNestingTooDeep { maximum } => {
+                format!("时间锚点嵌套超过最大深度 {maximum}")
+            }
+            Self::EventEndBeforeStart { event } => {
+                format!("事件 `{event}` 的结束时间早于开始时间")
+            }
+            Self::InvalidCalendarPath { path } => {
+                format!("历法路径 `{path}` 必须指向现有的 .rn 文件")
+            }
+            Self::InvalidCalculablePropPath { prop, path } => {
+                format!("可计算属性 `{prop}` 的路径 `{path}` 必须指向现有的 .rn 文件")
+            }
+            Self::CalculablePropFileRead { prop, details } => {
+                format!("读取可计算属性 `{prop}` 的脚本失败：{details}")
+            }
+            Self::CalculablePropCompile { prop, details } => {
+                format!("可计算属性 `{prop}` 编译失败：{details}")
+            }
+            Self::CalculablePropMissingInterface { prop, functions } => {
+                format!("可计算属性 `{prop}` 缺少公开接口：{functions}")
+            }
+            Self::UnknownCalculableProp { prop } => {
+                format!("引用了未注册的可计算属性 `{prop}`")
+            }
+            Self::CalculablePropArgument { prop, details } => {
+                format!("可计算属性 `{prop}` 入参转换失败：{details}")
+            }
+            Self::CalculablePropCall {
+                prop,
+                entry,
+                details,
+            } => format!("可计算属性 `{prop}` 的 `{entry}` 执行失败：{details}"),
+            Self::CalculablePropInvalidReturn {
+                prop,
+                entry,
+                expected,
+            } => format!("可计算属性 `{prop}` 的 `{entry}` 返回值无效，预期 {expected}"),
+            Self::CalendarComponentsOutOfRange { calendar } => {
+                format!("历法 `{calendar}` 的分量数必须在 1 到 64 之间")
+            }
+            Self::CalendarFileRead { calendar, details } => {
+                format!("读取历法 `{calendar}` 的脚本失败：{details}")
+            }
+            Self::CalendarCompile { calendar, details } => {
+                format!("历法 `{calendar}` 编译失败：{details}")
+            }
+            Self::CalendarMissingInterface {
+                calendar,
+                functions,
+            } => format!("历法 `{calendar}` 缺少公开接口：{functions}"),
+            Self::CalendarCall {
+                calendar,
+                entry,
+                details,
+            } => format!("历法 `{calendar}` 的 `{entry}` 执行失败：{details}"),
+            Self::CalendarInvalidReturn { calendar, entry } => {
+                format!("历法 `{calendar}` 的 `{entry}` 返回值无效")
+            }
+            Self::TooManyTimeComponents { actual, maximum } => {
+                format!("时间分量过多：{actual} 个，该历法最多 {maximum} 个")
+            }
+            Self::NormalizeWrongComponentCount { expected } => {
+                format!("from_tick 必须返回 {expected} 个时间分量")
+            }
+            Self::TimeOffsetOutOfRange => "时间偏移超出整数范围".to_owned(),
+            Self::TimeComponentBelowMinimum {
+                position,
+                value,
+                minimum,
+            } => format!("第 {position} 个时间分量为 {value}，低于该历法允许的最小值 {minimum}"),
+            Self::CalendarRoundTripMismatch { calendar } => {
+                format!("历法 `{calendar}` 的 to_tick(from_tick(tick)) 未能还原同一刻度")
+            }
         }
     }
 }

@@ -8,21 +8,23 @@ const Workspace = lazy(() =>
   loadWorkspace().then((m) => ({ default: m.Workspace })),
 );
 
+// 并行预热 Workspace 与默认首屏挂载的编辑器 chunk，消除点开文件后的二次瀑布
 function preloadWorkspace() {
   void loadWorkspace();
+  void import("@/features/editor/weft-editor-view");
 }
 
 export default function App() {
-  const { lang, theme, recents, remember, forget } = useAppSettings();
+  const { lang, theme, formatOnSave, recents, remember, forget } =
+    useAppSettings();
   const {
     path,
     doc,
-    diagnostic,
     draftStore,
+    flashStore,
     dirty,
     saving,
     diskStatus,
-    flash,
     bind,
     updateDraft,
     save,
@@ -52,14 +54,14 @@ export default function App() {
         key={path}
         path={path}
         doc={doc}
-        diagnostic={diagnostic}
         draftStore={draftStore}
         dirty={dirty}
         saving={saving}
         diskStatus={diskStatus}
         lang={lang}
         theme={theme}
-        flash={flash}
+        formatOnSave={formatOnSave}
+        flashStore={flashStore}
         onDraftChange={updateDraft}
         onSave={save}
         onForceSave={forceSave}

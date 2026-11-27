@@ -21,9 +21,16 @@ import {
   type ThemeMode,
 } from "@/lib/theme";
 
+type AppSettingsPayload = {
+  language?: unknown;
+  theme?: unknown;
+  formatOnSave?: unknown;
+};
+
 export function useAppSettings() {
   const [lang, setLang] = useState<Lang>(initialLang);
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
+  const [formatOnSave, setFormatOnSave] = useState(false);
   const followSystem = themeMode === "system";
   // 仅在跟随系统时订阅 prefers-color-scheme，固定浅色/深色时系统切换不触发重渲染
   const systemDark = useSyncExternalStore(
@@ -44,7 +51,8 @@ export function useAppSettings() {
     let cancelled = false;
     let languageChanged = false;
     let themeChanged = false;
-    const subscription = listen<{ language?: unknown; theme?: unknown }>(
+    let formatOnSaveChanged = false;
+    const subscription = listen<AppSettingsPayload>(
       "settings-changed",
       ({ payload }) => {
         if (cancelled) return;
@@ -58,35 +66,53 @@ export function useAppSettings() {
           themeChanged = true;
           setThemeMode(nextTheme);
         }
+        if (typeof payload.formatOnSave === "boolean") {
+          formatOnSaveChanged = true;
+          setFormatOnSave(payload.formatOnSave);
+        }
       },
     );
-    // 与 listen 并行：*Changed 已经挡住"事件先到、旧值后到"的覆盖
-    void invoke<unknown>("get_language")
-      .then((value) => {
-        if (cancelled || languageChanged) return;
-        const next = asLang(value);
-        if (next) setLang(next);
-      })
-      .catch(console.error);
-    void invoke<unknown>("get_theme")
-      .then((value) => {
-        if (cancelled || themeChanged) return;
-        const next = asThemeMode(value);
-        if (next) setThemeMode(next);
-      })
-      .catch(console.error);
-    void settings
-      .get<unknown>("recentFiles")
-      .then((value) => {
-        if (cancelled || recentsChanged.current || !Array.isArray(value))
-          return;
-        const next = value.filter(
-          (item): item is string => typeof item === "string",
-        );
-        recentFiles.current = next;
-        setRecents(next);
-      })
-      .catch(console.error);
+
+    // 合并启动 IPC 与本地存储读取，在同一次微任务里批量更新状态（避免 4 次连续根重渲染）
+    void Promise.allSettled([
+      invoke<AppSettingsPayload>("get_app_settings"),
+      settings.get<unknown>("recentFiles"),
+    ]).then(([settingsRes, recentsRes]) => {
+      if (cancelled) return;
+      if (settingsRes.status === "fulfilled") {
+        const appSettings = settingsRes.value;
+        if (!languageChanged) {
+          const next = asLang(appSettings.language);
+          if (next) setLang(next);
+        }
+        if (!themeChanged) {
+          const next = asThemeMode(appSettings.theme);
+          if (next) setThemeMode(next);
+        }
+        if (
+          !formatOnSaveChanged &&
+          typeof appSettings.formatOnSave === "boolean"
+        ) {
+          setFormatOnSave(appSettings.formatOnSave);
+        }
+      } else {
+        console.error("get_app_settings failed:", settingsRes.reason);
+      }
+
+      if (recentsRes.status === "fulfilled") {
+        const value = recentsRes.value;
+        if (!recentsChanged.current && Array.isArray(value)) {
+          const next = value.filter(
+            (item): item is string => typeof item === "string",
+          );
+          recentFiles.current = next;
+          setRecents(next);
+        }
+      } else {
+        console.error("recentFiles load failed:", recentsRes.reason);
+      }
+    });
+
     return () => {
       cancelled = true;
       void subscription.then((unlisten) => unlisten()).catch(console.error);
@@ -119,5 +145,5 @@ export function useAppSettings() {
     [updateRecents],
   );
 
-  return { lang, theme, recents, remember, forget };
+  return { lang, theme, formatOnSave, recents, remember, forget };
 }

@@ -13,7 +13,7 @@ import {
   DetailTimeRow,
   EntityAvatar,
 } from "@/components/detail-panel";
-import type { WeftDeclKind } from "@/features/editor/weft-completion";
+import type { WeftDeclKind } from "@/features/editor/weft-ls-client";
 import { type Lang, strings } from "@/i18n";
 import type { EventDetail } from "./model";
 
@@ -124,7 +124,10 @@ export const EventDetailPanel = memo(function EventDetailPanel({
         <DetailSection title={t.ganttEntities} icon={Users}>
           <ul className="flex flex-col gap-1.5">
             {detail.entities.map((entity) => (
-              <li key={entity.id}>
+              <li
+                key={entity.id}
+                className="[content-visibility:auto] [contain-intrinsic-size:auto_56px]"
+              >
                 <button
                   type="button"
                   className="flex w-full cursor-pointer items-start gap-2 rounded-box border border-base-300/80 bg-base-200/40 p-2 text-left transition-colors hover:border-primary/50 hover:bg-base-200/70"

@@ -20,6 +20,7 @@ pub const LINT_RULES: &[&str] = &[
 ];
 
 pub(crate) struct LintContext<'a> {
+    pub lang: &'a str,
     pub anchors: &'a BTreeMap<String, ByteSpan>,
     pub used_anchors: &'a HashSet<String>,
     pub entities: &'a BTreeMap<String, RawEntity>,
@@ -37,23 +38,31 @@ pub(crate) fn run_lints(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>
 }
 
 fn lint_unused_anchors(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
+    let zh = ctx.lang == "zh";
     for (name, span) in ctx.anchors {
         if !ctx.used_anchors.contains(name) {
-            diagnostics.push(Diagnostic::warning(
-                "unused-time-anchor",
-                format!("time anchor `{name}` is declared but never used"),
-                Some(*span),
-            ));
+            let msg = if zh {
+                format!("时间锚点 `{name}` 已声明但从未被使用")
+            } else {
+                format!("time anchor `{name}` is declared but never used")
+            };
+            diagnostics.push(Diagnostic::warning("unused-time-anchor", msg, Some(*span)));
         }
     }
 }
 
 fn lint_links(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
+    let zh = ctx.lang == "zh";
     for (group, edges) in ctx.links {
         if edges.is_empty() {
+            let msg = if zh {
+                format!("关系组 `{group}` 为空")
+            } else {
+                format!("link block `{group}` is empty")
+            };
             diagnostics.push(Diagnostic::warning(
                 "empty-block",
-                format!("link block `{group}` is empty"),
+                msg,
                 ctx.link_group_spans.get(group).copied(),
             ));
             continue;
@@ -61,14 +70,15 @@ fn lint_links(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
         let mut seen: HashMap<(&str, &str, &str), ByteSpan> = HashMap::new();
         for edge in edges {
             if edge.left.0 == edge.right.0 {
-                diagnostics.push(Diagnostic::warning(
-                    "self-link",
+                let msg = if zh {
+                    format!("关系组 `{group}` 将实体 `{}` 连向了自身", edge.left.0)
+                } else {
                     format!(
                         "link `{group}` connects entity `{}` to itself",
                         edge.left.0
-                    ),
-                    Some(edge.span),
-                ));
+                    )
+                };
+                diagnostics.push(Diagnostic::warning("self-link", msg, Some(edge.span)));
             }
             let key = (
                 edge.left.0.as_str(),
@@ -76,16 +86,25 @@ fn lint_links(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
                 edge.right.0.as_str(),
             );
             if let Some(&first_span) = seen.get(&key) {
-                diagnostics.push(
-                    Diagnostic::warning(
-                        "duplicate-link",
-                        format!(
-                            "duplicate link edge `{} -- \"{}\" -- {}` in `{group}`",
-                            edge.left.0, edge.relations, edge.right.0
-                        ),
-                        Some(edge.span),
+                let msg = if zh {
+                    format!(
+                        "关系组 `{group}` 重复声明了边 `{} -- \"{}\" -- {}`",
+                        edge.left.0, edge.relations, edge.right.0
                     )
-                    .with_related(first_span, "first declared here"),
+                } else {
+                    format!(
+                        "duplicate link edge `{} -- \"{}\" -- {}` in `{group}`",
+                        edge.left.0, edge.relations, edge.right.0
+                    )
+                };
+                let rel_msg = if zh {
+                    "首次声明于此"
+                } else {
+                    "first declared here"
+                };
+                diagnostics.push(
+                    Diagnostic::warning("duplicate-link", msg, Some(edge.span))
+                        .with_related(first_span, rel_msg),
                 );
             } else {
                 seen.insert(key, edge.span);
@@ -98,6 +117,7 @@ fn lint_unused_entities(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>
     if ctx.events.is_empty() && ctx.links.is_empty() {
         return;
     }
+    let zh = ctx.lang == "zh";
     let mut referenced: HashSet<&str> = HashSet::new();
     for raw in ctx.entities.values() {
         for (parent, _) in &raw.belong_to {
@@ -117,24 +137,27 @@ fn lint_unused_entities(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>
     }
     for (id, raw) in ctx.entities {
         if !referenced.contains(id.as_str()) {
-            diagnostics.push(Diagnostic::warning(
-                "unused-entity",
-                format!("entity `{id}` is never referenced by any event, link, or belong_to"),
-                Some(raw.name_span),
-            ));
+            let msg = if zh {
+                format!("实体 `{id}` 未被任何事件、关系或 belong_to 引用")
+            } else {
+                format!("entity `{id}` is never referenced by any event, link, or belong_to")
+            };
+            diagnostics.push(Diagnostic::warning("unused-entity", msg, Some(raw.name_span)));
         }
     }
 }
 
 fn lint_event_lists_and_events(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
+    let zh = ctx.lang == "zh";
     let mut referenced_events: HashSet<&str> = HashSet::new();
     for (name, (name_span, refs)) in ctx.event_lists {
         if refs.is_empty() {
-            diagnostics.push(Diagnostic::warning(
-                "empty-block",
-                format!("events `{name}` is empty"),
-                Some(*name_span),
-            ));
+            let msg = if zh {
+                format!("事件列表 `{name}` 为空")
+            } else {
+                format!("events `{name}` is empty")
+            };
+            diagnostics.push(Diagnostic::warning("empty-block", msg, Some(*name_span)));
         }
         for (ev, _) in refs {
             referenced_events.insert(ev.as_str());
@@ -146,9 +169,14 @@ fn lint_event_lists_and_events(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diag
     }
     for (id, raw) in ctx.events {
         if !referenced_events.contains(id.as_str()) {
+            let msg = if zh {
+                format!("事件 `{id}` 未被任何事件列表收录")
+            } else {
+                format!("event `{id}` is not included in any events")
+            };
             diagnostics.push(Diagnostic::warning(
                 "unreferenced-event",
-                format!("event `{id}` is not included in any events"),
+                msg,
                 Some(raw.name_span),
             ));
         }

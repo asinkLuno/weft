@@ -1,0 +1,132 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Weft",
+  "scopeName": "source.weft",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#declarations" },
+    { "include": "#properties" },
+    { "include": "#members" },
+    { "include": "#atoms" },
+    { "include": "#numbers" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.weft",
+          "begin": "/\\*",
+          "end": "\\*/"
+        },
+        {
+          "name": "comment.line.number-sign.weft",
+          "match": "#.*$"
+        },
+        {
+          "name": "comment.line.double-slash.weft",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.triple.weft",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.weft",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.weft",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.weft",
+              "match": "\\\\([\\\\\"nrt])"
+            }
+          ]
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "^\\s*(story)\\b",
+          "captures": {
+            "1": { "name": "keyword.declaration.story.weft" }
+          }
+        },
+        {
+          "match": "^\\s*(entity|event|events|link|time)\\s+(\"[^\"]+\"|[\\p{L}_][\\p{L}\\p{N}_·・]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.weft" },
+            "2": { "name": "entity.name.type.weft" }
+          }
+        }
+      ]
+    },
+    "properties": {
+      "patterns": [
+        {
+          "match": "\\b(title|author|description|date_mode|calculable_props|avatar|base_time|belong_to|start|end|entities)\\b(?=\\s*=)",
+          "captures": {
+            "1": { "name": "support.type.property-name.weft" }
+          }
+        },
+        {
+          "match": "([\\p{L}_][\\p{L}\\p{N}_·・]*)(?=\\s*=)",
+          "captures": {
+            "1": { "name": "variable.other.property.weft" }
+          }
+        }
+      ]
+    },
+    "members": {
+      "patterns": [
+        {
+          "match": "(\\.)(start|end|base_time)\\b",
+          "captures": {
+            "1": { "name": "punctuation.accessor.weft" },
+            "2": { "name": "support.variable.property.weft" }
+          }
+        }
+      ]
+    },
+    "atoms": {
+      "patterns": [
+        {
+          "name": "constant.language.weft",
+          "match": "\\b(true|false|null)\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.weft",
+          "match": "\\b[0-9]+(?:\\.[0-9]+)?\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.link.weft",
+          "match": "--"
+        },
+        {
+          "name": "keyword.operator.weft",
+          "match": "[+\\-=]"
+        }
+      ]
+    }
+  }
+}

@@ -1,6 +1,6 @@
-# weft CLI：检查与格式化
+# weft CLI：检查、编译、格式化与 LSP
 
-`crates/weft-cli` 提供 `weft` 命令，负责三件事：编译检查（语法 + 语义 + lint）、格式化、列出 lint 规则。语言本身见 [Weft 语言指南](weft-syntax.md)。
+`crates/weft-cli` 提供 `weft` 命令，负责五件事：编译检查（`check`）、编译导出 JSON（`build`）、格式化（`fmt`）、启动语言服务器（`lsp`）、列出 lint 规则（`rules`）。语言本身见 [Weft 语言指南](weft-syntax.md)。
 
 ## 安装与调用
 
@@ -18,7 +18,9 @@
 
 ```bash
 cargo run -- check .          # 编译检查
+cargo run -- build story.weft # 编译为结构化 JSON
 cargo run -- fmt .            # 原地格式化
+cargo run -- lsp              # 启动 LSP 3.17 语言服务器（stdio）
 cargo run -- rules            # 列出 lint 规则
 ```
 
@@ -63,6 +65,27 @@ weft check - < story.weft             # 从 stdin 读
 - `json`：诊断数组，字段稳定，适合自己写工具消费。
 
 没有诊断时退出码为 0；有错误时为 1；`--deny-warnings` 下出现警告也是 1。路径无法收集、文件读不了等环境问题退出码为 2，和“代码有问题”区分开。
+
+## build：编译导出 JSON
+
+```bash
+weft build story.weft                     # 编译并输出美化 JSON 到 stdout
+weft build story.weft -o dist/story.json  # 写入文件
+weft build story.weft --compact           # 单行紧凑 JSON
+weft build story.weft --lang en           # 指定历法与诊断语言
+weft compile story.weft                   # compile 是 build 的别名
+```
+
+会执行完整的 `.rn` 历法与可计算属性脚本，输出供外部工具、脚本或静态站点消费的 `WeftDoc` JSON。存在编译错误时打印诊断并以退出码 1 退出。
+
+## lsp：语言服务器（LSP 3.17）
+
+```bash
+weft lsp              # 按系统 locale 启动 stdio LSP 服务器
+weft lsp --lang zh    # 强制中文诊断与 Hover 文档
+```
+
+提供实时诊断（含 lint 警告与 Quick Fix）、上下文补全、Hover（含历法时间求解结果）、跳转定义、查找引用、符号重命名、文档大纲与格式化。VS Code 扩展位于仓库的 `editors/vscode/` 目录，其他编辑器（Neovim / Zed / Helix）直接配置启动 `weft lsp` 即可。
 
 ## rules：规则清单
 

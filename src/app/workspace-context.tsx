@@ -1,7 +1,7 @@
 import { createContext, useContext } from "react";
 import type { DiskStatus, DraftStore } from "@/features/document/use-document";
-import type { WeftDeclKind } from "@/features/editor/weft-completion";
-import type { CompileDiagnostic, Lang } from "@/i18n";
+import type { WeftDeclKind } from "@/features/editor/weft-ls-client";
+import type { Lang } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 import type { ResolvedTheme } from "@/lib/theme";
 import type { DocumentTone } from "@/lib/ui";
@@ -21,7 +21,6 @@ export type WorkspaceDocState = {
 
 export type WorkspaceEditorState = {
   draftStore: DraftStore;
-  diagnostic: CompileDiagnostic | null;
   dirty: boolean;
   saving: boolean;
   diskStatus: DiskStatus;

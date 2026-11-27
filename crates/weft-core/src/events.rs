@@ -25,7 +25,7 @@ pub(crate) fn check_collecting(
                     Some(*span),
                 );
                 if let Some(suggestion) = suggest_similar(id, &event_names) {
-                    diag = diag.with_help(format!("did you mean `{suggestion}`?"));
+                    diag = diag.with_suggestion(suggestion);
                 }
                 diagnostics.push(diag);
             }

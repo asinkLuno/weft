@@ -76,6 +76,9 @@ impl CheckOutput {
 pub fn check_document(src: &str, base: &Path, options: &CheckOptions) -> CheckOutput {
     let (ast, mut diagnostics) = parse_weft_recover(src);
     let Some(ast) = ast else {
+        for diag in &mut diagnostics {
+            diag.localize(&options.lang);
+        }
         sort_diagnostics(&mut diagnostics);
         return CheckOutput {
             doc: None,
@@ -86,6 +89,9 @@ pub fn check_document(src: &str, base: &Path, options: &CheckOptions) -> CheckOu
 
     let scripts = extract_script_refs(&ast);
     let doc = analyze_ast(ast, base, options, &mut diagnostics);
+    for diag in &mut diagnostics {
+        diag.localize(&options.lang);
+    }
     sort_diagnostics(&mut diagnostics);
 
     let has_errors = diagnostics.iter().any(Diagnostic::is_error);
@@ -380,6 +386,7 @@ fn analyze_ast(
     // 静态 Lint 告警（unused / self-link / duplicate-link / empty-block）。
     run_lints(
         &LintContext {
+            lang: &options.lang,
             anchors: &anchor_spans,
             used_anchors: &used_anchors,
             entities: &raw_entities,

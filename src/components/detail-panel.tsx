@@ -14,6 +14,32 @@ const AVATAR_SIZE_CLASS = {
   lg: "w-10 text-xs",
 } as const;
 
+// 模块级共享单一 Escape 监听与栈：多面板分屏时按 Esc 只关闭最近打开的栈顶面板
+const escapeCloseStack: Array<() => void> = [];
+
+function handleGlobalEscape(event: KeyboardEvent) {
+  if (event.defaultPrevented || event.key !== "Escape") return;
+  const top = escapeCloseStack[escapeCloseStack.length - 1];
+  if (top) {
+    event.preventDefault();
+    top();
+  }
+}
+
+function registerEscapeHandler(handler: () => void): () => void {
+  if (escapeCloseStack.length === 0) {
+    window.addEventListener("keydown", handleGlobalEscape);
+  }
+  escapeCloseStack.push(handler);
+  return () => {
+    const idx = escapeCloseStack.lastIndexOf(handler);
+    if (idx !== -1) escapeCloseStack.splice(idx, 1);
+    if (escapeCloseStack.length === 0) {
+      window.removeEventListener("keydown", handleGlobalEscape);
+    }
+  };
+}
+
 export function EntityAvatar({
   name,
   avatar,
@@ -71,12 +97,7 @@ export function DetailPanel({
   }, [onClose]);
 
   useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.defaultPrevented) return;
-      if (event.key === "Escape") onCloseRef.current();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    return registerEscapeHandler(() => onCloseRef.current());
   }, []);
 
   return (

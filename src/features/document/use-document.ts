@@ -1,14 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CompileDiagnostic, Lang } from "@/i18n";
+import type { Lang } from "@/i18n";
 import type { WeftDoc } from "@/lib/document";
 
 export type DiskStatus = "synced" | "modified" | "deleted";
 
 type CompileResult =
   | { status: "ok"; doc: WeftDoc }
-  | { status: "invalid"; diagnostic: CompileDiagnostic }
+  | { status: "invalid" }
   | { status: "failed"; message: string };
 
 type OpenDocumentResult = {
@@ -28,13 +28,45 @@ type SaveResult =
   | { status: "saved"; content: string; compile: CompileResult }
   | { status: "conflict"; diskContent: string };
 
+/**
+ * 编辑器草稿容器：
+ * - `setFromEditor` 仅记录最新草稿，不通知外部订阅者，按键输入零 React 重渲染；
+ * - `setExternal` 用于打开/重载/保存格式化回写，通知 CodeMirror 同步文档。
+ */
 export type DraftStore = {
   getSnapshot: () => string;
+  subscribeExternal: (listener: () => void) => () => void;
+};
+
+export type FlashStore = {
+  getSnapshot: () => boolean;
   subscribe: (listener: () => void) => () => void;
 };
 
 function createDraftStore() {
   let value = "";
+  const externalListeners = new Set<() => void>();
+
+  return {
+    getSnapshot: () => value,
+    subscribeExternal: (listener: () => void) => {
+      externalListeners.add(listener);
+      return () => {
+        externalListeners.delete(listener);
+      };
+    },
+    setFromEditor: (next: string) => {
+      value = next;
+    },
+    setExternal: (next: string) => {
+      value = next;
+      for (const listener of externalListeners) listener();
+    },
+  };
+}
+
+function createFlashStore() {
+  let value = false;
   const listeners = new Set<() => void>();
 
   return {
@@ -45,7 +77,7 @@ function createDraftStore() {
         listeners.delete(listener);
       };
     },
-    set: (next: string) => {
+    set: (next: boolean) => {
       if (next === value) return;
       value = next;
       for (const listener of listeners) listener();
@@ -54,20 +86,18 @@ function createDraftStore() {
 }
 
 const WEFT_FILTER = { name: "Weft", extensions: ["weft"] };
-const CHECK_DEBOUNCE_MS = 250;
 
-// 编辑草稿与已保存视图分离：输入期间只做内联诊断，保存后才更新渲染视图；
-// 外部文件与 .rn 脚本变更在窗口回到焦点及保存前探测，不运行后台 watcher。
+// 编辑草稿与已保存视图分离：草稿诊断由 @codemirror/lsp-client 自动维护，
+// 保存后才编译更新可视化视图；外部文件与 .rn 脚本变更在窗口回到焦点及保存前探测。
 export function useDocument(lang: Lang) {
   const [path, setPath] = useState<string | null>(null);
   const [doc, setDoc] = useState<WeftDoc | null>(null);
-  const [diagnostic, setDiagnostic] = useState<CompileDiagnostic | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [diskStatus, setDiskStatus] = useState<DiskStatus>("synced");
-  const [flash, setFlash] = useState(false);
 
   const [draftStore] = useState(createDraftStore);
+  const [flashStore] = useState(createFlashStore);
 
   const mountedRef = useRef(false);
   const pathRef = useRef<string | null>(null);
@@ -77,79 +107,37 @@ export function useDocument(lang: Lang) {
   const inspectingRef = useRef(false);
   const sessionSeq = useRef(0);
   const docCompileSeq = useRef(0);
-  const checkSeq = useRef(0);
   const prevLangRef = useRef(lang);
-  const checkTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
   const flashTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
 
   const triggerFlash = useCallback(() => {
-    setFlash(true);
+    flashStore.set(true);
     clearTimeout(flashTimer.current);
-    flashTimer.current = setTimeout(() => setFlash(false), 400);
-  }, []);
+    flashTimer.current = setTimeout(() => flashStore.set(false), 400);
+  }, [flashStore]);
 
   const applyPublishedCompile = useCallback(
-    (
-      result: CompileResult,
-      options: { updateDiagnostic: boolean; flashOnOk?: boolean },
-    ) => {
+    (result: CompileResult, options: { flashOnOk?: boolean } = {}) => {
       if (result.status === "ok") {
         setDoc(result.doc);
-        if (options.updateDiagnostic) setDiagnostic(null);
         if (options.flashOnOk) triggerFlash();
         return;
       }
       setDoc(null);
-      if (result.status === "invalid") {
-        if (options.updateDiagnostic) setDiagnostic(result.diagnostic);
-        return;
+      if (result.status === "failed") {
+        console.error("compile_document failed:", result.message);
       }
-      console.error("compile_document failed:", result.message);
-      if (options.updateDiagnostic) setDiagnostic(null);
     },
     [triggerFlash],
   );
 
-  const checkDraft = useCallback(async (content: string, session: number) => {
-    const seq = ++checkSeq.current;
-    try {
-      const next = await invoke<CompileDiagnostic | null>("check_document", {
-        content,
-      });
-      if (
-        !mountedRef.current ||
-        sessionSeq.current !== session ||
-        checkSeq.current !== seq
-      ) {
-        return;
-      }
-      setDiagnostic(next);
-    } catch (error) {
-      console.error("check_document failed:", error);
-    }
-  }, []);
-
-  // 重新编译已保存的文档内容以刷新视图；若草稿未保存则同时刷新草稿诊断。
   const recompileSaved = useCallback(
     async (session: number, options: { flashOnOk?: boolean } = {}) => {
       const saved = savedContentRef.current;
       if (saved === null) return;
-      const currentDraft = draftStore.getSnapshot();
-      const isDirty = currentDraft !== saved;
-
       const seq = ++docCompileSeq.current;
-      clearTimeout(checkTimer.current);
-      if (isDirty) {
-        // 与 compile_document 并行执行草稿诊断，避免串行等待；updateDraft 会自增 checkSeq 挡住过期结果
-        void checkDraft(currentDraft, session);
-      } else {
-        checkSeq.current += 1;
-      }
-
       try {
         const result = await invoke<CompileResult>("compile_document", {
           content: saved,
@@ -161,40 +149,30 @@ export function useDocument(lang: Lang) {
         ) {
           return;
         }
-        const stillClean = draftStore.getSnapshot() === saved;
-        applyPublishedCompile(result, {
-          updateDiagnostic: stillClean,
-          flashOnOk: options.flashOnOk,
-        });
+        applyPublishedCompile(result, { flashOnOk: options.flashOnOk });
       } catch (error) {
         console.error("compile_document failed:", error);
       }
     },
-    [applyPublishedCompile, checkDraft, draftStore],
+    [applyPublishedCompile],
   );
 
   const reloadInternal = useCallback(
     async (session: number, options: { flashOnOk?: boolean } = {}) => {
-      clearTimeout(checkTimer.current);
       const docSeq = ++docCompileSeq.current;
-      const diagSeq = ++checkSeq.current;
       const result = await invoke<OpenDocumentResult>("reload_document");
       if (
         !mountedRef.current ||
         sessionSeq.current !== session ||
-        docCompileSeq.current !== docSeq ||
-        checkSeq.current !== diagSeq
+        docCompileSeq.current !== docSeq
       ) {
         return;
       }
       savedContentRef.current = result.content;
-      draftStore.set(result.content);
+      draftStore.setExternal(result.content);
       setDirty(false);
       setDiskStatus("synced");
-      applyPublishedCompile(result.compile, {
-        updateDiagnostic: true,
-        flashOnOk: options.flashOnOk,
-      });
+      applyPublishedCompile(result.compile, { flashOnOk: options.flashOnOk });
     },
     [applyPublishedCompile, draftStore],
   );
@@ -251,7 +229,6 @@ export function useDocument(lang: Lang) {
     }
   }, [draftStore, recompileSaved, reloadInternal]);
 
-  // 挂载时清理页面刷新/HMR 前可能残留的后端会话，并在窗口恢复焦点时探测外部改动。
   useEffect(() => {
     mountedRef.current = true;
     void invoke("close_document").catch(() => {});
@@ -271,7 +248,6 @@ export function useDocument(lang: Lang) {
       mountedRef.current = false;
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibility);
-      clearTimeout(checkTimer.current);
       clearTimeout(flashTimer.current);
       if (pathRef.current !== null || busyRef.current) {
         pathRef.current = null;
@@ -280,7 +256,6 @@ export function useDocument(lang: Lang) {
     };
   }, [inspectDisk]);
 
-  // 语言切换后重编已保存文档刷新本地化展示值，未保存草稿同步刷新诊断。
   useEffect(() => {
     if (prevLangRef.current === lang) return;
     prevLangRef.current = lang;
@@ -292,10 +267,8 @@ export function useDocument(lang: Lang) {
     async (nextPath: string): Promise<"bound" | "failed" | "ignored"> => {
       if (busyRef.current) return "ignored";
       busyRef.current = true;
-      clearTimeout(checkTimer.current);
       const session = ++sessionSeq.current;
       docCompileSeq.current += 1;
-      checkSeq.current += 1;
       try {
         const result = await invoke<OpenDocumentResult>("open_document", {
           path: nextPath,
@@ -306,13 +279,13 @@ export function useDocument(lang: Lang) {
         }
         pathRef.current = nextPath;
         savedContentRef.current = result.content;
-        draftStore.set(result.content);
+        draftStore.setExternal(result.content);
         setPath(nextPath);
         setDirty(false);
         setDiskStatus("synced");
         clearTimeout(flashTimer.current);
-        setFlash(false);
-        applyPublishedCompile(result.compile, { updateDiagnostic: true });
+        flashStore.set(false);
+        applyPublishedCompile(result.compile);
         return "bound";
       } catch (error) {
         console.error("open_document failed:", error);
@@ -321,22 +294,16 @@ export function useDocument(lang: Lang) {
         busyRef.current = false;
       }
     },
-    [applyPublishedCompile, draftStore],
+    [applyPublishedCompile, draftStore, flashStore],
   );
 
   const updateDraft = useCallback(
     (next: string) => {
-      draftStore.set(next);
+      draftStore.setFromEditor(next);
       const saved = savedContentRef.current;
       setDirty(saved !== null && next !== saved);
-      clearTimeout(checkTimer.current);
-      checkSeq.current += 1;
-      const session = sessionSeq.current;
-      checkTimer.current = setTimeout(() => {
-        void checkDraft(next, session);
-      }, CHECK_DEBOUNCE_MS);
     },
-    [checkDraft, draftStore],
+    [draftStore],
   );
 
   const saveWithMode = useCallback(
@@ -351,9 +318,7 @@ export function useDocument(lang: Lang) {
       }
       const session = sessionSeq.current;
       const content = draftStore.getSnapshot();
-      clearTimeout(checkTimer.current);
       const docSeq = ++docCompileSeq.current;
-      const diagSeq = ++checkSeq.current;
       savingRef.current = true;
       setSaving(true);
       try {
@@ -369,16 +334,17 @@ export function useDocument(lang: Lang) {
           return false;
         }
         savedContentRef.current = result.content;
+        if (
+          result.content !== content &&
+          draftStore.getSnapshot() === content
+        ) {
+          draftStore.setExternal(result.content);
+        }
         const currentDraft = draftStore.getSnapshot();
         setDirty(currentDraft !== result.content);
         setDiskStatus("synced");
         if (docCompileSeq.current === docSeq) {
-          const updateDiag =
-            checkSeq.current === diagSeq && currentDraft === result.content;
-          applyPublishedCompile(result.compile, {
-            updateDiagnostic: updateDiag,
-            flashOnOk: true,
-          });
+          applyPublishedCompile(result.compile, { flashOnOk: true });
         }
         return true;
       } catch (error) {
@@ -422,41 +388,37 @@ export function useDocument(lang: Lang) {
   const close = useCallback(async () => {
     if (busyRef.current) return;
     busyRef.current = true;
-    clearTimeout(checkTimer.current);
     sessionSeq.current += 1;
     docCompileSeq.current += 1;
-    checkSeq.current += 1;
     try {
       await invoke("close_document");
       if (!mountedRef.current) return;
       pathRef.current = null;
       savedContentRef.current = null;
-      draftStore.set("");
+      draftStore.setExternal("");
       savingRef.current = false;
       setPath(null);
       setDoc(null);
-      setDiagnostic(null);
       setDirty(false);
       setSaving(false);
       setDiskStatus("synced");
       clearTimeout(flashTimer.current);
-      setFlash(false);
+      flashStore.set(false);
     } catch (error) {
       console.error("close_document failed:", error);
     } finally {
       busyRef.current = false;
     }
-  }, [draftStore]);
+  }, [draftStore, flashStore]);
 
   return {
     path,
     doc,
-    diagnostic,
     draftStore,
+    flashStore,
     dirty,
     saving,
     diskStatus,
-    flash,
     bind,
     updateDraft,
     save,

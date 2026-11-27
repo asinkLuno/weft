@@ -15,9 +15,11 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_log::log::error;
 use weft_core::calendar::{Calendar, CalendarTick};
-use weft_core::compiler::{self, StoryScriptRefs};
-use weft_core::errors::{CompileDiagnostic, DocumentError};
+use weft_core::compiler::{self, CheckOptions, StoryScriptRefs};
+use weft_core::errors::DocumentError;
+use weft_core::format::format_weft;
 use weft_core::plugin_loader::MAX_SCRIPT_BYTES;
+use weft_ls::server::LspServer;
 
 #[derive(Clone, PartialEq, Eq)]
 enum ScriptFingerprint {
@@ -54,7 +56,7 @@ pub struct DocumentState {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum CompileResult {
     Ok { doc: Value },
-    Invalid { diagnostic: CompileDiagnostic },
+    Invalid,
     Failed { message: String },
 }
 
@@ -174,53 +176,50 @@ type CompiledOutcome = (
 
 fn compile_text(app: &AppHandle, content: &str, base: &Path) -> CompiledOutcome {
     let lang = crate::current_lang(app);
-    let (refs, compiled) = compiler::compile_with_scripts(content, base, &lang);
-    let scripts = refs.map(|r| snapshot_script_refs(r, base));
-    match compiled {
-        Ok(doc) => {
-            for entity in doc.entity.values() {
-                if let Some(avatar) = &entity.avatar
-                    && let Err(err) = app.asset_protocol_scope().allow_file(avatar)
-                {
-                    error!("failed to allow avatar {avatar}: {err}");
-                    return (
-                        scripts,
-                        None,
-                        CompileResult::Failed {
-                            message: err.to_string(),
-                        },
-                    );
-                }
-            }
-            match serde_json::to_value(&doc) {
-                Ok(value) => (
+    let out = compiler::check_document(
+        content,
+        base,
+        &CheckOptions {
+            run_scripts: true,
+            lang,
+        },
+    );
+    let scripts = out.scripts.map(|r| snapshot_script_refs(r, base));
+
+    if let Some(doc) = out.doc {
+        for entity in doc.entity.values() {
+            if let Some(avatar) = &entity.avatar
+                && let Err(err) = app.asset_protocol_scope().allow_file(avatar)
+            {
+                error!("failed to allow avatar {avatar}: {err}");
+                return (
                     scripts,
-                    Some(Arc::new(doc.story.calendar)),
-                    CompileResult::Ok { doc: value },
-                ),
-                Err(err) => {
-                    error!("failed to serialize compiled document: {err}");
-                    (
-                        scripts,
-                        None,
-                        CompileResult::Failed {
-                            message: err.to_string(),
-                        },
-                    )
-                }
+                    None,
+                    CompileResult::Failed {
+                        message: err.to_string(),
+                    },
+                );
             }
         }
-        Err(DocumentError::Validation { error, span }) => (
-            scripts,
-            None,
-            CompileResult::Invalid {
-                diagnostic: CompileDiagnostic { error, span },
-            },
-        ),
-        Err(DocumentError::Raw { message }) => {
-            error!("document compilation failed: {message}");
-            (scripts, None, CompileResult::Failed { message })
+        match serde_json::to_value(&doc) {
+            Ok(value) => (
+                scripts,
+                Some(Arc::new(doc.story.calendar)),
+                CompileResult::Ok { doc: value },
+            ),
+            Err(err) => {
+                error!("failed to serialize compiled document: {err}");
+                (
+                    scripts,
+                    None,
+                    CompileResult::Failed {
+                        message: err.to_string(),
+                    },
+                )
+            }
         }
+    } else {
+        (scripts, None, CompileResult::Invalid)
     }
 }
 
@@ -309,32 +308,11 @@ pub fn compile_document(
     Ok(compile)
 }
 
-/// 编辑器草稿诊断入口：仅校验未保存草稿并返回单条诊断，不序列化视图数据、不触发视图重渲染。
+/// 进程内 LSP 传输通道：直接投递标准 JSON-RPC 2.0 消息并返回服务端响应/通知列表。
 #[tauri::command]
-pub fn check_document(
-    app: AppHandle,
-    state: State<'_, Mutex<DocumentState>>,
-    content: String,
-) -> Result<Option<CompileDiagnostic>, DocumentError> {
-    let parent = {
-        let st = state.lock().unwrap_or_else(|p| p.into_inner());
-        st.active
-            .as_ref()
-            .ok_or_else(|| DocumentError::raw("no document is open"))?
-            .parent
-            .clone()
-    };
-    let lang = crate::current_lang(&app);
-    match compiler::compile_with_scripts(&content, &parent, &lang).1 {
-        Ok(_) => Ok(None),
-        Err(DocumentError::Validation { error, span }) => {
-            Ok(Some(CompileDiagnostic { error, span }))
-        }
-        Err(DocumentError::Raw { message }) => {
-            error!("check_document failed: {message}");
-            Ok(None)
-        }
-    }
+pub fn lsp_send(state: State<'_, Mutex<LspServer>>, message: String) -> Vec<String> {
+    let mut server = state.lock().unwrap_or_else(|p| p.into_inner());
+    server.handle_json(&message)
 }
 
 /// 焦点外部变更探测：只读比对 `.weft` 与外部 `.rn` 脚本，不修改文档会话状态。
@@ -404,7 +382,18 @@ pub fn reload_document(
     Ok(OpenDocumentResult { content, compile })
 }
 
-/// 保存缓冲区到磁盘：默认带乐观锁校验（`force = false`），发现磁盘被外部改过时拒绝静默覆盖。
+fn maybe_format_for_save(content: String, format_on_save: bool) -> String {
+    if !format_on_save {
+        return content;
+    }
+    match format_weft(&content) {
+        Ok(formatted) => formatted,
+        Err(_) => content,
+    }
+}
+
+/// 保存缓冲区到磁盘：默认带乐观锁校验（`force = false`），发现磁盘被外部改过时拒绝静默覆盖；
+/// 启用 `formatOnSave` 且无语法错误时，先格式化再落盘并编译。
 #[tauri::command]
 pub fn save_document(
     app: AppHandle,
@@ -412,6 +401,8 @@ pub fn save_document(
     content: String,
     force: bool,
 ) -> Result<SaveResult, DocumentError> {
+    let format_on_save = crate::current_format_on_save(&app);
+    let content = maybe_format_for_save(content, format_on_save);
     let (path, parent) = {
         let mut st = state.lock().unwrap_or_else(|p| p.into_inner());
         let active = st
@@ -419,6 +410,7 @@ pub fn save_document(
             .as_mut()
             .ok_or_else(|| DocumentError::raw("no document is open"))?;
 
+        let mut file_exists = true;
         if !force {
             match fs::read_to_string(&active.path) {
                 Ok(disk_content) if disk_content != active.disk_base => {
@@ -428,6 +420,7 @@ pub fn save_document(
                 Err(err)
                     if err.kind() == io::ErrorKind::NotFound || !active.path.exists() =>
                 {
+                    file_exists = false;
                     // 磁盘文件已不存在：允许写入以重建文件，不会覆盖外部修改。
                 }
                 Err(err) => {
@@ -440,8 +433,10 @@ pub fn save_document(
             }
         }
 
-        write_atomic(&active.path, &content)?;
-        active.disk_base = content.clone();
+        if force || !file_exists || content != active.disk_base {
+            write_atomic(&active.path, &content)?;
+            active.disk_base = content.clone();
+        }
         (active.path.clone(), active.parent.clone())
     };
 

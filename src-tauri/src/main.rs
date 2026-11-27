@@ -15,6 +15,7 @@ use tauri::menu::{CheckMenuItem, Menu, SubmenuBuilder};
 use tauri::{AppHandle, Emitter, Theme, Wry};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, log::LevelFilter};
 use tauri_plugin_store::StoreExt;
+use weft_ls::server::LspServer;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ThemeMode {
@@ -42,8 +43,13 @@ impl ThemeMode {
     }
 }
 
-// 菜单无法就地改文字，切语言或主题时整体重建
-fn build_menu(app: &AppHandle, lang: &str, theme: ThemeMode) -> tauri::Result<Menu<Wry>> {
+// 菜单无法就地改文字，切语言、主题或勾选状态时整体重建
+fn build_menu(
+    app: &AppHandle,
+    lang: &str,
+    theme: ThemeMode,
+    format_on_save: bool,
+) -> tauri::Result<Menu<Wry>> {
     let zh = lang == "zh";
     let (
         settings_label,
@@ -52,8 +58,17 @@ fn build_menu(app: &AppHandle, lang: &str, theme: ThemeMode) -> tauri::Result<Me
         theme_system_label,
         theme_light_label,
         theme_dark_label,
+        format_on_save_label,
     ) = if zh {
-        ("设置", "语言", "外观", "跟随系统", "浅色", "深色")
+        (
+            "设置",
+            "语言",
+            "外观",
+            "跟随系统",
+            "浅色",
+            "深色",
+            "保存时自动格式化",
+        )
     } else {
         (
             "Settings",
@@ -62,6 +77,7 @@ fn build_menu(app: &AppHandle, lang: &str, theme: ThemeMode) -> tauri::Result<Me
             "System",
             "Light",
             "Dark",
+            "Format on Save",
         )
     };
     let item_zh = CheckMenuItem::with_id(app, "lang-zh", "中文", true, zh, None::<&str>)?;
@@ -101,9 +117,20 @@ fn build_menu(app: &AppHandle, lang: &str, theme: ThemeMode) -> tauri::Result<Me
         .item(&item_theme_dark)
         .build()?;
 
+    let item_format_on_save = CheckMenuItem::with_id(
+        app,
+        "format-on-save",
+        format_on_save_label,
+        true,
+        format_on_save,
+        None::<&str>,
+    )?;
+
     let mut settings_builder = SubmenuBuilder::new(app, settings_label)
         .item(&language)
-        .item(&appearance);
+        .item(&appearance)
+        .separator()
+        .item(&item_format_on_save);
     #[cfg(unix)]
     if cli_install::should_show_menu() {
         let install_cli_label = if zh {
@@ -144,6 +171,21 @@ fn current_theme(app: &AppHandle) -> ThemeMode {
         .unwrap_or(ThemeMode::System)
 }
 
+fn current_format_on_save(app: &AppHandle) -> bool {
+    app.store("settings.json")
+        .ok()
+        .and_then(|s| s.get("formatOnSave"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+fn save_setting(app: &AppHandle, key: &str, value: impl Into<serde_json::Value>) {
+    if let Ok(store) = app.store("settings.json") {
+        store.set(key, value);
+        let _ = store.save();
+    }
+}
+
 fn apply_native_theme(app: &AppHandle, mode: ThemeMode) {
     match mode {
         ThemeMode::Light => app.set_theme(Some(Theme::Light)),
@@ -168,38 +210,51 @@ fn apply_native_theme(app: &AppHandle, mode: ThemeMode) {
 }
 
 fn apply_lang(app: &AppHandle, lang: &str) {
-    if let Ok(store) = app.store("settings.json") {
-        store.set("language", lang);
-        let _ = store.save();
-    }
+    save_setting(app, "language", lang);
     let theme = current_theme(app);
-    if let Ok(menu) = build_menu(app, lang, theme) {
+    let format_on_save = current_format_on_save(app);
+    if let Ok(menu) = build_menu(app, lang, theme, format_on_save) {
         let _ = app.set_menu(menu);
     }
     let _ = app.emit("settings-changed", json!({ "language": lang }));
 }
 
 fn apply_theme(app: &AppHandle, theme: ThemeMode) {
-    if let Ok(store) = app.store("settings.json") {
-        store.set("theme", theme.as_str());
-        let _ = store.save();
-    }
+    save_setting(app, "theme", theme.as_str());
     apply_native_theme(app, theme);
     let lang = current_lang(app);
-    if let Ok(menu) = build_menu(app, &lang, theme) {
+    let format_on_save = current_format_on_save(app);
+    if let Ok(menu) = build_menu(app, &lang, theme, format_on_save) {
         let _ = app.set_menu(menu);
     }
     let _ = app.emit("settings-changed", json!({ "theme": theme.as_str() }));
 }
 
-#[tauri::command]
-fn get_language(app: AppHandle) -> String {
-    current_lang(&app)
+fn apply_format_on_save(app: &AppHandle, enabled: bool) {
+    save_setting(app, "formatOnSave", enabled);
+    let lang = current_lang(app);
+    let theme = current_theme(app);
+    if let Ok(menu) = build_menu(app, &lang, theme, enabled) {
+        let _ = app.set_menu(menu);
+    }
+    let _ = app.emit("settings-changed", json!({ "formatOnSave": enabled }));
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppSettings {
+    language: String,
+    theme: &'static str,
+    format_on_save: bool,
 }
 
 #[tauri::command]
-fn get_theme(app: AppHandle) -> &'static str {
-    current_theme(&app).as_str()
+fn get_app_settings(app: AppHandle) -> AppSettings {
+    AppSettings {
+        language: current_lang(&app),
+        theme: current_theme(&app).as_str(),
+        format_on_save: current_format_on_save(&app),
+    }
 }
 
 fn main() {
@@ -215,23 +270,24 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(Mutex::new(weft_doc::DocumentState::default()))
+        .manage(Mutex::new(LspServer::new("en".to_owned())))
         .invoke_handler(tauri::generate_handler![
             weft_doc::open_document,
             weft_doc::compile_document,
-            weft_doc::check_document,
+            weft_doc::lsp_send,
             weft_doc::inspect_disk,
             weft_doc::reload_document,
             weft_doc::save_document,
             weft_doc::calendar_axis_ticks,
             weft_doc::close_document,
-            get_language,
-            get_theme,
+            get_app_settings,
         ])
         .setup(|app| {
             let lang = current_lang(app.handle());
             let theme = current_theme(app.handle());
+            let format_on_save = current_format_on_save(app.handle());
             apply_native_theme(app.handle(), theme);
-            app.set_menu(build_menu(app.handle(), &lang, theme)?)?;
+            app.set_menu(build_menu(app.handle(), &lang, theme, format_on_save)?)?;
             Ok(())
         })
         .on_menu_event(|app, event| match event.id().0.as_str() {
@@ -240,6 +296,10 @@ fn main() {
             "theme-system" => apply_theme(app, ThemeMode::System),
             "theme-light" => apply_theme(app, ThemeMode::Light),
             "theme-dark" => apply_theme(app, ThemeMode::Dark),
+            "format-on-save" => {
+                let next = !current_format_on_save(app);
+                apply_format_on_save(app, next);
+            }
             #[cfg(unix)]
             "install-cli" => {
                 let lang = current_lang(app);
