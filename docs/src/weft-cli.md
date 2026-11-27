@@ -85,7 +85,7 @@ weft lsp              # 按系统 locale 启动 stdio LSP 服务器
 weft lsp --lang zh    # 强制中文诊断与 Hover 文档
 ```
 
-提供实时诊断（含 lint 警告与 Quick Fix）、上下文补全、Hover（含历法时间求解结果）、跳转定义、查找引用、符号重命名、文档大纲与格式化。VS Code 扩展位于仓库的 `editors/vscode/` 目录，其他编辑器（Neovim / Zed / Helix）直接配置启动 `weft lsp` 即可。
+完整的 LSP 3.17 服务器：实时诊断与 Quick Fix、上下文补全、Hover（含历法求解后的时间）、跳转定义、查找引用、重命名、文档大纲、整篇格式化。桌面端已内置同一套语言服务；VS Code 扩展在 `editors/vscode/`。编辑器配置、各功能细节与限制见[语言服务器](lsp.md)。
 
 ## rules：规则清单
 

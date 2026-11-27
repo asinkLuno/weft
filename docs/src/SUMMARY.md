@@ -6,4 +6,5 @@
 
 - [Weft 语言](weft-syntax.md)
 - [检查与格式化](weft-cli.md)
+- [语言服务器（LSP）](lsp.md)
 - [在 AI 客户端安装 skill](skills.md)
