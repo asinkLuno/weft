@@ -1,8 +1,11 @@
 import {
+  ArrowLeftRight,
+  ArrowRight,
   ChevronLeft,
   ChevronRight,
   Clock,
   GitBranch,
+  Link2,
   List,
   Users,
 } from "lucide-react";
@@ -16,7 +19,7 @@ import {
 } from "@/components/detail-panel";
 import type { WeftDeclKind } from "@/features/editor/weft-ls-client";
 import { type Lang, strings } from "@/i18n";
-import type { EventDetail } from "./model";
+import type { EventDetail, EventPlotLink } from "./model";
 
 const EVENT_LEADING_ICON = (
   <GitBranch className="mt-1 size-4 shrink-0 text-primary" aria-hidden="true" />
@@ -29,6 +32,101 @@ const DELTA_ICON = (
     aria-hidden="true"
   />
 );
+const LINK_ARROW_ICON = (
+  <ArrowRight
+    className="size-3.5 shrink-0 text-primary/70"
+    aria-hidden="true"
+  />
+);
+const LINK_BI_ICON = (
+  <ArrowLeftRight
+    className="size-3.5 shrink-0 text-primary/70"
+    aria-hidden="true"
+  />
+);
+
+function EventPlotLinksSection({
+  title,
+  locateLabel,
+  links,
+  onSelectEvent,
+  onRevealInEditor,
+}: {
+  title: string;
+  locateLabel: string;
+  links: readonly EventPlotLink[];
+  onSelectEvent: (eventId: string) => void;
+  onRevealInEditor: (kind: WeftDeclKind, name: string) => void;
+}) {
+  return (
+    <DetailSection title={title} icon={Link2}>
+      <ul className="flex flex-col gap-1.5">
+        {links.map((item) => (
+          <li
+            key={item.key}
+            className="flex flex-col gap-1 rounded-box border border-base-300/80 bg-base-200/40 px-2.5 py-1.5"
+          >
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                className="badge badge-xs badge-ghost cursor-pointer hover:text-primary"
+                title={locateLabel}
+                onClick={() => onRevealInEditor("link", item.graph)}
+              >
+                {item.graph}
+              </button>
+              {item.direction === "incoming" ? (
+                <>
+                  <button
+                    type="button"
+                    className="link link-hover min-w-0 break-words font-medium"
+                    onClick={() => onSelectEvent(item.peerId)}
+                  >
+                    {item.peerId}
+                  </button>
+                  {item.label && (
+                    <span className="font-medium text-primary">
+                      {item.label}
+                    </span>
+                  )}
+                  {LINK_ARROW_ICON}
+                </>
+              ) : (
+                <>
+                  {item.label && (
+                    <span className="font-medium text-primary">
+                      {item.label}
+                    </span>
+                  )}
+                  {item.direction === "outgoing"
+                    ? LINK_ARROW_ICON
+                    : LINK_BI_ICON}
+                  <button
+                    type="button"
+                    className="link link-hover min-w-0 break-words font-medium"
+                    onClick={() => onSelectEvent(item.peerId)}
+                  >
+                    {item.peerId}
+                  </button>
+                </>
+              )}
+            </div>
+            {item.peerTime && (
+              <span className="font-mono text-[11px] text-base-content/60">
+                {item.peerTime}
+              </span>
+            )}
+            {item.description && (
+              <span className="whitespace-pre-wrap break-words text-xs leading-5 text-base-content/75">
+                {item.description}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </DetailSection>
+  );
+}
 
 function EventNavButtons({
   prevId,
@@ -96,6 +194,7 @@ export const EventDetailPanel = memo(function EventDetailPanel({
     !detail.time &&
     !detail.description &&
     detail.entities.length === 0 &&
+    detail.links.length === 0 &&
     detail.lists.length === 0;
 
   return (
@@ -125,6 +224,16 @@ export const EventDetailPanel = memo(function EventDetailPanel({
         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-base-content/85">
           {detail.description}
         </p>
+      )}
+
+      {detail.links.length > 0 && (
+        <EventPlotLinksSection
+          title={t.eventLinks}
+          locateLabel={t.locateInEditor}
+          links={detail.links}
+          onSelectEvent={onSelectEvent}
+          onRevealInEditor={onRevealInEditor}
+        />
       )}
 
       {detail.entities.length > 0 && (

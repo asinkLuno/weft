@@ -2,16 +2,16 @@
 //!
 //! 所有规则产生 `Severity::Warning` 诊断，可通过 CLI `--ignore <rule>` 按名屏蔽。
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
-use crate::entity::{RawEntity, RawEntityLink};
+use crate::entity::RawEntity;
 use crate::errors::{ByteSpan, Diagnostic};
 use crate::event::RawEvent;
+use crate::relation::{RawLink, RawLinkGraph};
 
 /// 所有可选 Lint 规则名清单。
 pub const LINT_RULES: &[&str] = &[
     "duplicate-attr",
-    "duplicate-tag",
     "unused-time-anchor",
     "unused-entity",
     "unreferenced-event",
@@ -24,46 +24,18 @@ pub(crate) struct LintContext<'a> {
     pub lang: &'a str,
     pub anchors: &'a BTreeMap<String, ByteSpan>,
     pub used_anchors: &'a HashSet<String>,
+    pub graphs: &'a BTreeMap<String, RawLinkGraph>,
     pub entities: &'a BTreeMap<String, RawEntity>,
-    pub links: &'a BTreeMap<String, Vec<RawEntityLink>>,
-    pub link_group_spans: &'a HashMap<String, ByteSpan>,
+    pub links: &'a [RawLink],
     pub events: &'a BTreeMap<String, RawEvent>,
     pub event_lists: &'a BTreeMap<String, (ByteSpan, Vec<(String, ByteSpan)>)>,
 }
 
 pub(crate) fn run_lints(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
     lint_unused_anchors(ctx, diagnostics);
-    lint_duplicate_tags(ctx, diagnostics);
-    lint_links(ctx, diagnostics);
+    lint_links_static(ctx, diagnostics);
     lint_unused_entities(ctx, diagnostics);
     lint_event_lists_and_events(ctx, diagnostics);
-}
-
-fn lint_duplicate_tags(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
-    let zh = ctx.lang == "zh";
-    let rel_msg = if zh {
-        "首次出现于此"
-    } else {
-        "first listed here"
-    };
-    for (id, raw) in ctx.entities {
-        let mut seen: HashMap<&str, ByteSpan> = HashMap::new();
-        for (tag, span) in &raw.tags {
-            if let Some(&first_span) = seen.get(tag.as_str()) {
-                let msg = if zh {
-                    format!("实体 `{id}` 重复声明了标签 `{tag}`")
-                } else {
-                    format!("entity `{id}` lists duplicate tag `{tag}`")
-                };
-                diagnostics.push(
-                    Diagnostic::warning("duplicate-tag", msg, Some(*span))
-                        .with_related(first_span, rel_msg),
-                );
-            } else {
-                seen.insert(tag.as_str(), *span);
-            }
-        }
-    }
 }
 
 fn lint_unused_anchors(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
@@ -80,66 +52,41 @@ fn lint_unused_anchors(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>)
     }
 }
 
-fn lint_links(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
+fn lint_links_static(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
     let zh = ctx.lang == "zh";
-    for (group, edges) in ctx.links {
-        if edges.is_empty() {
+    for (graph, raw) in ctx.graphs {
+        if raw.edge_stmt_count == 0 {
             let msg = if zh {
-                format!("关系组 `{group}` 为空")
+                format!("关系图 `{graph}` 不包含任何边")
             } else {
-                format!("link block `{group}` is empty")
+                format!("link graph `{graph}` has no edges")
             };
             diagnostics.push(Diagnostic::warning(
                 "empty-block",
                 msg,
-                ctx.link_group_spans.get(group).copied(),
+                Some(raw.name_span),
             ));
-            continue;
         }
-        let mut seen: HashMap<(bool, &str, &str, &str), ByteSpan> = HashMap::new();
-        for edge in edges {
-            if edge.left.0 == edge.right.0 {
-                let msg = if zh {
-                    format!("关系组 `{group}` 将实体 `{}` 连向了自身", edge.left.0)
-                } else {
-                    format!(
-                        "link `{group}` connects entity `{}` to itself",
-                        edge.left.0
-                    )
-                };
-                diagnostics.push(Diagnostic::warning("self-link", msg, Some(edge.span)));
+    }
+    for edge in ctx.links {
+        if edge.from.0 == edge.to.0 {
+            // 若所在图启用了 acyclic 或 asymmetric，图校验阶段已报告 Error，避免叠加重复 Warning。
+            if ctx
+                .graphs
+                .get(&edge.graph)
+                .is_some_and(|g| g.spec.acyclic || g.spec.asymmetric)
+            {
+                continue;
             }
-            let (norm_left, norm_right) = if edge.directed || edge.left.0 <= edge.right.0 {
-                (edge.left.0.as_str(), edge.right.0.as_str())
+            let msg = if zh {
+                format!("关系图 `{}` 将节点 `{}` 连向了自身", edge.graph, edge.from.0)
             } else {
-                (edge.right.0.as_str(), edge.left.0.as_str())
+                format!(
+                    "link `{}` connects node `{}` to itself",
+                    edge.graph, edge.from.0
+                )
             };
-            let key = (edge.directed, norm_left, edge.relations.as_str(), norm_right);
-            if let Some(&first_span) = seen.get(&key) {
-                let right_op = if edge.directed { "->" } else { "--" };
-                let msg = if zh {
-                    format!(
-                        "关系组 `{group}` 重复声明了边 `{} -- \"{}\" {right_op} {}`",
-                        edge.left.0, edge.relations, edge.right.0
-                    )
-                } else {
-                    format!(
-                        "duplicate link edge `{} -- \"{}\" {right_op} {}` in `{group}`",
-                        edge.left.0, edge.relations, edge.right.0
-                    )
-                };
-                let rel_msg = if zh {
-                    "首次声明于此"
-                } else {
-                    "first declared here"
-                };
-                diagnostics.push(
-                    Diagnostic::warning("duplicate-link", msg, Some(edge.span))
-                        .with_related(first_span, rel_msg),
-                );
-            } else {
-                seen.insert(key, edge.span);
-            }
+            diagnostics.push(Diagnostic::warning("self-link", msg, Some(edge.span)));
         }
     }
 }
@@ -150,16 +97,9 @@ fn lint_unused_entities(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>
     }
     let zh = ctx.lang == "zh";
     let mut referenced: HashSet<&str> = HashSet::new();
-    for raw in ctx.entities.values() {
-        for (parent, _) in &raw.belong_to {
-            referenced.insert(parent.as_str());
-        }
-    }
-    for edges in ctx.links.values() {
-        for edge in edges {
-            referenced.insert(edge.left.0.as_str());
-            referenced.insert(edge.right.0.as_str());
-        }
+    for edge in ctx.links {
+        referenced.insert(edge.from.0.as_str());
+        referenced.insert(edge.to.0.as_str());
     }
     for ev in ctx.events.values() {
         for (ent, _) in &ev.entities {
@@ -169,9 +109,9 @@ fn lint_unused_entities(ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>
     for (id, raw) in ctx.entities {
         if !referenced.contains(id.as_str()) {
             let msg = if zh {
-                format!("实体 `{id}` 未被任何事件、关系或 belong_to 引用")
+                format!("实体 `{id}` 未被任何事件或 link 引用")
             } else {
-                format!("entity `{id}` is never referenced by any event, link, or belong_to")
+                format!("entity `{id}` is never referenced by any event or link")
             };
             diagnostics.push(Diagnostic::warning("unused-entity", msg, Some(raw.name_span)));
         }

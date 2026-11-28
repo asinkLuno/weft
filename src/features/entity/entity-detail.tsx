@@ -1,10 +1,9 @@
 import {
+  ArrowLeftRight,
   ArrowRight,
   GitBranch,
+  Layers,
   Link2,
-  Tag,
-  Users,
-  Waypoints,
 } from "lucide-react";
 import { memo, useCallback } from "react";
 import {
@@ -20,6 +19,13 @@ import type { EntityDetail, EntityEventEntry, EntityLinkEntry } from "./model";
 
 const LINK_ARROW_ICON = (
   <ArrowRight
+    className="size-3.5 shrink-0 text-primary/70"
+    aria-hidden="true"
+  />
+);
+
+const LINK_BI_ICON = (
+  <ArrowLeftRight
     className="size-3.5 shrink-0 text-primary/70"
     aria-hidden="true"
   />
@@ -44,44 +50,62 @@ function EntityLinksSection({
         {links.map((item) => (
           <li
             key={item.key}
-            className="flex flex-wrap items-center gap-1.5 rounded-box border border-base-300/80 bg-base-200/40 px-2.5 py-1.5"
+            className="flex flex-col gap-1 rounded-box border border-base-300/80 bg-base-200/40 px-2.5 py-1.5"
           >
-            <button
-              type="button"
-              className="badge badge-xs badge-ghost cursor-pointer hover:text-primary"
-              title={locateLabel}
-              onClick={() => onRevealInEditor("link", item.group)}
-            >
-              {item.group}
-            </button>
-            {item.direction === "incoming" ? (
-              <>
-                <button
-                  type="button"
-                  className="link link-hover min-w-0 break-words font-medium"
-                  onClick={() => onSelectEntity(item.peerId)}
-                >
-                  {item.peerName}
-                </button>
-                <span className="font-medium text-primary">
-                  {item.relation}
-                </span>
-                {LINK_ARROW_ICON}
-              </>
-            ) : (
-              <>
-                <span className="font-medium text-primary">
-                  {item.relation}
-                </span>
-                {item.direction === "outgoing" && LINK_ARROW_ICON}
-                <button
-                  type="button"
-                  className="link link-hover min-w-0 break-words font-medium"
-                  onClick={() => onSelectEntity(item.peerId)}
-                >
-                  {item.peerName}
-                </button>
-              </>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                className="badge badge-xs badge-ghost cursor-pointer hover:text-primary"
+                title={locateLabel}
+                onClick={() => onRevealInEditor("link", item.graph)}
+              >
+                {item.graph}
+              </button>
+              {item.direction === "incoming" ? (
+                <>
+                  <button
+                    type="button"
+                    className="link link-hover min-w-0 break-words font-medium"
+                    onClick={() => onSelectEntity(item.peerId)}
+                  >
+                    {item.peerName}
+                  </button>
+                  {item.label && (
+                    <span className="font-medium text-primary">
+                      {item.label}
+                    </span>
+                  )}
+                  {LINK_ARROW_ICON}
+                </>
+              ) : (
+                <>
+                  {item.label && (
+                    <span className="font-medium text-primary">
+                      {item.label}
+                    </span>
+                  )}
+                  {item.direction === "outgoing"
+                    ? LINK_ARROW_ICON
+                    : LINK_BI_ICON}
+                  <button
+                    type="button"
+                    className="link link-hover min-w-0 break-words font-medium"
+                    onClick={() => onSelectEntity(item.peerId)}
+                  >
+                    {item.peerName}
+                  </button>
+                </>
+              )}
+            </div>
+            {item.timeRange && (
+              <span className="font-mono text-[11px] text-base-content/60">
+                {item.timeRange}
+              </span>
+            )}
+            {item.description && (
+              <span className="whitespace-pre-wrap break-words text-xs leading-5 text-base-content/75">
+                {item.description}
+              </span>
             )}
           </li>
         ))}
@@ -136,18 +160,14 @@ function EntityEventsSection({
 export const EntityDetailPanel = memo(function EntityDetailPanel({
   detail,
   lang,
-  activeTags,
   onClose,
   onSelectEntity,
-  onToggleTag,
   onRevealInEditor,
 }: {
   detail: EntityDetail;
   lang: Lang;
-  activeTags: ReadonlySet<string>;
   onClose: () => void;
   onSelectEntity: (id: string) => void;
-  onToggleTag: (tag: string) => void;
   onRevealInEditor: (kind: WeftDeclKind, name: string) => void;
 }) {
   const t = strings[lang];
@@ -155,13 +175,15 @@ export const EntityDetailPanel = memo(function EntityDetailPanel({
     () => onRevealInEditor("entity", detail.id),
     [detail.id, onRevealInEditor],
   );
+  const handleRevealAlias = useCallback(
+    (alias: string) => onRevealInEditor("entity", alias),
+    [onRevealInEditor],
+  );
   const isEmpty =
     !detail.description &&
     !detail.baseTime &&
-    detail.tags.length === 0 &&
+    detail.aliases.length === 0 &&
     detail.extraProps.length === 0 &&
-    detail.parents.length === 0 &&
-    detail.children.length === 0 &&
     detail.links.length === 0 &&
     detail.events.length === 0;
 
@@ -180,33 +202,22 @@ export const EntityDetailPanel = memo(function EntityDetailPanel({
       onClose={onClose}
       onLocate={handleLocate}
     >
+      {detail.aliases.length > 0 && (
+        <DetailSection title={t.entityAliases} icon={Layers}>
+          <DetailBadgeList
+            items={detail.aliases.map((a) => ({ id: a, label: a }))}
+            title={t.locateInEditor}
+            onClick={handleRevealAlias}
+          />
+        </DetailSection>
+      )}
+
       {detail.description && (
         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-base-content/85">
           {detail.description}
         </p>
       )}
       {detail.baseTime && <DetailTimeRow value={detail.baseTime} />}
-
-      {detail.tags.length > 0 && (
-        <DetailSection title={t.tags} icon={Tag}>
-          <div className="flex flex-wrap gap-1.5">
-            {detail.tags.map((tag) => (
-              <button
-                key={tag}
-                type="button"
-                className={`badge badge-sm h-auto cursor-pointer whitespace-normal break-words transition-colors ${
-                  activeTags.has(tag)
-                    ? "badge-primary"
-                    : "badge-soft badge-primary"
-                }`}
-                onClick={() => onToggleTag(tag)}
-              >
-                {tag}
-              </button>
-            ))}
-          </div>
-        </DetailSection>
-      )}
 
       {detail.extraProps.length > 0 && (
         <DetailSection title={t.entityProps}>
@@ -218,18 +229,6 @@ export const EntityDetailPanel = memo(function EntityDetailPanel({
               </div>
             ))}
           </dl>
-        </DetailSection>
-      )}
-
-      {detail.parents.length > 0 && (
-        <DetailSection title={t.belongTo} icon={Waypoints}>
-          <DetailBadgeList items={detail.parents} onClick={onSelectEntity} />
-        </DetailSection>
-      )}
-
-      {detail.children.length > 0 && (
-        <DetailSection title={t.entityChildren} icon={Users}>
-          <DetailBadgeList items={detail.children} onClick={onSelectEntity} />
         </DetailSection>
       )}
 

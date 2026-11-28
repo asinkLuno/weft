@@ -104,7 +104,12 @@ export const weftLanguage = StreamLanguage.define<WeftParserState>({
       }
       return "string";
     }
-    if (stream.match("--") || stream.match("->") || stream.match("<-")) {
+    if (
+      stream.match("<->") ||
+      stream.match("--") ||
+      stream.match("->") ||
+      stream.match("<-")
+    ) {
       state.expectDeclName = false;
       return "operator";
     }

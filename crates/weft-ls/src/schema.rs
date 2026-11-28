@@ -5,6 +5,8 @@ pub enum AttrBlockKind {
     Story,
     Entity,
     Event,
+    Link,
+    LinkEdge,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13,6 +15,7 @@ pub enum BlockKind {
     Entity,
     Event,
     Link,
+    LinkEdge,
 }
 
 impl BlockKind {
@@ -21,7 +24,8 @@ impl BlockKind {
             Self::Story => Some(AttrBlockKind::Story),
             Self::Entity => Some(AttrBlockKind::Entity),
             Self::Event => Some(AttrBlockKind::Event),
-            Self::Link => None,
+            Self::Link => Some(AttrBlockKind::Link),
+            Self::LinkEdge => Some(AttrBlockKind::LinkEdge),
         }
     }
 }
@@ -29,10 +33,10 @@ impl BlockKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FieldValueKind {
     String,
+    Bool,
     StringMap,
     Time,
     EntityList,
-    TagList,
     CalcPropList,
 }
 
@@ -120,6 +124,109 @@ pub const STORY_FIELDS: &[FieldSpec] = &[
     },
 ];
 
+pub const LINK_GRAPH_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        name: "acyclic",
+        value_kind: FieldValueKind::Bool,
+        required: false,
+        snippet: "acyclic = true",
+        short_zh: "无环（DAG）",
+        short_en: "Acyclic (DAG)",
+        doc_zh: "任意时间切片内不存在有向环（强制有向边，隐含反自反、非对称），成环报 `graph-cycle`。",
+        doc_en: "Forbids directed cycles in every atomic time slice (requires directed edges; forms a DAG).",
+    },
+    FieldSpec {
+        name: "asymmetric",
+        value_kind: FieldValueKind::Bool,
+        required: false,
+        snippet: "asymmetric = true",
+        short_zh: "非对称（禁止双向互指）",
+        short_en: "Asymmetric (no reverse edge)",
+        doc_zh: "禁止同时间段双向互指（强制有向边，允许长度 ≥ 3 的环），违规报 `asymmetry-conflict`。",
+        doc_en: "Forbids bidirectional edges (A -> B and B -> A) in the same time slice.",
+    },
+    FieldSpec {
+        name: "intransitive",
+        value_kind: FieldValueKind::Bool,
+        required: false,
+        snippet: "intransitive = true",
+        short_zh: "反传递（禁止跳级直连）",
+        short_en: "Intransitive (no shortcut edges)",
+        doc_zh: "若存在 A -> B 与 B -> C，则禁止存在 A -> C，违规报 `intransitivity-violation`。",
+        doc_en: "Forbids shortcut edge A -> C when A -> B and B -> C exist in the same slice.",
+    },
+    FieldSpec {
+        name: "functional",
+        value_kind: FieldValueKind::Bool,
+        required: false,
+        snippet: "functional = true",
+        short_zh: "多对一（源节点出度 ≤ 1）",
+        short_en: "Functional (out-degree <= 1)",
+        doc_zh: "任意时间切片同一源节点出度不超过 1（配合 `acyclic` 构成严格树）。",
+        doc_en: "Limits each source node to at most one outgoing target per time slice.",
+    },
+    FieldSpec {
+        name: "inverse_functional",
+        value_kind: FieldValueKind::Bool,
+        required: false,
+        snippet: "inverse_functional = true",
+        short_zh: "一对多（目标节点入度 ≤ 1）",
+        short_en: "Inverse functional (in-degree <= 1)",
+        doc_zh: "任意时间切片同一目标节点入度不超过 1（如物品唯一持有）。",
+        doc_en: "Limits each target node to at most one incoming source per time slice.",
+    },
+    FieldSpec {
+        name: "symmetric",
+        value_kind: FieldValueKind::Bool,
+        required: false,
+        snippet: "symmetric = true",
+        short_zh: "对称图（强制 <-> 或团）",
+        short_en: "Symmetric (requires <-> or clique)",
+        doc_zh: "整张图强制为无向对称图（仅允许 `<->`、`<- \"...\" ->` 或团），查重忽略方向。",
+        doc_en: "Requires undirected edges (`<->`, `<- \"...\" ->`, or cliques) across this graph.",
+    },
+    FieldSpec {
+        name: "transitive",
+        value_kind: FieldValueKind::Bool,
+        required: false,
+        snippet: "transitive = true",
+        short_zh: "可传递（支持传递闭包）",
+        short_en: "Transitive (supports closure)",
+        doc_zh: "标记可传递，供前端与查询层计算传递闭包。",
+        doc_en: "Marks graph as transitive for closure computation in views and queries.",
+    },
+    FieldSpec {
+        name: "equivalence",
+        value_kind: FieldValueKind::Bool,
+        required: false,
+        snippet: "equivalence = true",
+        short_zh: "等价图（商图坍缩）",
+        short_en: "Equivalence (quotient graph)",
+        doc_zh: "等价关系图（自反 + 对称 + 传递），强制使用 `<->` / 团，前端可合并为商图节点。",
+        doc_en: "Equivalence graph requiring `<->` / cliques; enables quotient-node merging in UI.",
+    },
+    FieldSpec {
+        name: "chronological",
+        value_kind: FieldValueKind::Bool,
+        required: false,
+        snippet: "chronological = true",
+        short_zh: "时序单调（防时间穿帮）",
+        short_en: "Chronological (time-ordered)",
+        doc_zh: "强制有向边，校验前置节点时间不晚于后续节点时间（如伏笔与阻塞关系防止时间倒流穿帮），违规报 `chronological-violation`。",
+        doc_en: "Requires directed edges where source time <= target time (prevents chronological plot holes in foreshadowing/blocking graphs).",
+    },
+    FieldSpec {
+        name: "description",
+        value_kind: FieldValueKind::String,
+        required: false,
+        snippet: "description = \"$1\"",
+        short_zh: "关系图说明",
+        short_en: "Graph description",
+        doc_zh: "该张关系图的文档说明，供 LSP Hover 展示。",
+        doc_en: "Documentation note for this link graph, displayed in LSP Hover.",
+    },
+];
+
 pub const ENTITY_FIELDS: &[FieldSpec] = &[
     FieldSpec {
         name: "description",
@@ -150,26 +257,6 @@ pub const ENTITY_FIELDS: &[FieldSpec] = &[
         short_en: "Base time expression",
         doc_zh: "实体的出生/起始基准时间表达式，可作为时间引用或可计算属性的输入。",
         doc_en: "Base/birth time expression for this entity; usable in time refs and calculable props.",
-    },
-    FieldSpec {
-        name: "belong_to",
-        value_kind: FieldValueKind::EntityList,
-        required: false,
-        snippet: "belong_to = [$1]",
-        short_zh: "归属上级实体列表",
-        short_en: "Parent entity list",
-        doc_zh: "上级实体列表，构成归属有向无环图（DAG），不允许成环。",
-        doc_en: "Parent entity list forming an acyclic ownership DAG.",
-    },
-    FieldSpec {
-        name: "tags",
-        value_kind: FieldValueKind::TagList,
-        required: false,
-        snippet: "tags = [$1]",
-        short_zh: "实体标签列表",
-        short_en: "Entity tags",
-        doc_zh: "实体的标签列表，用于分类与前端多选筛选；免声明，支持裸标识符或字符串。",
-        doc_en: "List of tags for categorization and multi-select filtering; no declaration required.",
     },
     FieldSpec {
         name: "calculable_props",
@@ -226,11 +313,46 @@ pub const EVENT_FIELDS: &[FieldSpec] = &[
     },
 ];
 
+pub const LINK_EDGE_FIELDS: &[FieldSpec] = &[
+    FieldSpec {
+        name: "start",
+        value_kind: FieldValueKind::Time,
+        required: false,
+        snippet: "start = $1",
+        short_zh: "关系生效时间（缺省 -∞）",
+        short_en: "Relation start time (default -∞)",
+        doc_zh: "关系生效时间表达式；省略表示从负无穷生效，支持所有 WEFT 时间表达式与块内 `end` 自引用。",
+        doc_en: "When this relation edge begins (defaults to -∞); supports all time expressions.",
+    },
+    FieldSpec {
+        name: "end",
+        value_kind: FieldValueKind::Time,
+        required: false,
+        snippet: "end = $1",
+        short_zh: "关系终止时间（缺省 +∞）",
+        short_en: "Relation end time (default +∞)",
+        doc_zh: "关系终止时间表达式；省略表示持续至正无穷，不能早于 `start`。",
+        doc_en: "When this relation edge ends (defaults to +∞); must not precede `start`.",
+    },
+    FieldSpec {
+        name: "description",
+        value_kind: FieldValueKind::String,
+        required: false,
+        snippet: "description = \"$1\"",
+        short_zh: "关系边描述",
+        short_en: "Link edge description",
+        doc_zh: "该条关系边的文字说明（支持多行字符串）。",
+        doc_en: "Description for this specific relation edge.",
+    },
+];
+
 pub fn fields_for(block: AttrBlockKind) -> &'static [FieldSpec] {
     match block {
         AttrBlockKind::Story => STORY_FIELDS,
         AttrBlockKind::Entity => ENTITY_FIELDS,
         AttrBlockKind::Event => EVENT_FIELDS,
+        AttrBlockKind::Link => LINK_GRAPH_FIELDS,
+        AttrBlockKind::LinkEdge => LINK_EDGE_FIELDS,
     }
 }
 
@@ -253,19 +375,19 @@ pub fn keyword_doc(word: &str, lang: &str) -> Option<&'static str> {
             "`time <name> = <expr>` — Named time anchor reusable in any time expression."
         }),
         "entity" => Some(if zh {
-            "`entity <名称> { ... }` — 实体声明（人物、团体、地点、道具等）；内置字段外的键会透传到 `extra_props`。"
+            "`entity <名称> { ... }` — 实体声明（人物、组织、地点、道具等）；内置字段外的键透传到 `extra_props`。"
         } else {
-            "`entity <name> { ... }` — Entity declaration (character, group, place, item); extra keys pass through as `extra_props`."
+            "`entity <name> { ... }` — Entity declaration (character, group, place, item, etc.); extra keys pass through as `extra_props`."
         }),
         "link" => Some(if zh {
-            "`link <组名> { A -- \"关系\" -- B / A -- \"关系\" -> B }` — 按组声明实体之间的无向或有向关系边。"
+            "`link <图名> { ... }` — 同质关系图：纯 `entity` 时变状态图或纯 `event` 剧情图（支持有向边 `->` / `-- \"标签\" ->`、无向边 `<->` / `<- \"标签\" ->`、团 `<-> [...]` 与批量端点 `[...] -> ...`）。"
         } else {
-            "`link <group> { A -- \"rel\" -- B / A -- \"rel\" -> B }` — Grouped undirected or directed entity relation edges."
+            "`link <graph> { ... }` — Homogeneous relation graph over either `entity` nodes (temporal) or `event` nodes (plot DAG); supports directed, symmetric, cliques, and batch endpoints."
         }),
         "event" => Some(if zh {
-            "`event <名称> { ... }` — 事件声明，必填 `start`，支持跨事件/实体相对时间偏移。"
+            "`event <名称> { ... }` — 事件声明，必填 `start`，与 `entity` 共享统一节点命名空间。"
         } else {
-            "`event <name> { ... }` — Event declaration (`start` required); supports relative time offsets."
+            "`event <name> { ... }` — Event declaration (`start` required); shares node namespace with `entity`."
         }),
         "events" => Some(if zh {
             "`events <名称> = [事件1, 事件2]` — 有序事件列表，列表顺序即时间线展示顺序。"

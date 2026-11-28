@@ -12,4 +12,5 @@ pub mod events;
 pub mod parser;
 pub mod phase;
 pub mod plugin_loader;
+pub mod relation;
 pub mod story;

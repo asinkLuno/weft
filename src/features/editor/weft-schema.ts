@@ -24,7 +24,7 @@ export const NAMED_DECL_KEYWORDS = new Set([
   "events",
 ]);
 
-export type AttrBlockKind = "story" | "entity" | "event";
+export type AttrBlockKind = "story" | "link" | "entity" | "event";
 
 export type FieldDocSpec = {
   name: string;
@@ -65,6 +65,78 @@ export const BLOCK_FIELDS: Record<AttrBlockKind, readonly FieldDocSpec[]> = {
       },
     },
   ],
+  link: [
+    {
+      name: "acyclic",
+      docDesc: {
+        zh: "无环（DAG），任意时间切片禁止有向环（强制有向边）",
+        en: "Acyclic (DAG); forbids directed cycles in every time slice (directed edges only)",
+      },
+    },
+    {
+      name: "asymmetric",
+      docDesc: {
+        zh: "非对称，禁止同时间段双向互指（强制有向边）",
+        en: "Asymmetric; forbids bidirectional edges in the same slice (directed edges only)",
+      },
+    },
+    {
+      name: "intransitive",
+      docDesc: {
+        zh: "反传递，禁止存在跳级直连 A -> C（当 A -> B -> C 存在时）",
+        en: "Intransitive; forbids shortcut A -> C when A -> B -> C exists",
+      },
+    },
+    {
+      name: "functional",
+      docDesc: {
+        zh: "多对一（源节点出度 ≤ 1），配合 acyclic 构成严格树",
+        en: "Functional (out-degree ≤ 1); combines with acyclic for strict trees",
+      },
+    },
+    {
+      name: "inverse_functional",
+      docDesc: {
+        zh: "一对多（目标节点入度 ≤ 1），如神器唯一持有",
+        en: "Inverse functional (in-degree ≤ 1), e.g. unique item ownership",
+      },
+    },
+    {
+      name: "symmetric",
+      docDesc: {
+        zh: '对称图，强制全部使用无向边或团（<-> / <- "..." ->），查重忽略方向',
+        en: 'Symmetric graph; requires undirected edges or cliques (<-> / <- "..." ->)',
+      },
+    },
+    {
+      name: "transitive",
+      docDesc: {
+        zh: "可传递，供前端与查询层计算传递闭包",
+        en: "Transitive; supports closure computation in views and queries",
+      },
+    },
+    {
+      name: "equivalence",
+      docDesc: {
+        zh: "等价图（自反+对称+传递），强制 <-> / 团，前端可合并商图节点",
+        en: "Equivalence graph; requires <-> / cliques and enables quotient view",
+      },
+    },
+    {
+      name: "chronological",
+      docDesc: {
+        zh: "时序单调，强制有向边且前置节点时间 <= 后续节点时间（防止伏笔/阻塞时间倒流穿帮）",
+        en: "Chronological; requires directed edges with source time <= target time",
+      },
+    },
+    {
+      name: "description",
+      docDesc: {
+        zh: "关系图说明，供 LSP Hover 展示",
+        en: "Graph documentation shown in LSP Hover",
+      },
+    },
+  ],
   entity: [
     {
       name: "description",
@@ -82,20 +154,6 @@ export const BLOCK_FIELDS: Record<AttrBlockKind, readonly FieldDocSpec[]> = {
       docDesc: {
         zh: "基准时间表达式，可计算属性的输入",
         en: "Base time expression, input of calculable props",
-      },
-    },
-    {
-      name: "belong_to",
-      docDesc: {
-        zh: "上级实体 id 列表，构成归属 DAG",
-        en: "Parent entity ids, forming an acyclic belong graph",
-      },
-    },
-    {
-      name: "tags",
-      docDesc: {
-        zh: "实体标签列表（免声明），可用于前端多选交集筛选",
-        en: "Entity tag list (no declaration needed) for multi-select intersection filtering",
       },
     },
     {

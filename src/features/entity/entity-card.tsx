@@ -1,36 +1,11 @@
 import { Handle, Position } from "@xyflow/react";
 import { CalendarDays } from "lucide-react";
-import {
-  createContext,
-  memo,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
-import { createPortal } from "react-dom";
+import { memo } from "react";
 import { EntityAvatar } from "@/components/detail-panel";
 import type { EntityData } from "./model";
 
-const PREVIEW_WIDTH = 280;
-const PREVIEW_GAP = 10;
-const VIEWPORT_MARGIN = 12;
 const CALENDAR_ICON = (
   <CalendarDays className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-);
-
-export const EntitySelectContext = createContext<((id: string) => void) | null>(
-  null,
-);
-
-export type EntityTagContextValue = {
-  activeTags: ReadonlySet<string>;
-  onToggleTag: (tag: string) => void;
-};
-
-export const EntityTagContext = createContext<EntityTagContextValue | null>(
-  null,
 );
 
 // 入参只要 data 与 selected：memo 避免拖动单个节点时重渲染其余卡片
@@ -43,7 +18,6 @@ export const EntityNode = memo(function EntityNode({
 }) {
   return (
     <>
-      {/* 归属层级边锚点：父级从底部出、子级从顶部入；藏掉但保留挂点，且不许用户拖出新连线 */}
       <Handle
         type="target"
         position={Position.Top}
@@ -64,11 +38,9 @@ export const EntityNode = memo(function EntityNode({
 export function EntityCard({
   data,
   selected = false,
-  interactive = true,
 }: {
   data: EntityData;
   selected?: boolean;
-  interactive?: boolean;
 }) {
   return (
     <div
@@ -81,22 +53,31 @@ export function EntityCard({
       <div className="card-body gap-2.5">
         <div className="flex items-start gap-2.5">
           <EntityAvatar name={data.name} avatar={data.avatar} size="md" />
-          <h3 className="min-w-0 self-center break-words text-sm leading-5 font-semibold">
-            {data.name}
-          </h3>
+          <div className="min-w-0 flex-1 self-center">
+            <h3 className="break-words text-sm leading-5 font-semibold">
+              {data.name}
+            </h3>
+            {data.aliases.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {data.aliases.map((alias) => (
+                  <span
+                    key={alias}
+                    className="badge badge-xs badge-ghost max-w-full truncate text-[10px]"
+                  >
+                    = {alias}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         {data.description && (
           <p className="line-clamp-3 whitespace-pre-wrap break-words text-xs leading-5 text-base-content/70">
             {data.description}
           </p>
         )}
-        {data.tags.length > 0 && (
-          <TagBadgeList tags={data.tags} interactive={interactive} />
-        )}
       </div>
-      {(data.baseTime ||
-        data.extraProps.length > 0 ||
-        data.parents.length > 0) && (
+      {(data.baseTime || data.extraProps.length > 0) && (
         <div className="flex flex-col gap-2 border-t border-base-300 px-4 py-3">
           {data.baseTime && (
             <div className="flex items-start gap-1.5 text-xs text-base-content/60">
@@ -112,158 +93,8 @@ export function EntityCard({
               <span className="min-w-0 break-words leading-5">{value}</span>
             </div>
           ))}
-          {data.parents.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              <p className="text-xs text-base-content/60">{data.belongLabel}</p>
-              <div className="flex flex-wrap gap-1">
-                {data.parents.map((p) => (
-                  <ParentBadge
-                    key={p.id}
-                    parent={p}
-                    interactive={interactive}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
     </div>
-  );
-}
-
-function TagBadgeList({
-  tags,
-  interactive,
-}: {
-  tags: readonly string[];
-  interactive: boolean;
-}) {
-  const tagCtx = useContext(EntityTagContext);
-  return (
-    <div className="flex flex-wrap gap-1">
-      {tags.map((tag) => {
-        const active = tagCtx?.activeTags.has(tag) ?? false;
-        const tone = active ? "badge-primary" : "badge-soft badge-primary";
-        if (!interactive || !tagCtx) {
-          return (
-            <span
-              key={tag}
-              className={`badge badge-xs h-auto max-w-full whitespace-normal break-words ${tone}`}
-            >
-              {tag}
-            </span>
-          );
-        }
-        return (
-          <button
-            key={tag}
-            type="button"
-            className={`nodrag badge badge-xs h-auto max-w-full cursor-pointer whitespace-normal break-words transition-colors ${tone}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              tagCtx.onToggleTag(tag);
-            }}
-          >
-            {tag}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-type PreviewCoords = { left: number; top: number };
-
-function computePreviewCoords(anchor: DOMRect): PreviewCoords {
-  const spaceRight = window.innerWidth - anchor.right - PREVIEW_GAP;
-  const preferRight = spaceRight >= PREVIEW_WIDTH + VIEWPORT_MARGIN;
-  const left = preferRight
-    ? anchor.right + PREVIEW_GAP
-    : Math.max(VIEWPORT_MARGIN, anchor.left - PREVIEW_GAP - PREVIEW_WIDTH);
-  // 留出底部边距，避免预览卡贴底被视口截断
-  const maxTop = Math.max(VIEWPORT_MARGIN, window.innerHeight - 260);
-  const top = Math.min(Math.max(VIEWPORT_MARGIN, anchor.top), maxTop);
-  return { left, top };
-}
-
-// 预览卡通过 Portal 挂到 document.body，脱离 React Flow 节点的堆叠上下文，不会被相邻卡片盖住
-function ParentBadge({
-  parent,
-  interactive,
-}: {
-  parent: EntityData["parents"][number];
-  interactive: boolean;
-}) {
-  const onSelectEntity = useContext(EntitySelectContext);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const [coords, setCoords] = useState<PreviewCoords | null>(null);
-  const preview = interactive ? parent.preview : undefined;
-
-  const showPreview = useCallback(() => {
-    const rect = triggerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setCoords(computePreviewCoords(rect));
-  }, []);
-
-  const hidePreview = useCallback(() => {
-    setCoords(null);
-  }, []);
-
-  const isOpen = coords !== null;
-
-  // 画布缩放或滚动时自动收起预览，防止浮层停在旧坐标
-  useEffect(() => {
-    if (!isOpen) return;
-    const dismiss = () => setCoords(null);
-    window.addEventListener("wheel", dismiss, { passive: true });
-    window.addEventListener("pointerdown", dismiss, {
-      capture: true,
-      passive: true,
-    });
-    return () => {
-      window.removeEventListener("wheel", dismiss);
-      window.removeEventListener("pointerdown", dismiss, { capture: true });
-    };
-  }, [isOpen]);
-
-  if (!preview) {
-    return (
-      <span className="badge badge-sm badge-outline h-auto max-w-full border-base-300 whitespace-normal break-words">
-        {parent.name}
-      </span>
-    );
-  }
-
-  return (
-    <>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="nodrag badge badge-sm badge-outline h-auto max-w-full cursor-pointer border-base-300 whitespace-normal break-words transition-colors hover:border-primary hover:text-primary"
-        onMouseEnter={showPreview}
-        onMouseLeave={hidePreview}
-        onFocus={showPreview}
-        onBlur={hidePreview}
-        onClick={(event) => {
-          event.stopPropagation();
-          setCoords(null);
-          onSelectEntity?.(parent.id);
-        }}
-      >
-        {parent.name}
-      </button>
-      {coords &&
-        createPortal(
-          <div
-            role="tooltip"
-            className="pointer-events-none fixed z-50 rounded-box shadow-lg"
-            style={{ left: coords.left, top: coords.top }}
-          >
-            <EntityCard data={preview} interactive={false} />
-          </div>,
-          document.body,
-        )}
-    </>
   );
 }

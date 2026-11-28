@@ -2,8 +2,7 @@
 //!
 //! 语法为类 HCL 的声明式块语言：
 //! - 顶层声明：`story { ... }`、`time <name> = <expr>`、`entity <name> { ... }`、
-//!   `link <group> { a -- "rel" -- b }`、`event <name> { ... }`、
-//!   `events <name> = [...]`
+//!   `event <name> { ... }`、`events <name> = [...]`、`link <name> { ... }`
 //! - 标识符支持中文与中点（如 `哈利·波特`），含空格/特殊符号/数字开头时用双引号（如 `"9又3/4站台"`）。
 //! - 表达式支持标量、列表、对象、成员访问（`事件.start`）与 `+` / `-` 时间偏移运算。
 
@@ -39,7 +38,8 @@ pub enum TopItem {
         attrs: Vec<Spanned<Attr>>,
     },
     Link {
-        group: Spanned<String>,
+        name: Spanned<String>,
+        attrs: Vec<Spanned<Attr>>,
         edges: Vec<Spanned<LinkEdge>>,
     },
     Event {
@@ -58,22 +58,57 @@ pub struct Attr {
     pub value: Spanned<Expr>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LinkSyntax {
-    /// `A -- "rel" -- B`
-    Undirected,
-    /// `A -- "rel" -> B`
-    Forward,
-    /// `A <- "rel" -- B`
-    Backward,
+#[derive(Clone, Debug)]
+pub enum LinkEndpoint {
+    Single(Spanned<String>),
+    List(Vec<Spanned<String>>, Span),
+}
+
+impl LinkEndpoint {
+    pub fn names(&self) -> &[Spanned<String>] {
+        match self {
+            Self::Single(name) => std::slice::from_ref(name),
+            Self::List(names, _) => names.as_slice(),
+        }
+    }
+
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Single((_, span)) | Self::List(_, span) => *span,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum LinkEdgeKind {
+    /// `left -> right` 或 `left -- "label" -> right`
+    Directed {
+        left: LinkEndpoint,
+        right: LinkEndpoint,
+    },
+    /// `left <-> right` 或 `left <- "label" -> right`
+    Symmetric {
+        left: LinkEndpoint,
+        right: LinkEndpoint,
+    },
+    /// `<-> [A, B, C]` 或 `<- "label" -> [A, B, C]`
+    Clique {
+        members: Vec<Spanned<String>>,
+        list_span: Span,
+    },
 }
 
 #[derive(Clone, Debug)]
 pub struct LinkEdge {
-    pub left: Spanned<String>,
-    pub relation: Spanned<String>,
-    pub right: Spanned<String>,
-    pub syntax: LinkSyntax,
+    pub kind: LinkEdgeKind,
+    pub label: Option<Spanned<String>>,
+    pub attrs: Option<Spanned<Vec<Spanned<Attr>>>>,
+}
+
+impl LinkEdge {
+    pub fn is_directed(&self) -> bool {
+        matches!(self.kind, LinkEdgeKind::Directed { .. })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,6 +159,7 @@ enum Token {
     Str(String),
     Ident(String),
     LinkDash,
+    LinkArrowBoth,
     LinkArrowRight,
     LinkArrowLeft,
     Plus,
@@ -148,6 +184,7 @@ impl fmt::Display for Token {
             Token::Str(s) => write!(f, "\"{s}\""),
             Token::Ident(s) => write!(f, "{s}"),
             Token::LinkDash => write!(f, "--"),
+            Token::LinkArrowBoth => write!(f, "<->"),
             Token::LinkArrowRight => write!(f, "->"),
             Token::LinkArrowLeft => write!(f, "<-"),
             Token::Plus => write!(f, "+"),
@@ -390,6 +427,7 @@ fn lexer<'src>()
         .labelled("identifier");
 
     let punct = choice((
+        just("<->").to(Token::LinkArrowBoth),
         just("--").to(Token::LinkDash),
         just("->").to(Token::LinkArrowRight),
         just("<-").to(Token::LinkArrowLeft),
@@ -625,7 +663,7 @@ where
     let time_decl = kw("time")
         .ignore_then(name.clone())
         .then_ignore(just(Token::Eq))
-        .then(expr)
+        .then(expr.clone())
         .then_ignore(opt_sep())
         .map(|(name, expr)| TopItem::TimeAnchor { name, expr })
         .labelled("time anchor");
@@ -635,55 +673,6 @@ where
         .then(attr_block.clone())
         .map(|(name, attrs)| TopItem::Entity { name, attrs })
         .labelled("entity block");
-
-    let link_edge = name
-        .clone()
-        .then(choice((
-            just(Token::LinkDash)
-                .ignore_then(name.clone())
-                .then(choice((
-                    just(Token::LinkDash).to(LinkSyntax::Undirected),
-                    just(Token::LinkArrowRight).to(LinkSyntax::Forward),
-                ))),
-            just(Token::LinkArrowLeft)
-                .ignore_then(name.clone())
-                .then_ignore(just(Token::LinkDash))
-                .map(|relation| (relation, LinkSyntax::Backward)),
-        )))
-        .then(name.clone())
-        .map(|((left, (relation, syntax)), right)| LinkEdge {
-            left,
-            relation,
-            right,
-            syntax,
-        })
-        .map_with(|edge, e| Some((edge, e.span())))
-        .labelled("link edge")
-        .then_ignore(opt_sep());
-
-    let link_decl = kw("link")
-        .ignore_then(name.clone())
-        .then(
-            link_edge
-                .repeated()
-                .collect::<Vec<_>>()
-                .map(|items| items.into_iter().flatten().collect())
-                .delimited_by(just(Token::LBrace), just(Token::RBrace))
-                .recover_with(via_parser(nested_delimiters(
-                    Token::LBrace,
-                    Token::RBrace,
-                    [(Token::LBracket, Token::RBracket)],
-                    |_| Vec::new(),
-                ))),
-        )
-        .map(|(group, edges)| TopItem::Link { group, edges })
-        .labelled("link block");
-
-    let event_decl = kw("event")
-        .ignore_then(name.clone())
-        .then(attr_block)
-        .map(|(name, attrs)| TopItem::Event { name, attrs })
-        .labelled("event block");
 
     let name_list = name
         .clone()
@@ -697,6 +686,169 @@ where
             [(Token::LBrace, Token::RBrace)],
             |_| Vec::new(),
         )));
+
+    let link_endpoint = name_list
+        .clone()
+        .map_with(|names, e| LinkEndpoint::List(names, e.span()))
+        .or(name.clone().map(LinkEndpoint::Single))
+        .labelled("link endpoint");
+
+    let edge_label = select! {
+        Token::Str(s) => (s, true),
+        Token::Ident(s) => (s, false),
+    }
+    .validate(|(s, quoted), e, emitter| {
+        if !quoted {
+            emitter.emit(Rich::custom(
+                e.span(),
+                format!("edge label must be a quoted string: `\"{s}\"`"),
+            ));
+        }
+        (s, e.span())
+    })
+    .labelled("edge label");
+
+    let edge_attrs = attr_block
+        .clone()
+        .map_with(|attrs, e| (attrs, e.span()))
+        .or_not();
+
+    // 团（Clique）：`<-> [A, B, C]` 或 `<- "label" -> [A, B, C]`
+    let clique_op = just(Token::LinkArrowBoth).to(None).or(just(Token::LinkArrowLeft)
+        .ignore_then(edge_label.clone())
+        .then_ignore(just(Token::LinkArrowRight))
+        .map(Some));
+
+    let clique_edge = clique_op
+        .then(name_list.clone().map_with(|members, e| (members, e.span())))
+        .then(edge_attrs.clone())
+        .map(|((label, (members, list_span)), attrs)| LinkEdge {
+            kind: LinkEdgeKind::Clique { members, list_span },
+            label,
+            attrs,
+        });
+
+    // 二元或批量边：`A -> B`、`A -- "label" -> B`、`A <-> B`、`A <- "label" -> B`
+    let binary_op = choice((
+        just(Token::LinkArrowRight).to((true, None)),
+        just(Token::LinkArrowBoth).to((false, None)),
+        just(Token::LinkDash)
+            .ignore_then(edge_label.clone())
+            .then_ignore(just(Token::LinkArrowRight))
+            .map(|label| (true, Some(label))),
+        just(Token::LinkArrowLeft)
+            .ignore_then(edge_label.clone())
+            .then_ignore(just(Token::LinkArrowRight))
+            .map(|label| (false, Some(label))),
+    ));
+
+    let binary_edge = link_endpoint
+        .clone()
+        .then(binary_op)
+        .then(link_endpoint.clone())
+        .then(edge_attrs)
+        .map(|(((left, (directed, label)), right), attrs)| LinkEdge {
+            kind: if directed {
+                LinkEdgeKind::Directed { left, right }
+            } else {
+                LinkEdgeKind::Symmetric { left, right }
+            },
+            label,
+            attrs,
+        });
+
+    #[derive(Clone)]
+    enum LinkBodyItem {
+        Attr(Spanned<Attr>),
+        Edge(Spanned<LinkEdge>),
+    }
+
+    let link_attr = name
+        .clone()
+        .then_ignore(just(Token::Eq))
+        .then(expr)
+        .map(|(key, value)| Attr { key, value })
+        .map_with(|attr, e| LinkBodyItem::Attr((attr, e.span())))
+        .labelled("link graph attribute");
+
+    let link_edge_item = clique_edge
+        .or(binary_edge)
+        .map_with(|edge, e| LinkBodyItem::Edge((edge, e.span())))
+        .labelled("link edge");
+
+    let next_edge_op = choice((
+        just(Token::LinkArrowRight).ignored(),
+        just(Token::LinkArrowBoth).ignored(),
+        just(Token::LinkDash).ignored(),
+        just(Token::LinkArrowLeft).ignored(),
+    ));
+
+    let raw_label_tok = select! {
+        Token::Str(_) => (),
+        Token::Ident(_) => (),
+    };
+
+    let next_clique_start = just(Token::LinkArrowBoth)
+        .then(just(Token::LBracket))
+        .ignored()
+        .or(just(Token::LinkArrowLeft)
+            .then(raw_label_tok)
+            .then(just(Token::LinkArrowRight))
+            .then(just(Token::LBracket))
+            .ignored());
+
+    let link_body_item = link_attr
+        .or(link_edge_item)
+        .map(Some)
+        .then_ignore(opt_sep())
+        .recover_with(via_parser(
+            any()
+                .and_is(
+                    just(Token::RBrace)
+                        .ignored()
+                        .or(name.clone().then(just(Token::Eq)).ignored())
+                        .or(next_clique_start)
+                        .or(just(Token::LBracket).ignored())
+                        .or(name.clone().then(next_edge_op).ignored())
+                        .not(),
+                )
+                .repeated()
+                .at_least(1)
+                .to(None),
+        ));
+
+    let link_decl = kw("link")
+        .ignore_then(name.clone())
+        .then(
+            link_body_item
+                .repeated()
+                .collect::<Vec<_>>()
+                .delimited_by(just(Token::LBrace), just(Token::RBrace))
+                .recover_with(via_parser(nested_delimiters(
+                    Token::LBrace,
+                    Token::RBrace,
+                    [(Token::LBracket, Token::RBracket)],
+                    |_| Vec::new(),
+                ))),
+        )
+        .map(|(name, items)| {
+            let mut attrs = Vec::new();
+            let mut edges = Vec::new();
+            for item in items.into_iter().flatten() {
+                match item {
+                    LinkBodyItem::Attr(a) => attrs.push(a),
+                    LinkBodyItem::Edge(e) => edges.push(e),
+                }
+            }
+            TopItem::Link { name, attrs, edges }
+        })
+        .labelled("link block");
+
+    let event_decl = kw("event")
+        .ignore_then(name.clone())
+        .then(attr_block)
+        .map(|(name, attrs)| TopItem::Event { name, attrs })
+        .labelled("event block");
 
     let events_decl = kw("events")
         .ignore_then(name)

@@ -203,10 +203,24 @@ pub enum ValidationError {
     DuplicateEntity { entity: String },
     #[error("duplicate event `{event}`")]
     DuplicateEvent { event: String },
+    #[error("duplicate link graph `{graph}`")]
+    DuplicateLinkGraph { graph: String },
+    #[error("symbol `{name}` is already declared as {existing_kind} and cannot also be declared as {new_kind}")]
+    DuplicateSymbol {
+        name: String,
+        existing_kind: String,
+        new_kind: String,
+    },
     #[error("duplicate events `{events}`")]
     DuplicateEvents { events: String },
     #[error("duplicate time anchor `{name}`")]
     DuplicateTimeAnchor { name: String },
+    #[error("link graph `{graph}` enables mutually exclusive properties `{attr_a}` and `{attr_b}`")]
+    InvalidGraphConfig {
+        graph: String,
+        attr_a: String,
+        attr_b: String,
+    },
     #[error("missing required field `{field}` in {section}")]
     MissingField { section: String, field: String },
     #[error("invalid value for field `{field}` in {section}: {reason}")]
@@ -221,16 +235,76 @@ pub enum ValidationError {
     UnknownTimeRef { reference: String },
     #[error("time reference `{target}` forms a cycle")]
     TimeCycle { target: String },
-    #[error("entity link {group} refers to unknown entity {entity}")]
-    UnknownLinkEntity { group: String, entity: String },
+    #[error("link `{graph}` refers to unknown node `{entity}`")]
+    UnknownLinkEntity { graph: String, entity: String },
+    #[error("link `{graph}` mixes {expected_kind} and {found_kind} nodes (`{node}`); a link graph must connect only entities or only events")]
+    MixedLinkNodeKinds {
+        graph: String,
+        expected_kind: String,
+        found_kind: String,
+        node: String,
+    },
+    #[error("event link graph `{graph}` cannot enable `equivalence`")]
+    EventGraphEquivalence { graph: String },
+    #[error("edges in event link graph `{graph}` cannot specify `start` or `end`")]
+    EventLinkHasTimeBounds { graph: String },
+    #[error("edges in equivalence link graph `{graph}` cannot specify `start` or `end`")]
+    EquivalenceLinkHasTimeBounds { graph: String },
+    #[error("chronological link `{graph}` violated: `{from}` ({from_time}) occurs after `{to}` ({to_time})")]
+    ChronologicalViolation {
+        graph: String,
+        from: String,
+        from_time: String,
+        to: String,
+        to_time: String,
+    },
+    #[error("clique in link `{graph}` requires at least 2 nodes, got {count}")]
+    InvalidClique { graph: String, count: usize },
+    #[error("endpoint list in link `{graph}` cannot be empty")]
+    EmptyLinkEndpoint { graph: String },
+    #[error("link `{graph}` uses wrong arrow direction: expected {expected}")]
+    ArrowDirectionMismatch { graph: String, expected: String },
+    #[error("acyclic link `{graph}` forms a cycle ({path}) during {interval}")]
+    GraphCycle {
+        graph: String,
+        path: String,
+        interval: String,
+    },
+    #[error("asymmetric link `{graph}` has bidirectional edges between `{a}` and `{b}` during {interval}")]
+    AsymmetryConflict {
+        graph: String,
+        a: String,
+        b: String,
+        interval: String,
+    },
+    #[error("intransitive link `{graph}` has shortcut `{a} -> {c}` bypassing `{a} -> {b} -> {c}` during {interval}")]
+    IntransitivityViolation {
+        graph: String,
+        a: String,
+        b: String,
+        c: String,
+        interval: String,
+    },
+    #[error("functional link `{graph}` has multiple outgoing targets from `{node}` ({targets}) during {interval}")]
+    FunctionalConflict {
+        graph: String,
+        node: String,
+        targets: String,
+        interval: String,
+    },
+    #[error("inverse_functional link `{graph}` has multiple incoming sources to `{node}` ({sources}) during {interval}")]
+    InverseFunctionalConflict {
+        graph: String,
+        node: String,
+        sources: String,
+        interval: String,
+    },
+    #[error("link edge `{edge}` in `{graph}` ends before it starts")]
+    LinkEndBeforeStart { graph: String, edge: String },
     #[error("event {event} refers to unknown entity {entity}")]
     UnknownEventEntity { event: String, entity: String },
     #[error("events {events} includes unknown event {event}")]
     UnknownEventsEvent { events: String, event: String },
-    #[error("entity {entity} refers to unknown parent {target}")]
-    EntityUnknownParent { entity: String, target: String },
-    #[error("entity {entity} has a parent cycle")]
-    EntityCycle { entity: String },
     #[error("entity {entity} avatar must be an existing image file: {path}")]
     InvalidAvatarPath { entity: String, path: String },
     #[error("time must be a nonempty list")]
@@ -330,18 +404,33 @@ impl ValidationError {
             Self::DuplicateStory => "duplicate-story",
             Self::DuplicateEntity { .. } => "duplicate-entity",
             Self::DuplicateEvent { .. } => "duplicate-event",
+            Self::DuplicateLinkGraph { .. } => "duplicate-link-graph",
+            Self::DuplicateSymbol { .. } => "duplicate-symbol",
             Self::DuplicateEvents { .. } => "duplicate-events",
             Self::DuplicateTimeAnchor { .. } => "duplicate-time-anchor",
+            Self::InvalidGraphConfig { .. } => "invalid-graph-config",
             Self::MissingField { .. } => "missing-field",
             Self::InvalidField { .. } => "invalid-field",
             Self::UnknownField { .. } => "unknown-field",
             Self::UnknownTimeRef { .. } => "unknown-time-ref",
             Self::TimeCycle { .. } => "time-cycle",
             Self::UnknownLinkEntity { .. } => "unknown-link-entity",
+            Self::MixedLinkNodeKinds { .. } => "mixed-link-node-kinds",
+            Self::EventGraphEquivalence { .. } => "event-graph-equivalence",
+            Self::EventLinkHasTimeBounds { .. } => "event-link-time-bounds",
+            Self::EquivalenceLinkHasTimeBounds { .. } => "equivalence-link-time-bounds",
+            Self::ChronologicalViolation { .. } => "chronological-violation",
+            Self::InvalidClique { .. } => "invalid-clique",
+            Self::EmptyLinkEndpoint { .. } => "empty-link-endpoint",
+            Self::ArrowDirectionMismatch { .. } => "arrow-direction-mismatch",
+            Self::GraphCycle { .. } => "graph-cycle",
+            Self::AsymmetryConflict { .. } => "asymmetry-conflict",
+            Self::IntransitivityViolation { .. } => "intransitivity-violation",
+            Self::FunctionalConflict { .. } => "functional-conflict",
+            Self::InverseFunctionalConflict { .. } => "inverse-functional-conflict",
+            Self::LinkEndBeforeStart { .. } => "link-end-before-start",
             Self::UnknownEventEntity { .. } => "unknown-event-entity",
             Self::UnknownEventsEvent { .. } => "unknown-events-event",
-            Self::EntityUnknownParent { .. } => "entity-unknown-parent",
-            Self::EntityCycle { .. } => "entity-cycle",
             Self::InvalidAvatarPath { .. } => "invalid-avatar-path",
             Self::TimeNonemptyList => "time-nonempty-list",
             Self::TimeIntegerComponent => "time-integer-component",
@@ -381,8 +470,19 @@ impl ValidationError {
             Self::DuplicateStory => "重复声明了 story 块".to_owned(),
             Self::DuplicateEntity { entity } => format!("重复声明了实体 `{entity}`"),
             Self::DuplicateEvent { event } => format!("重复声明了事件 `{event}`"),
+            Self::DuplicateLinkGraph { graph } => format!("重复声明了关系图 `{graph}`"),
+            Self::DuplicateSymbol {
+                name,
+                existing_kind,
+                new_kind,
+            } => format!("节点名 `{name}` 已被声明为 {existing_kind}，不能再声明为 {new_kind}"),
             Self::DuplicateEvents { events } => format!("重复声明了事件列表 `{events}`"),
             Self::DuplicateTimeAnchor { name } => format!("重复声明了时间锚点 `{name}`"),
+            Self::InvalidGraphConfig {
+                graph,
+                attr_a,
+                attr_b,
+            } => format!("关系图 `{graph}` 同时启用了互斥属性 `{attr_a}` 与 `{attr_b}`"),
             Self::MissingField { section, field } => {
                 format!("{section} 缺少必填字段 `{field}`")
             }
@@ -396,20 +496,94 @@ impl ValidationError {
             }
             Self::UnknownTimeRef { reference } => format!("引用了不存在的时间 `{reference}`"),
             Self::TimeCycle { target } => format!("时间引用 `{target}` 形成了循环"),
-            Self::UnknownLinkEntity { group, entity } => {
-                format!("link `{group}` 引用了不存在的实体 `{entity}`")
+            Self::UnknownLinkEntity { graph, entity } => {
+                format!("link `{graph}` 引用了不存在的实体或事件 `{entity}`")
+            }
+            Self::MixedLinkNodeKinds {
+                graph,
+                expected_kind,
+                found_kind,
+                node,
+            } => {
+                format!(
+                    "关系图 `{graph}` 混用了 {expected_kind} 与 {found_kind} 节点（`{node}`）；同一张 link 图只能全连 entity 或全连 event"
+                )
+            }
+            Self::EventGraphEquivalence { graph } => {
+                format!("事件关系图 `{graph}` 不能启用 `equivalence`（商图等价仅适用于 entity）")
+            }
+            Self::EventLinkHasTimeBounds { graph } => {
+                format!(
+                    "事件关系图 `{graph}` 的边不能指定 `start` 或 `end`（事件自身已具备时间坐标）"
+                )
+            }
+            Self::EquivalenceLinkHasTimeBounds { graph } => {
+                format!("等价关系图 `{graph}` 的边不能指定 `start` 或 `end`")
+            }
+            Self::ChronologicalViolation {
+                graph,
+                from,
+                from_time,
+                to,
+                to_time,
+            } => {
+                format!(
+                    "时序关系图 `{graph}` 出现时间穿帮：前置节点 `{from}`（{from_time}）晚于后续节点 `{to}`（{to_time}）"
+                )
+            }
+            Self::InvalidClique { graph, count } => {
+                format!("link `{graph}` 中的团（Clique）至少需要 2 个节点，当前只有 {count} 个")
+            }
+            Self::EmptyLinkEndpoint { graph } => {
+                format!("link `{graph}` 中边的端点列表不能为空")
+            }
+            Self::ArrowDirectionMismatch { graph, expected } => {
+                format!("link `{graph}` 中的边方向与图约束不匹配，应使用 {expected}")
+            }
+            Self::GraphCycle {
+                graph,
+                path,
+                interval,
+            } => format!("无环图 `{graph}` 在时段 {interval} 内形成有向环：{path}"),
+            Self::AsymmetryConflict {
+                graph,
+                a,
+                b,
+                interval,
+            } => format!("非对称图 `{graph}` 在时段 {interval} 内出现双向互指：`{a}` ↔ `{b}`"),
+            Self::IntransitivityViolation {
+                graph,
+                a,
+                b,
+                c,
+                interval,
+            } => format!(
+                "反传递图 `{graph}` 在时段 {interval} 内存在跳级直连 `{a} -> {c}`（已有 `{a} -> {b} -> {c}`）"
+            ),
+            Self::FunctionalConflict {
+                graph,
+                node,
+                targets,
+                interval,
+            } => format!(
+                "多对一图 `{graph}` 在时段 {interval} 内节点 `{node}` 出度超过 1（指向：{targets}）"
+            ),
+            Self::InverseFunctionalConflict {
+                graph,
+                node,
+                sources,
+                interval,
+            } => format!(
+                "一对多图 `{graph}` 在时段 {interval} 内节点 `{node}` 入度超过 1（来自：{sources}）"
+            ),
+            Self::LinkEndBeforeStart { graph, edge } => {
+                format!("link `{graph}` 的边 `{edge}` 结束时间早于开始时间")
             }
             Self::UnknownEventEntity { event, entity } => {
                 format!("event `{event}` 引用了不存在的实体 `{entity}`")
             }
             Self::UnknownEventsEvent { events, event } => {
                 format!("事件列表 `{events}` 引用了不存在的事件 `{event}`")
-            }
-            Self::EntityUnknownParent { entity, target } => {
-                format!("entity `{entity}` belong_to 引用了不存在的实体 `{target}`")
-            }
-            Self::EntityCycle { entity } => {
-                format!("entity `{entity}` 的 belong_to 形成了循环")
             }
             Self::InvalidAvatarPath { entity, path } => {
                 format!("entity `{entity}` 的 avatar `{path}` 必须指向已存在的图片文件")
@@ -499,7 +673,7 @@ pub enum DocumentError {
     #[error("{}", format_validation(error, span.as_ref()))]
     Validation {
         #[source]
-        error: ValidationError,
+        error: Box<ValidationError>,
         #[serde(skip_serializing_if = "Option::is_none")]
         span: Option<SourceSpan>,
     },
@@ -517,7 +691,7 @@ fn format_validation(error: &ValidationError, span: Option<&SourceSpan>) -> Stri
 impl DocumentError {
     pub fn validation_at(error: ValidationError, span: SourceSpan) -> Self {
         Self::Validation {
-            error,
+            error: Box::new(error),
             span: Some(span),
         }
     }
@@ -540,7 +714,7 @@ impl DocumentError {
 
     pub(crate) fn into_diagnostic(self, fallback_span: Option<ByteSpan>) -> Diagnostic {
         match self {
-            Self::Validation { error, .. } => Diagnostic::from_validation(error, fallback_span),
+            Self::Validation { error, .. } => Diagnostic::from_validation(*error, fallback_span),
             Self::Raw { message } => Diagnostic::from_validation(
                 ValidationError::SyntaxError { details: message },
                 fallback_span,
@@ -551,6 +725,9 @@ impl DocumentError {
 
 impl From<ValidationError> for DocumentError {
     fn from(error: ValidationError) -> Self {
-        Self::Validation { error, span: None }
+        Self::Validation {
+            error: Box::new(error),
+            span: None,
+        }
     }
 }

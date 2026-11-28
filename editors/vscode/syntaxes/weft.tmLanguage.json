@@ -76,7 +76,7 @@
     "properties": {
       "patterns": [
         {
-          "match": "\\b(title|author|description|date_mode|calculable_props|avatar|base_time|belong_to|tags|start|end|entities)\\b(?=\\s*=)",
+          "match": "\\b(title|author|description|date_mode|calculable_props|avatar|base_time|start|end|entities|acyclic|asymmetric|intransitive|functional|inverse_functional|symmetric|transitive|equivalence|chronological)\\b(?=\\s*=)",
           "captures": {
             "1": { "name": "support.type.property-name.weft" }
           }
@@ -120,7 +120,7 @@
       "patterns": [
         {
           "name": "keyword.operator.link.weft",
-          "match": "--|->|<-"
+          "match": "<->|--|->|<-"
         },
         {
           "name": "keyword.operator.weft",

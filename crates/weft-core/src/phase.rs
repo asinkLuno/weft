@@ -30,6 +30,14 @@ pub(crate) enum TimeTarget {
     EntityBaseTime(String),
     EventStart(String),
     EventEnd(String),
+    LinkStart(usize),
+    LinkEnd(usize),
+}
+
+#[derive(Clone, Copy, Debug)]
+enum SelfTimeScope<'a> {
+    Event(&'a str),
+    Link(usize),
 }
 
 impl TimeTarget {
@@ -39,12 +47,15 @@ impl TimeTarget {
             Self::EntityBaseTime(id) => format!("{id}.base_time"),
             Self::EventStart(id) => format!("{id}.start"),
             Self::EventEnd(id) => format!("{id}.end"),
+            Self::LinkStart(_) => "start".to_owned(),
+            Self::LinkEnd(_) => "end".to_owned(),
         }
     }
 
-    fn self_event(&self) -> Option<&str> {
+    fn self_scope(&self) -> Option<SelfTimeScope<'_>> {
         match self {
-            Self::EventStart(id) | Self::EventEnd(id) => Some(id.as_str()),
+            Self::EventStart(id) | Self::EventEnd(id) => Some(SelfTimeScope::Event(id.as_str())),
+            Self::LinkStart(id) | Self::LinkEnd(id) => Some(SelfTimeScope::Link(*id)),
             Self::Anchor(_) | Self::EntityBaseTime(_) => None,
         }
     }
@@ -97,6 +108,13 @@ impl<'a> TimeResolver<'a> {
             return None;
         }
         let Some(expr) = self.exprs.get(target) else {
+            // 点事件未显式声明 end 时，外部引用 `事件.end` 退化为其 `start`。
+            if let TimeTarget::EventEnd(event_id) = target {
+                let start_target = TimeTarget::EventStart(event_id.clone());
+                if self.exprs.contains_key(&start_target) {
+                    return self.resolve_target(&start_target, use_span, diagnostics);
+                }
+            }
             diagnostics.push(Diagnostic::from_validation(
                 ValidationError::UnknownTimeRef {
                     reference: target.display_name(),
@@ -106,7 +124,7 @@ impl<'a> TimeResolver<'a> {
             return None;
         };
         self.visiting.push((target.clone(), to_byte_span(expr.1)));
-        let phase = self.resolve_expr(expr, target.self_event(), diagnostics);
+        let phase = self.resolve_expr(expr, target.self_scope(), diagnostics);
         self.visiting.pop();
         self.resolved.insert(target.clone(), phase.clone());
         phase
@@ -115,7 +133,7 @@ impl<'a> TimeResolver<'a> {
     fn resolve_expr(
         &mut self,
         expr: &Spanned<Expr>,
-        self_event: Option<&str>,
+        self_scope: Option<SelfTimeScope<'_>>,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Option<Phase> {
         let (node, span) = expr;
@@ -130,20 +148,37 @@ impl<'a> TimeResolver<'a> {
                 anchor: None,
             },
             Expr::Ident(name) => {
-                if let Some(event_id) = self_event {
-                    if name == "start" {
-                        return self.resolve_target(
-                            &TimeTarget::EventStart(event_id.to_owned()),
-                            *span,
-                            diagnostics,
-                        );
-                    }
-                    if name == "end" {
-                        return self.resolve_target(
-                            &TimeTarget::EventEnd(event_id.to_owned()),
-                            *span,
-                            diagnostics,
-                        );
+                if let Some(scope) = self_scope {
+                    match (scope, name.as_str()) {
+                        (SelfTimeScope::Event(event_id), "start") => {
+                            return self.resolve_target(
+                                &TimeTarget::EventStart(event_id.to_owned()),
+                                *span,
+                                diagnostics,
+                            );
+                        }
+                        (SelfTimeScope::Event(event_id), "end") => {
+                            return self.resolve_target(
+                                &TimeTarget::EventEnd(event_id.to_owned()),
+                                *span,
+                                diagnostics,
+                            );
+                        }
+                        (SelfTimeScope::Link(link_id), "start") => {
+                            return self.resolve_target(
+                                &TimeTarget::LinkStart(link_id),
+                                *span,
+                                diagnostics,
+                            );
+                        }
+                        (SelfTimeScope::Link(link_id), "end") => {
+                            return self.resolve_target(
+                                &TimeTarget::LinkEnd(link_id),
+                                *span,
+                                diagnostics,
+                            );
+                        }
+                        _ => {}
                     }
                 }
                 self.used_anchors.insert(name.clone());
@@ -167,7 +202,7 @@ impl<'a> TimeResolver<'a> {
                 self.resolve_target(&target, *span, diagnostics)?
             }
             Expr::Binary { lhs, op, rhs } => {
-                let anchor = self.resolve_expr(lhs, self_event, diagnostics);
+                let anchor = self.resolve_expr(lhs, self_scope, diagnostics);
                 let offset = self.parse_offset(rhs, diagnostics);
                 let (anchor, mut offset) = (anchor?, offset?);
                 if *op == BinOp::Sub {

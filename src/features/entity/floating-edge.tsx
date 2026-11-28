@@ -87,6 +87,7 @@ export const FloatingEdge = memo(function FloatingEdge({
   target,
   data,
   style,
+  markerStart,
   markerEnd,
 }: EdgeProps) {
   const sourceNode = useInternalNode(source);
@@ -106,18 +107,34 @@ export const FloatingEdge = memo(function FloatingEdge({
     edgeData?.canonicalForward ?? true,
   );
 
+  const tooltip = [edgeData?.timeRange, edgeData?.description]
+    .filter(Boolean)
+    .join(" — ");
+
   return (
     <>
-      <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />
-      {edgeData?.label && (
+      <BaseEdge
+        id={id}
+        path={path}
+        style={style}
+        markerStart={markerStart}
+        markerEnd={markerEnd}
+      />
+      {(edgeData?.label || edgeData?.timeRange) && (
         <EdgeLabelRenderer>
           <div
-            className="nodrag nopan pointer-events-none absolute rounded border border-primary/20 bg-base-100/95 px-1.5 py-0.5 text-[11px] leading-tight font-medium text-primary shadow-2xs"
+            title={tooltip || undefined}
+            className="nodrag nopan pointer-events-auto absolute flex flex-col items-center rounded border border-primary/20 bg-base-100/95 px-1.5 py-0.5 text-[11px] leading-tight font-medium text-primary shadow-2xs"
             style={{
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
             }}
           >
-            {edgeData.label}
+            {edgeData.label && <span>{edgeData.label}</span>}
+            {edgeData.timeRange && (
+              <span className="font-mono text-[9px] font-normal text-base-content/60">
+                {edgeData.timeRange}
+              </span>
+            )}
           </div>
         </EdgeLabelRenderer>
       )}

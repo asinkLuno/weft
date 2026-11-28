@@ -3,15 +3,15 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "请用 WEFT 语言写一份线上故障复盘时间轴 `incident.weft`，记录 2026 年一次核心支付链路 502 故障：包含核心集群与两个子系统（网关层、结算层）的归属层级、至少 4 个服务或值班实体（带上线/创建基准时间 `base_time` 和自定义 `kind`/`owner` 字段，名称中需包含带斜杠或数字开头的实体如「api/v2」或「502-网关」）、服务依赖关系网、1 个故障起点时间锚点、至少 4 个按相对时间串联的事件（其中至少 2 个带持续区间 `end`），以及 1 条完整时间轴 `events` 和 1 条根因链路 `events`。确保零错误、零 lint 警告且格式规范。",
-      "expected_output": "A formatted `incident.weft` passing `weft check --deny-warnings` and `weft fmt --check` with all requested entities, DAG `belong_to`, quoted special-character entity, `extra_props`, `link` block, `time` anchor, >=4 chained events (>=2 with `end`), and 2 `events` tracks.",
+      "prompt": "请用 WEFT 语言写一份线上故障复盘时间轴 `incident.weft`，记录 2026 年一次核心支付链路 502 故障：包含核心集群与两个子系统（网关层、结算层）的归属层级、至少 4 个服务或值班实体（带上线/创建基准时间 `base_time` 和自定义 `kind`/`owner` 字段，名称中需包含带斜杠或数字开头的实体如「api/v2」或「502-网关」）、服务依赖关系网、1 个故障起点时间锚点、至少 4 个按相对时间串联的事件（其中至少 2 个带持续区间 `end`）、1 张带时序单调校验的事件因果依赖图，以及 1 条完整时间轴 `events` 和 1 条根因链路 `events`。确保零错误、零 lint 警告且格式规范。",
+      "expected_output": "A formatted `incident.weft` passing `weft check --deny-warnings` and `weft fmt --check` with all requested entities, acyclic entity `link` DAG hierarchy, quoted special-character entity, `extra_props`, `acyclic + chronological` event `link` graph, `time` anchor, >=4 chained events (>=2 with `end`), and 2 `events` tracks.",
       "files": [],
       "expectations": [
         "`incident.weft` exists and passes `weft check --deny-warnings` with exit code 0 (0 errors, 0 warnings)",
         "`incident.weft` passes `weft fmt --check` with exit code 0",
-        "Models cluster, 2 subsystems (网关层, 结算层), and >=4 entities with `base_time`, custom `kind`/`owner` extra props, and `belong_to` DAG hierarchy",
+        "Models cluster, 2 subsystems (网关层, 结算层), and >=4 entities with `base_time`, custom `kind`/`owner` extra props, and an `acyclic = true` entity `link` DAG hierarchy",
         "Includes a properly double-quoted entity name starting with a digit or containing a slash (e.g. \"api/v2\" or \"502-网关\")",
-        "Includes >=1 `time` anchor, >=1 `link` block, >=4 `event` blocks using relative time offsets (>=2 with `end`), and >=2 `events` tracks"
+        "Includes >=1 `time` anchor, >=1 chronological event `link` block, >=4 `event` blocks using relative time offsets (>=2 with `end`), and >=2 `events` tracks"
       ]
     },
     {
@@ -35,8 +35,8 @@
       "expectations": [
         "`fixed_timeline.weft` exists and passes `weft check --deny-warnings` with exit code 0 (0 errors, 0 warnings)",
         "`fixed_timeline.weft` passes `weft fmt --check` with exit code 0",
-        "Fixes all syntax and semantic errors (quoted \"2号机房\", quoted `author`, removed `story.version` & `event.env`, broke `belong_to` cycle, fixed `订单服务.base_time` month 0, fixed `停机割接` `end >= start`)",
-        "Resolves all lint warnings (`废弃锚点`, `未接入组件`, duplicate & self links in `调用拓扑`, and `回归验收` added to an `events` list)",
+        "Fixes all syntax and semantic errors (quoted \"2号机房\", quoted `author` & edge label \"转发\", removed `story.version` & `event.env`, broke `机房归属` cycle, fixed `变更前置` chronological direction, fixed `订单服务.base_time` month 0, fixed `停机割接` `end >= start`)",
+        "Resolves all lint warnings (`废弃锚点`, `空拓扑`, `未接入组件`, duplicate links in `调用拓扑`, and `回归验收` added to an `events` list)",
         "Preserves original timeline domain (`核心机房迁移`, core entities and events) and keeps header comment"
       ]
     }

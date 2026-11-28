@@ -13,6 +13,7 @@ pub enum TokKind {
     Str,
     Num,
     Dash2,
+    ArrowBoth,
     ArrowRight,
     ArrowLeft,
     Plus,
@@ -43,7 +44,7 @@ impl Tok {
     pub fn is_link_op(&self) -> bool {
         matches!(
             self.kind,
-            TokKind::Dash2 | TokKind::ArrowRight | TokKind::ArrowLeft
+            TokKind::Dash2 | TokKind::ArrowBoth | TokKind::ArrowRight | TokKind::ArrowLeft
         )
     }
 }
@@ -214,7 +215,17 @@ pub fn tokenize(src: &str, cursor_byte: usize) -> TokenizeResult {
             continue;
         }
 
-        // 关系连线符 `--` / `->` / `<-`
+        // 关系连线符 `<->` / `--` / `->` / `<-`
+        if b == b'<' && bytes.get(i + 1) == Some(&b'-') && bytes.get(i + 2) == Some(&b'>') {
+            tokens.push(Tok {
+                kind: TokKind::ArrowBoth,
+                value: "<->".to_owned(),
+                span: ByteSpan::new(i, i + 3),
+                line,
+            });
+            i += 3;
+            continue;
+        }
         if b == b'-' && bytes.get(i + 1) == Some(&b'-') {
             tokens.push(Tok {
                 kind: TokKind::Dash2,
@@ -360,8 +371,6 @@ pub struct ScanSymbols {
     pub events: BTreeMap<String, ScanEvent>,
     pub time_anchors: BTreeSet<String>,
     pub calculable_props: BTreeSet<String>,
-    pub relations: BTreeSet<String>,
-    pub tags: BTreeSet<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -383,7 +392,15 @@ pub enum CursorContext {
         block: AttrBlockKind,
         existing_keys: BTreeSet<String>,
     },
+    /// `link` 块行首：既可写图代数属性，也可写边端点节点。
+    LinkLineStart {
+        existing_keys: BTreeSet<String>,
+    },
+    BoolValue,
     EntityRef {
+        exclude: BTreeSet<String>,
+    },
+    NodeRef {
         exclude: BTreeSet<String>,
     },
     EventRef {
@@ -392,12 +409,9 @@ pub enum CursorContext {
     CalcPropRef {
         exclude: BTreeSet<String>,
     },
-    TagRef {
-        exclude: BTreeSet<String>,
-    },
-    RelationRef,
     TimeExpr {
         self_event: Option<String>,
+        allow_self_start_end: bool,
         field: TimeFieldKind,
     },
 }
@@ -413,10 +427,12 @@ struct CursorSnapshot {
     top_time_assign_line: Option<usize>,
     in_events_list: bool,
     existing_keys: BTreeSet<String>,
+    edge_existing_keys: BTreeSet<String>,
     list_items: BTreeSet<String>,
     last: Option<Tok>,
     prev: Option<Tok>,
-    dash_count_on_cursor_line: usize,
+    has_link_op_on_cursor_line: bool,
+    last_link_op_on_cursor_line: Option<TokKind>,
 }
 
 fn is_before_cursor(tok: &Tok, pos: usize) -> bool {
@@ -446,16 +462,19 @@ pub fn scan_document(
     let mut block_kind: Option<BlockKind> = None;
     let mut block_name: Option<String> = None;
     let mut in_story_calc_props = false;
+    let mut in_link_edge_block = false;
     let mut active_attr: Option<String> = None;
     let mut active_attr_line: Option<usize> = None;
     let mut top_time_assign_line: Option<usize> = None;
     let mut in_events_list = false;
     let mut existing_keys: BTreeSet<String> = BTreeSet::new();
+    let mut edge_existing_keys: BTreeSet<String> = BTreeSet::new();
     let mut list_items: BTreeSet<String> = BTreeSet::new();
 
     let mut last: Option<Tok> = None;
     let mut prev: Option<Tok> = None;
-    let mut dash_count_on_cursor_line = 0usize;
+    let mut has_link_op_on_cursor_line = false;
+    let mut last_link_op_on_cursor_line: Option<TokKind> = None;
     let mut snapshot: Option<CursorSnapshot> = None;
 
     macro_rules! capture_snapshot {
@@ -464,17 +483,23 @@ pub fn scan_document(
                 snapshot = Some(CursorSnapshot {
                     brace_depth,
                     bracket_depth,
-                    block_kind,
+                    block_kind: if in_link_edge_block {
+                        Some(BlockKind::LinkEdge)
+                    } else {
+                        block_kind
+                    },
                     block_name: block_name.clone(),
                     active_attr: active_attr.clone(),
                     active_attr_line,
                     top_time_assign_line,
                     in_events_list,
                     existing_keys: existing_keys.clone(),
+                    edge_existing_keys: edge_existing_keys.clone(),
                     list_items: list_items.clone(),
                     last: last.clone(),
                     prev: prev.clone(),
-                    dash_count_on_cursor_line,
+                    has_link_op_on_cursor_line,
+                    last_link_op_on_cursor_line,
                 });
             }
         };
@@ -489,7 +514,8 @@ pub fn scan_document(
                 } else {
                     prev = last.take();
                     if t.line == cursor_line && t.is_link_op() {
-                        dash_count_on_cursor_line += 1;
+                        has_link_op_on_cursor_line = true;
+                        last_link_op_on_cursor_line = Some(t.kind);
                     }
                     last = Some(t.clone());
                 }
@@ -503,7 +529,9 @@ pub fn scan_document(
         consume!(tok);
 
         if brace_depth == 0 && bracket_depth == 0 && tok.kind == TokKind::Ident {
-            if tok.value == "story" && tokens.get(i + 1).is_some_and(|t| t.kind == TokKind::LBrace) {
+            if tok.value == "story"
+                && tokens.get(i + 1).is_some_and(|t| t.kind == TokKind::LBrace)
+            {
                 consume!(&tokens[i + 1]);
                 symbols.has_story = true;
                 block_kind = Some(BlockKind::Story);
@@ -585,12 +613,24 @@ pub fn scan_document(
         match tok.kind {
             TokKind::LBrace => {
                 brace_depth += 1;
+                if block_kind == Some(BlockKind::Link) && brace_depth == 2 {
+                    in_link_edge_block = true;
+                    edge_existing_keys.clear();
+                    active_attr = None;
+                    active_attr_line = None;
+                }
                 i += 1;
                 continue;
             }
             TokKind::RBrace => {
                 if in_story_calc_props && brace_depth == 2 {
                     in_story_calc_props = false;
+                }
+                if in_link_edge_block && brace_depth == 2 {
+                    in_link_edge_block = false;
+                    edge_existing_keys.clear();
+                    active_attr = None;
+                    active_attr_line = None;
                 }
                 brace_depth = brace_depth.saturating_sub(1);
                 if brace_depth == 0 {
@@ -623,18 +663,20 @@ pub fn scan_document(
             _ => {}
         }
 
-        if brace_depth == 1 && bracket_depth == 0 {
-            if block_kind == Some(BlockKind::Link) {
-                if tok.is_link_op()
-                    && tokens.get(i + 1).is_some_and(Tok::is_name)
-                    && tokens.get(i + 2).is_some_and(Tok::is_link_op)
-                {
-                    symbols.relations.insert(tokens[i + 1].value.clone());
-                }
-                i += 1;
+        if in_link_edge_block && brace_depth == 2 && bracket_depth == 0 {
+            if tok.is_name() && tokens.get(i + 1).is_some_and(|t| t.kind == TokKind::Eq) {
+                consume!(&tokens[i + 1]);
+                edge_existing_keys.insert(tok.value.clone());
+                active_attr = Some(tok.value.clone());
+                active_attr_line = Some(tokens[i + 1].line);
+                i += 2;
                 continue;
             }
+            i += 1;
+            continue;
+        }
 
+        if brace_depth == 1 && bracket_depth == 0 {
             if tok.is_name() && tokens.get(i + 1).is_some_and(|t| t.kind == TokKind::Eq) {
                 consume!(&tokens[i + 1]);
                 existing_keys.insert(tok.value.clone());
@@ -691,17 +733,8 @@ pub fn scan_document(
             continue;
         }
 
-        if bracket_depth == 1 && tok.is_name() {
-            if block_kind == Some(BlockKind::Entity)
-                && active_attr.as_deref() == Some("tags")
-                && !tok.value.trim().is_empty()
-                && !(tok.span.start < cursor_byte && cursor_byte <= tok.span.end)
-            {
-                symbols.tags.insert(tok.value.clone());
-            }
-            if snapshot.is_none() {
-                list_items.insert(tok.value.clone());
-            }
+        if bracket_depth == 1 && tok.is_name() && snapshot.is_none() {
+            list_items.insert(tok.value.clone());
         }
 
         i += 1;
@@ -742,6 +775,7 @@ fn resolve_cursor_context(
     if s.brace_depth == 0 && s.bracket_depth == 0 && s.top_time_assign_line == Some(cursor_line) {
         return member_ctx().unwrap_or(CursorContext::TimeExpr {
             self_event: None,
+            allow_self_start_end: false,
             field: TimeFieldKind::Anchor,
         });
     }
@@ -762,17 +796,84 @@ fn resolve_cursor_context(
     let Some(block_kind) = s.block_kind else {
         return CursorContext::None;
     };
+
+    if block_kind == BlockKind::LinkEdge && s.brace_depth == 2 {
+        let field_spec = s
+            .active_attr
+            .as_deref()
+            .and_then(|attr| find_field(BlockKind::LinkEdge, attr));
+        let on_attr_value = s.active_attr.is_some()
+            && (s.active_attr_line == Some(cursor_line)
+                || s.last
+                    .as_ref()
+                    .is_some_and(|t| matches!(t.kind, TokKind::Eq | TokKind::Plus | TokKind::Minus)));
+        if on_attr_value && s.bracket_depth == 0 {
+            if let Some(spec) = field_spec
+                && spec.value_kind == FieldValueKind::Time
+            {
+                let field = match spec.name {
+                    "start" => TimeFieldKind::Start,
+                    _ => TimeFieldKind::End,
+                };
+                return member_ctx().unwrap_or(CursorContext::TimeExpr {
+                    self_event: None,
+                    allow_self_start_end: true,
+                    field,
+                });
+            }
+            return CursorContext::None;
+        }
+        if cursor_in_string.is_some() {
+            return CursorContext::None;
+        }
+        return CursorContext::AttrKey {
+            block: AttrBlockKind::LinkEdge,
+            existing_keys: s.edge_existing_keys,
+        };
+    }
+
     if s.brace_depth > 1 {
         return CursorContext::None;
     }
 
     if block_kind == BlockKind::Link {
-        return match s.dash_count_on_cursor_line {
-            1 => CursorContext::RelationRef,
-            0 | 2 => CursorContext::EntityRef {
+        if s.bracket_depth == 1 {
+            return CursorContext::NodeRef {
+                exclude: s.list_items,
+            };
+        }
+        let on_attr_value = s.active_attr.is_some()
+            && (s.active_attr_line == Some(cursor_line)
+                || s.last.as_ref().is_some_and(|t| t.kind == TokKind::Eq));
+        if on_attr_value {
+            if let Some(spec) = s
+                .active_attr
+                .as_deref()
+                .and_then(|attr| find_field(BlockKind::Link, attr))
+                && spec.value_kind == FieldValueKind::Bool
+            {
+                return CursorContext::BoolValue;
+            }
+            return CursorContext::None;
+        }
+        if s.has_link_op_on_cursor_line {
+            if matches!(
+                s.last_link_op_on_cursor_line,
+                Some(TokKind::Dash2 | TokKind::ArrowLeft)
+            ) {
+                return CursorContext::None;
+            }
+            return CursorContext::NodeRef {
                 exclude: BTreeSet::new(),
-            },
-            _ => CursorContext::None,
+            };
+        }
+        if cursor_in_string.is_some() {
+            return CursorContext::NodeRef {
+                exclude: BTreeSet::new(),
+            };
+        }
+        return CursorContext::LinkLineStart {
+            existing_keys: s.existing_keys,
         };
     }
 
@@ -785,16 +886,7 @@ fn resolve_cursor_context(
         if let Some(spec) = field_spec {
             match spec.value_kind {
                 FieldValueKind::EntityList => {
-                    let mut exclude = s.list_items;
-                    if s.active_attr.as_deref() == Some("belong_to")
-                        && let Some(self_name) = s.block_name
-                    {
-                        exclude.insert(self_name);
-                    }
-                    return CursorContext::EntityRef { exclude };
-                }
-                FieldValueKind::TagList => {
-                    return CursorContext::TagRef {
+                    return CursorContext::EntityRef {
                         exclude: s.list_items,
                     };
                 }
@@ -816,22 +908,29 @@ fn resolve_cursor_context(
                 .is_some_and(|t| matches!(t.kind, TokKind::Eq | TokKind::Plus | TokKind::Minus)));
 
     if on_attr_value && s.bracket_depth == 0 {
-        if let Some(spec) = field_spec
-            && spec.value_kind == FieldValueKind::Time
-        {
-            let field = match spec.name {
-                "base_time" => TimeFieldKind::BaseTime,
-                "start" => TimeFieldKind::Start,
-                _ => TimeFieldKind::End,
-            };
-            return member_ctx().unwrap_or(CursorContext::TimeExpr {
-                self_event: if block_kind == BlockKind::Event {
-                    s.block_name
-                } else {
-                    None
-                },
-                field,
-            });
+        if let Some(spec) = field_spec {
+            match spec.value_kind {
+                FieldValueKind::Time => {
+                    let field = match spec.name {
+                        "base_time" => TimeFieldKind::BaseTime,
+                        "start" => TimeFieldKind::Start,
+                        _ => TimeFieldKind::End,
+                    };
+                    return member_ctx().unwrap_or(CursorContext::TimeExpr {
+                        self_event: if block_kind == BlockKind::Event {
+                            s.block_name
+                        } else {
+                            None
+                        },
+                        allow_self_start_end: block_kind == BlockKind::Event,
+                        field,
+                    });
+                }
+                FieldValueKind::Bool => {
+                    return CursorContext::BoolValue;
+                }
+                _ => {}
+            }
         }
         return CursorContext::None;
     }

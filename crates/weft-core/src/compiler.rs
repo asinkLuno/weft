@@ -1,4 +1,4 @@
-//! `.weft` 编译器管线：容错 AST 降级、多诊断语义校验、Lint 检查与运行时 `WeftDoc` 构建。
+//! `.weft` 编译器管线：容错 AST 降级、多诊断语义校验、时变图代数校验、Lint 检查与运行时 `WeftDoc` 构建。
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -9,28 +9,32 @@ use serde::Serialize;
 use serde_json::{Map as JsonMap, Number as JsonNumber, Value as JsonValue};
 
 use crate::entity::{
-    BelongNode, Entity, EntityBuildContext, EntityLink, RawEntity, RawEntityLink,
-    build_entities_runtime, validate_entities_static,
+    Entity, EntityBuildContext, RawEntity, build_entities_runtime, validate_entities_static,
 };
 use crate::errors::{ByteSpan, Diagnostic, DocumentError, ValidationError};
 use crate::event::{
     Event, RawEvent, build_events_collecting, check_collecting as check_events_collecting,
 };
-use crate::lint::{LintContext, run_lints};
 use crate::events::{Events, check_collecting as check_event_lists_collecting};
+use crate::lint::{LintContext, run_lints};
 use crate::parser::{
-    Attr, Expr, LinkSyntax, Span, Spanned, TopItem, WeftAst, parse_weft_recover, to_byte_span,
+    Attr, Expr, LinkEdge, LinkEdgeKind, Span, Spanned, TopItem, WeftAst, parse_weft_recover,
+    to_byte_span,
 };
 use crate::phase::{TimeResolver, TimeTarget};
+use crate::relation::{
+    Link, LinkGraph, LinkRuntimeContext, RawLink, RawLinkGraph, build_and_validate_links_runtime,
+    validate_graphs_static, validate_links_static, validate_timeless_links_fallback,
+};
 use crate::story::{RawStory, Story, StoryContext};
 
 /// 编译后的运行时故事文档，直接序列化为 JSON 交付前端。
 #[derive(Debug, Serialize)]
 pub struct WeftDoc {
     pub story: Story,
+    pub graphs: BTreeMap<String, LinkGraph>,
     pub entity: HashMap<String, Entity>,
-    pub belong_dag: Vec<BelongNode>,
-    pub entity_link: HashMap<String, Vec<EntityLink>>,
+    pub links: Vec<Link>,
     pub event: BTreeMap<String, Event>,
     pub events: BTreeMap<String, Events>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -185,9 +189,10 @@ fn analyze_ast(
     let mut anchor_spans: BTreeMap<String, ByteSpan> = BTreeMap::new();
     let mut time_exprs: HashMap<TimeTarget, Spanned<Expr>> = HashMap::new();
     let mut entity_blocks: BTreeMap<String, (ByteSpan, Vec<Spanned<Attr>>)> = BTreeMap::new();
-    let mut link_groups: BTreeMap<String, Vec<RawEntityLink>> = BTreeMap::new();
-    let mut link_group_spans: HashMap<String, ByteSpan> = HashMap::new();
     let mut event_blocks: BTreeMap<String, (ByteSpan, Vec<Spanned<Attr>>, Span)> = BTreeMap::new();
+    let mut node_namespace: HashMap<String, (&'static str, ByteSpan)> = HashMap::new();
+    let mut link_blocks: BTreeMap<String, (ByteSpan, ByteSpan, Vec<Spanned<Attr>>, Vec<Spanned<LinkEdge>>)> =
+        BTreeMap::new();
     let mut raw_event_lists: BTreeMap<String, (ByteSpan, Vec<(String, ByteSpan)>)> =
         BTreeMap::new();
 
@@ -231,30 +236,21 @@ fn analyze_ast(
                         )
                         .with_related(*first_span, "first defined here"),
                     );
+                } else if let Some(&(existing_kind, first_span)) = node_namespace.get(&name.0) {
+                    diagnostics.push(
+                        Diagnostic::from_validation(
+                            ValidationError::DuplicateSymbol {
+                                name: name.0,
+                                existing_kind: existing_kind.to_owned(),
+                                new_kind: "entity".to_owned(),
+                            },
+                            Some(name_span),
+                        )
+                        .with_related(first_span, "first declared here"),
+                    );
                 } else {
+                    node_namespace.insert(name.0.clone(), ("entity", name_span));
                     entity_blocks.insert(name.0, (name_span, attrs));
-                }
-            }
-            TopItem::Link { group, edges } => {
-                link_group_spans
-                    .entry(group.0.clone())
-                    .or_insert_with(|| to_byte_span(group.1));
-                let entry = link_groups.entry(group.0).or_default();
-                for (edge, edge_span) in edges {
-                    let raw_left = (edge.left.0, to_byte_span(edge.left.1));
-                    let raw_right = (edge.right.0, to_byte_span(edge.right.1));
-                    let (left, right, directed) = match edge.syntax {
-                        LinkSyntax::Undirected => (raw_left, raw_right, false),
-                        LinkSyntax::Forward => (raw_left, raw_right, true),
-                        LinkSyntax::Backward => (raw_right, raw_left, true),
-                    };
-                    entry.push(RawEntityLink {
-                        left,
-                        right,
-                        relations: edge.relation.0,
-                        directed,
-                        span: to_byte_span(edge_span),
-                    });
                 }
             }
             TopItem::Event { name, attrs } => {
@@ -267,8 +263,35 @@ fn analyze_ast(
                         )
                         .with_related(*first_span, "first defined here"),
                     );
+                } else if let Some(&(existing_kind, first_span)) = node_namespace.get(&name.0) {
+                    diagnostics.push(
+                        Diagnostic::from_validation(
+                            ValidationError::DuplicateSymbol {
+                                name: name.0,
+                                existing_kind: existing_kind.to_owned(),
+                                new_kind: "event".to_owned(),
+                            },
+                            Some(name_span),
+                        )
+                        .with_related(first_span, "first declared here"),
+                    );
                 } else {
+                    node_namespace.insert(name.0.clone(), ("event", name_span));
                     event_blocks.insert(name.0, (name_span, attrs, item_span));
+                }
+            }
+            TopItem::Link { name, attrs, edges } => {
+                let name_span = to_byte_span(name.1);
+                if let Some((first_span, _, _, _)) = link_blocks.get(&name.0) {
+                    diagnostics.push(
+                        Diagnostic::from_validation(
+                            ValidationError::DuplicateLinkGraph { graph: name.0 },
+                            Some(name_span),
+                        )
+                        .with_related(*first_span, "first defined here"),
+                    );
+                } else {
+                    link_blocks.insert(name.0, (name_span, to_byte_span(item_span), attrs, edges));
                 }
             }
             TopItem::Events { name, events } => {
@@ -303,6 +326,119 @@ fn analyze_ast(
         }
     };
 
+    let mut raw_graphs: BTreeMap<String, RawLinkGraph> = BTreeMap::new();
+    let mut raw_links: Vec<RawLink> = Vec::new();
+    let mut next_stmt_id = 0usize;
+
+    for (graph_name, (name_span, block_span, attrs, edges)) in link_blocks {
+        let edge_stmt_count = edges.len();
+        let raw_graph = lower_link_graph(
+            &graph_name,
+            name_span,
+            block_span,
+            attrs,
+            edge_stmt_count,
+            diagnostics,
+        );
+        raw_graphs.insert(graph_name.clone(), raw_graph);
+
+        for (edge, edge_span) in edges {
+            let stmt_id = next_stmt_id;
+            next_stmt_id += 1;
+            let edge_byte_span = to_byte_span(edge_span);
+            let directed = edge.is_directed();
+            let label = edge.label.map(|(s, sp)| (s, to_byte_span(sp)));
+
+            let (description, start_expr, end_expr) = match edge.attrs {
+                Some((edge_attrs, _)) => lower_link_attrs(&graph_name, edge_attrs, diagnostics),
+                None => (None, None, None),
+            };
+            let start_attr_span = start_expr.as_ref().map(|(_, sp)| to_byte_span(*sp));
+            let end_attr_span = end_expr.as_ref().map(|(_, sp)| to_byte_span(*sp));
+            if let Some(expr) = start_expr {
+                time_exprs.insert(TimeTarget::LinkStart(stmt_id), expr);
+            }
+            if let Some(expr) = end_expr {
+                time_exprs.insert(TimeTarget::LinkEnd(stmt_id), expr);
+            }
+
+            match edge.kind {
+                LinkEdgeKind::Directed { left, right } | LinkEdgeKind::Symmetric { left, right } => {
+                    let left_names = left.names();
+                    let right_names = right.names();
+                    if left_names.is_empty() {
+                        diagnostics.push(Diagnostic::from_validation(
+                            ValidationError::EmptyLinkEndpoint {
+                                graph: graph_name.clone(),
+                            },
+                            Some(to_byte_span(left.span())),
+                        ));
+                        continue;
+                    }
+                    if right_names.is_empty() {
+                        diagnostics.push(Diagnostic::from_validation(
+                            ValidationError::EmptyLinkEndpoint {
+                                graph: graph_name.clone(),
+                            },
+                            Some(to_byte_span(right.span())),
+                        ));
+                        continue;
+                    }
+                    for (l_name, l_span) in left_names {
+                        for (r_name, r_span) in right_names {
+                            raw_links.push(RawLink {
+                                stmt_id,
+                                graph: graph_name.clone(),
+                                from: (l_name.clone(), to_byte_span(*l_span)),
+                                to: (r_name.clone(), to_byte_span(*r_span)),
+                                directed,
+                                label: label.clone(),
+                                start_attr_span,
+                                end_attr_span,
+                                start_time: None,
+                                end_time: None,
+                                description: description.clone(),
+                                span: edge_byte_span,
+                            });
+                        }
+                    }
+                }
+                LinkEdgeKind::Clique { members, list_span } => {
+                    if members.len() < 2 {
+                        diagnostics.push(Diagnostic::from_validation(
+                            ValidationError::InvalidClique {
+                                graph: graph_name.clone(),
+                                count: members.len(),
+                            },
+                            Some(to_byte_span(list_span)),
+                        ));
+                        continue;
+                    }
+                    for i in 0..members.len() {
+                        for j in (i + 1)..members.len() {
+                            let (a_name, a_span) = &members[i];
+                            let (b_name, b_span) = &members[j];
+                            raw_links.push(RawLink {
+                                stmt_id,
+                                graph: graph_name.clone(),
+                                from: (a_name.clone(), to_byte_span(*a_span)),
+                                to: (b_name.clone(), to_byte_span(*b_span)),
+                                directed: false,
+                                label: label.clone(),
+                                start_attr_span,
+                                end_attr_span,
+                                start_time: None,
+                                end_time: None,
+                                description: description.clone(),
+                                span: edge_byte_span,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // 收集实体/事件字段并把所有时间表达式汇入同一张 `time_exprs` 表，交由统一 TimeResolver 展开。
     let mut raw_entities: BTreeMap<String, RawEntity> = BTreeMap::new();
     for (id, (name_span, attrs)) in entity_blocks {
@@ -332,7 +468,7 @@ fn analyze_ast(
 
     let mut resolver = TimeResolver::new(&time_exprs);
 
-    // 校验所有独立声明的 time 锚点（即使未被事件引用也提前捕获错误）。
+    // 校验所有独立声明的 time 锚点（即使未被事件或边引用也提前捕获错误）。
     for name in anchor_spans.keys() {
         let target = TimeTarget::Anchor(name.clone());
         let span = time_exprs[&target].1;
@@ -341,10 +477,10 @@ fn analyze_ast(
 
     for (id, raw) in &mut raw_entities {
         let target = TimeTarget::EntityBaseTime(id.clone());
-        if let Some(expr) = time_exprs.get(&target) {
-            if let Some(phase) = resolver.resolve_target(&target, expr.1, diagnostics) {
-                raw.base_time = Some((phase, to_byte_span(expr.1)));
-            }
+        if let Some(expr) = time_exprs.get(&target)
+            && let Some(phase) = resolver.resolve_target(&target, expr.1, diagnostics)
+        {
+            raw.base_time = Some((phase, to_byte_span(expr.1)));
         }
     }
 
@@ -378,28 +514,57 @@ fn analyze_ast(
             },
         );
     }
+
+    let mut resolved_stmt_times: HashMap<usize, (Option<(crate::phase::Phase, ByteSpan)>, Option<(crate::phase::Phase, ByteSpan)>)> =
+        HashMap::new();
+    for link in &mut raw_links {
+        let (st, et) = resolved_stmt_times
+            .entry(link.stmt_id)
+            .or_insert_with(|| {
+                let start_target = TimeTarget::LinkStart(link.stmt_id);
+                let s = time_exprs.get(&start_target).and_then(|expr| {
+                    resolver
+                        .resolve_target(&start_target, expr.1, diagnostics)
+                        .map(|phase| (phase, to_byte_span(expr.1)))
+                });
+                let end_target = TimeTarget::LinkEnd(link.stmt_id);
+                let e = time_exprs.get(&end_target).and_then(|expr| {
+                    resolver
+                        .resolve_target(&end_target, expr.1, diagnostics)
+                        .map(|phase| (phase, to_byte_span(expr.1)))
+                });
+                (s, e)
+            })
+            .clone();
+        link.start_time = st;
+        link.end_time = et;
+    }
+
     let used_anchors = resolver.into_used_anchors();
 
-    // 静态引用与图结构校验（不依赖外部脚本，总是完整执行）。
-    let belong_graph = validate_entities_static(
+    // 静态图配置、引用与结构校验（不依赖外部脚本，总是完整执行）。
+    let mut valid_graphs = validate_graphs_static(&raw_graphs, diagnostics);
+    validate_entities_static(&raw_entities, base, options.run_scripts, diagnostics);
+    let link_static_valid = validate_links_static(
+        &raw_links,
+        &mut raw_graphs,
+        &mut valid_graphs,
         &raw_entities,
-        &link_groups,
-        base,
-        options.run_scripts,
+        &raw_events,
         diagnostics,
     );
     check_events_collecting(&raw_events, &raw_entities, diagnostics);
     check_event_lists_collecting(&raw_event_lists, &raw_events, diagnostics);
 
-    // 静态 Lint 告警（unused / self-link / duplicate-link / empty-block）。
+    // 静态 Lint 告警（unused / self-link / empty-block）。
     run_lints(
         &LintContext {
             lang: &options.lang,
             anchors: &anchor_spans,
             used_anchors: &used_anchors,
+            graphs: &raw_graphs,
             entities: &raw_entities,
-            links: &link_groups,
-            link_group_spans: &link_group_spans,
+            links: &raw_links,
             events: &raw_events,
             event_lists: &raw_event_lists,
         },
@@ -407,24 +572,50 @@ fn analyze_ast(
     );
 
     if !options.run_scripts {
+        validate_timeless_links_fallback(
+            &raw_links,
+            &link_static_valid,
+            &raw_graphs,
+            &valid_graphs,
+            &options.lang,
+            diagnostics,
+        );
         return None;
     }
 
-    // 运行时脚本阶段：历法加载、可计算属性求值与时间归一化校验。
-    let raw_story = raw_story?;
-    let story = Story::build_collecting(
+    // 运行时脚本阶段：历法加载、可计算属性求值、时变图代数校验与时间归一化。
+    let Some(raw_story) = raw_story else {
+        validate_timeless_links_fallback(
+            &raw_links,
+            &link_static_valid,
+            &raw_graphs,
+            &valid_graphs,
+            &options.lang,
+            diagnostics,
+        );
+        return None;
+    };
+    let Some(story) = Story::build_collecting(
         raw_story,
         StoryContext {
             base,
             lang: &options.lang,
         },
         diagnostics,
-    )?;
+    ) else {
+        validate_timeless_links_fallback(
+            &raw_links,
+            &link_static_valid,
+            &raw_graphs,
+            &valid_graphs,
+            &options.lang,
+            diagnostics,
+        );
+        return None;
+    };
 
-    let (entity, belong_dag, entity_link, entity_base_times) = build_entities_runtime(
+    let (entity, entity_base_times) = build_entities_runtime(
         raw_entities,
-        &link_groups,
-        belong_graph,
         EntityBuildContext {
             base,
             calendar: &story.calendar,
@@ -434,17 +625,35 @@ fn analyze_ast(
     );
     let event =
         build_events_collecting(raw_events, &entity_base_times, &story.calendar, diagnostics);
+    let links = build_and_validate_links_runtime(
+        &raw_links,
+        &link_static_valid,
+        &LinkRuntimeContext {
+            graphs: &raw_graphs,
+            valid_graphs: &valid_graphs,
+            entities: &entity,
+            entity_base_times: &entity_base_times,
+            events: &event,
+            calendar: &story.calendar,
+            lang: &options.lang,
+        },
+        diagnostics,
+    );
     let events: BTreeMap<String, Events> = raw_event_lists
         .into_iter()
         .map(|(name, (_, refs))| (name, refs.into_iter().map(|(id, _)| id).collect()))
+        .collect();
+    let graphs: BTreeMap<String, LinkGraph> = raw_graphs
+        .into_iter()
+        .map(|(name, raw)| (name, raw.spec))
         .collect();
     let calendar_components = Some(story.calendar.component_count());
 
     Some(WeftDoc {
         story,
+        graphs,
         entity,
-        belong_dag,
-        entity_link,
+        links,
         event,
         events,
         calendar_components,
@@ -555,6 +764,104 @@ fn lower_story(
     })
 }
 
+fn lower_link_graph(
+    name: &str,
+    name_span: ByteSpan,
+    block_span: ByteSpan,
+    attrs: Vec<Spanned<Attr>>,
+    edge_stmt_count: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> RawLinkGraph {
+    let section = format!("link `{name}`");
+    let mut seen_keys = HashMap::new();
+    let mut spec = LinkGraph::default();
+    let mut attr_spans = HashMap::new();
+
+    for (attr, attr_span) in attrs {
+        let key = attr.key.0;
+        let key_span = to_byte_span(attr.key.1);
+        track_duplicate_attr(&mut seen_keys, &section, &key, key_span, diagnostics);
+        match key.as_str() {
+            "acyclic" => {
+                if let Some(v) = expect_bool(&section, &key, attr.value, diagnostics) {
+                    spec.acyclic = v;
+                    attr_spans.insert(key, to_byte_span(attr_span));
+                }
+            }
+            "asymmetric" => {
+                if let Some(v) = expect_bool(&section, &key, attr.value, diagnostics) {
+                    spec.asymmetric = v;
+                    attr_spans.insert(key, to_byte_span(attr_span));
+                }
+            }
+            "intransitive" => {
+                if let Some(v) = expect_bool(&section, &key, attr.value, diagnostics) {
+                    spec.intransitive = v;
+                    attr_spans.insert(key, to_byte_span(attr_span));
+                }
+            }
+            "functional" => {
+                if let Some(v) = expect_bool(&section, &key, attr.value, diagnostics) {
+                    spec.functional = v;
+                    attr_spans.insert(key, to_byte_span(attr_span));
+                }
+            }
+            "inverse_functional" => {
+                if let Some(v) = expect_bool(&section, &key, attr.value, diagnostics) {
+                    spec.inverse_functional = v;
+                    attr_spans.insert(key, to_byte_span(attr_span));
+                }
+            }
+            "symmetric" => {
+                if let Some(v) = expect_bool(&section, &key, attr.value, diagnostics) {
+                    spec.symmetric = v;
+                    attr_spans.insert(key, to_byte_span(attr_span));
+                }
+            }
+            "transitive" => {
+                if let Some(v) = expect_bool(&section, &key, attr.value, diagnostics) {
+                    spec.transitive = v;
+                    attr_spans.insert(key, to_byte_span(attr_span));
+                }
+            }
+            "equivalence" => {
+                if let Some(v) = expect_bool(&section, &key, attr.value, diagnostics) {
+                    spec.equivalence = v;
+                    attr_spans.insert(key, to_byte_span(attr_span));
+                }
+            }
+            "chronological" => {
+                if let Some(v) = expect_bool(&section, &key, attr.value, diagnostics) {
+                    spec.chronological = v;
+                    attr_spans.insert(key, to_byte_span(attr_span));
+                }
+            }
+            "description" => {
+                if let Some(val) = expect_opt_string(&section, &key, attr.value, diagnostics) {
+                    spec.description = val;
+                }
+            }
+            _ => {
+                diagnostics.push(Diagnostic::from_validation(
+                    ValidationError::UnknownField {
+                        section: section.clone(),
+                        field: key,
+                    },
+                    Some(key_span),
+                ));
+            }
+        }
+    }
+
+    RawLinkGraph {
+        name_span,
+        block_span,
+        spec,
+        attr_spans,
+        edge_stmt_count,
+    }
+}
+
 fn lower_entity(
     id: &str,
     name_span: ByteSpan,
@@ -566,8 +873,6 @@ fn lower_entity(
     let mut base_time = None;
     let mut description = None;
     let mut avatar = None;
-    let mut belong_to = Vec::new();
-    let mut tags = Vec::new();
     let mut calculable_props = Vec::new();
     let mut extra_props = HashMap::new();
 
@@ -594,33 +899,6 @@ fn lower_entity(
                     avatar = val.map(|path| (path, val_span));
                 }
             }
-            "belong_to" => {
-                if let Some(list) = expect_name_list(&section, &key, attr.value, diagnostics) {
-                    belong_to = list;
-                }
-            }
-            "tags" => {
-                if let Some(list) = expect_name_list(&section, &key, attr.value, diagnostics) {
-                    tags = list
-                        .into_iter()
-                        .filter(|(tag, span)| {
-                            if tag.trim().is_empty() {
-                                diagnostics.push(Diagnostic::from_validation(
-                                    ValidationError::InvalidField {
-                                        section: section.clone(),
-                                        field: key.clone(),
-                                        reason: "tag name cannot be empty".to_owned(),
-                                    },
-                                    Some(*span),
-                                ));
-                                false
-                            } else {
-                                true
-                            }
-                        })
-                        .collect();
-                }
-            }
             "calculable_props" => {
                 if let Some(list) = expect_name_list(&section, &key, attr.value, diagnostics) {
                     calculable_props = list;
@@ -640,13 +918,67 @@ fn lower_entity(
             base_time: None,
             description,
             avatar,
-            belong_to,
-            tags,
             calculable_props,
             extra_props,
         },
         base_time,
     )
+}
+
+type LoweredLinkAttrs = (
+    Option<String>,
+    Option<Spanned<Expr>>,
+    Option<Spanned<Expr>>,
+);
+
+fn lower_link_attrs(
+    graph: &str,
+    attrs: Vec<Spanned<Attr>>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> LoweredLinkAttrs {
+    let section = format!("link `{graph}` edge");
+    let mut seen_keys = HashMap::new();
+    let mut start = None;
+    let mut end = None;
+    let mut description = None;
+
+    for (attr, _) in attrs {
+        let key = attr.key.0;
+        let key_span = to_byte_span(attr.key.1);
+        track_duplicate_attr(&mut seen_keys, &section, &key, key_span, diagnostics);
+        match key.as_str() {
+            "start" => {
+                if !matches!(attr.value.0, Expr::Null) {
+                    start = Some(attr.value);
+                } else {
+                    start = None;
+                }
+            }
+            "end" => {
+                if !matches!(attr.value.0, Expr::Null) {
+                    end = Some(attr.value);
+                } else {
+                    end = None;
+                }
+            }
+            "description" => {
+                if let Some(val) = expect_opt_string(&section, &key, attr.value, diagnostics) {
+                    description = val;
+                }
+            }
+            _ => {
+                diagnostics.push(Diagnostic::from_validation(
+                    ValidationError::UnknownField {
+                        section: section.clone(),
+                        field: key,
+                    },
+                    Some(key_span),
+                ));
+            }
+        }
+    }
+
+    (description, start, end)
 }
 
 type LoweredEvent = (
@@ -715,6 +1047,28 @@ fn lower_event(
     }
 
     (entities, description, start, end)
+}
+
+fn expect_bool(
+    section: &str,
+    field: &str,
+    expr: Spanned<Expr>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<bool> {
+    match expr.0 {
+        Expr::Bool(b) => Some(b),
+        _ => {
+            diagnostics.push(Diagnostic::from_validation(
+                ValidationError::InvalidField {
+                    section: section.to_owned(),
+                    field: field.to_owned(),
+                    reason: "expected a boolean (`true` or `false`)".to_owned(),
+                },
+                Some(to_byte_span(expr.1)),
+            ));
+            None
+        }
+    }
 }
 
 fn expect_string(

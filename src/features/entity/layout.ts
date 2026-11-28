@@ -58,7 +58,7 @@ export function gridLayout(
 }
 
 /**
- * 层级 DAG 布局（归属视图）：仅在 hierarchy 模式下按需加载 dagre，按真实宽高分层。
+ * 层级 DAG 布局（无环关系视图）：仅在 hierarchy 模式下按需加载 dagre，按真实宽高分层。
  */
 export async function dagreLayout(
   ids: readonly string[],
@@ -67,7 +67,7 @@ export async function dagreLayout(
 ): Promise<Record<string, Point>> {
   const dagre = await loadDagre();
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: "TB", nodesep: 48, ranksep: 64 });
+  g.setGraph({ rankdir: "BT", nodesep: 48, ranksep: 64 });
   g.setDefaultEdgeLabel(() => ({}));
   for (const id of ids) {
     const { width, height } = sizeOf(sizes, id);

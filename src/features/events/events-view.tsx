@@ -46,11 +46,21 @@ function EventsViewInner({
     setSelection({ eventId, listName });
   }, []);
 
-  const handleNavigateEvent = useCallback((eventId: string) => {
-    setSelection((prev) =>
-      prev ? { eventId, listName: prev.listName } : null,
-    );
-  }, []);
+  const handleNavigateEvent = useCallback(
+    (eventId: string) => {
+      setSelection((prev) => {
+        if (!prev) return null;
+        const inCurrent = eventsView.listIndexByName
+          .get(prev.listName)
+          ?.has(eventId);
+        const nextList = inCurrent
+          ? prev.listName
+          : (eventsView.listsByEvent.get(eventId)?.[0]?.id ?? prev.listName);
+        return { eventId, listName: nextList };
+      });
+    },
+    [eventsView],
+  );
 
   const handleCloseDetail = useCallback(() => {
     setSelection(null);

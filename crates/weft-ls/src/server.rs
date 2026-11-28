@@ -322,8 +322,6 @@ impl LspServer {
                     LsCompletionKind::Event => CompletionItemKind::EVENT,
                     LsCompletionKind::TimeAnchor => CompletionItemKind::CONSTANT,
                     LsCompletionKind::CalculableProp => CompletionItemKind::FUNCTION,
-                    LsCompletionKind::Tag => CompletionItemKind::VALUE,
-                    LsCompletionKind::Relation => CompletionItemKind::TEXT,
                 }),
                 detail: item.detail,
                 documentation: item.documentation.map(|d| {

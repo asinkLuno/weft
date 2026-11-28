@@ -14,7 +14,7 @@ import { Maximize, Minus, Plus } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWorkspaceTheme } from "@/app/workspace-context";
 import type { Lang } from "@/i18n";
-import { EntityNode, EntitySelectContext } from "./entity-card";
+import { EntityNode } from "./entity-card";
 import { FloatingEdge } from "./floating-edge";
 import {
   computeEntityLayout,
@@ -48,7 +48,6 @@ export type EntityCanvasProps = {
   focusTarget: { id: string; seq: number } | null;
   lang: Lang;
   onSelect: (id: string | null) => void;
-  onJumpToEntity: (id: string) => void;
   onPersist?: (id: string, pos: Point) => void;
 };
 
@@ -170,7 +169,6 @@ function EntityCanvasInner({
   focusTarget,
   lang,
   onSelect,
-  onJumpToEntity,
   onPersist,
 }: EntityCanvasProps) {
   const theme = useWorkspaceTheme();
@@ -319,24 +317,22 @@ function EntityCanvasInner({
   );
 
   return (
-    <EntitySelectContext.Provider value={onJumpToEntity}>
-      <ReactFlow
-        colorMode={theme}
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={handleNodesChange}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
-        onNodeClick={handleNodeClick}
-        onPaneClick={handlePaneClick}
-        onNodeDragStop={onPersist ? handleNodeDragStop : undefined}
-        minZoom={0.1}
-      >
-        <Background gap={24} color="var(--color-base-300)" />
-        <CanvasControls lang={lang} />
-      </ReactFlow>
-    </EntitySelectContext.Provider>
+    <ReactFlow
+      colorMode={theme}
+      nodes={nodes}
+      edges={edges}
+      onNodesChange={handleNodesChange}
+      nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
+      defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
+      onNodeClick={handleNodeClick}
+      onPaneClick={handlePaneClick}
+      onNodeDragStop={onPersist ? handleNodeDragStop : undefined}
+      minZoom={0.1}
+    >
+      <Background gap={24} color="var(--color-base-300)" />
+      <CanvasControls lang={lang} />
+    </ReactFlow>
   );
 }
 

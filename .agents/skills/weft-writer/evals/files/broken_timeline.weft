@@ -11,34 +11,50 @@ time 废弃锚点 = [2026, 1, 1]
 
 entity 2号机房 {
   description = "新投入使用的同城灾备机房"
-  belong_to = [华东集群]
 }
 
 entity 华东集群 {
   description = "华东区核心生产集群"
-  belong_to = [2号机房]
 }
 
 entity 订单服务 {
   description = "核心交易订单处理服务"
   base_time = [2023, 0, 10]
-  belong_to = [2号机房]
   tier = "P0"
 }
 
 entity 网关集群 {
   description = "统一入口流量转发层"
-  belong_to = [2号机房]
 }
 
 entity 未接入组件 {
   description = "顺手写上的旧模块，未在事件和关系中使用"
 }
 
+link 机房归属 {
+  acyclic = true
+
+  2号机房 -> 华东集群
+  华东集群 -> 2号机房
+  [订单服务, 网关集群] -> 2号机房
+}
+
 link 调用拓扑 {
-  网关集群 -- 转发 -- 订单服务
-  网关集群 -- "转发" -- 订单服务
-  网关集群 -- "自检" -- 网关集群
+  asymmetric = true
+
+  网关集群 -- 转发 -> 订单服务
+  网关集群 -- "转发" -> 订单服务
+}
+
+link 空拓扑 {
+  transitive = true
+}
+
+link 变更前置 {
+  acyclic = true
+  chronological = true
+
+  回归验收 -> 停机割接
 }
 
 event 停机割接 {

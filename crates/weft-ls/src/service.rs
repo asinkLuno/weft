@@ -75,8 +75,6 @@ pub enum LsCompletionKind {
     Event,
     TimeAnchor,
     CalculableProp,
-    Tag,
-    Relation,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -206,26 +204,31 @@ pub fn quick_fixes_for_diagnostic(src: &str, diag: &Diagnostic, lang: &str) -> V
 
     match diag.rule {
         "self-link" | "duplicate-link" => {
-            let line_span = expand_to_full_line(src, span);
-            let title = if zh {
-                if diag.rule == "self-link" {
-                    "删除自环关系边"
+            let can_remove_line = src
+                .get(span.range())
+                .is_some_and(|slice| !slice.contains('[') && !slice.contains('\n'));
+            if can_remove_line {
+                let line_span = expand_to_full_line(src, span);
+                let title = if zh {
+                    if diag.rule == "self-link" {
+                        "删除自环关系边"
+                    } else {
+                        "删除重复关系边"
+                    }
+                } else if diag.rule == "self-link" {
+                    "Remove self-link edge"
                 } else {
-                    "删除重复关系边"
-                }
-            } else if diag.rule == "self-link" {
-                "Remove self-link edge"
-            } else {
-                "Remove duplicate link edge"
-            };
-            actions.push(LsCodeAction {
-                title: title.to_owned(),
-                edits: vec![LsTextEdit {
-                    span: line_span,
-                    utf16: span_to_utf16(src, line_span),
-                    new_text: String::new(),
-                }],
-            });
+                    "Remove duplicate link edge"
+                };
+                actions.push(LsCodeAction {
+                    title: title.to_owned(),
+                    edits: vec![LsTextEdit {
+                        span: line_span,
+                        utf16: span_to_utf16(src, line_span),
+                        new_text: String::new(),
+                    }],
+                });
+            }
         }
         "unused-time-anchor" => {
             let line_span = expand_to_full_line(src, span);
@@ -368,7 +371,37 @@ fn build_completion_items(
             block,
             existing_keys,
         } => attr_key_completions(*block, existing_keys, lang),
+        CursorContext::LinkLineStart { existing_keys } => {
+            let mut out = attr_key_completions(AttrBlockKind::Link, existing_keys, lang);
+            out.extend(node_ref_completions(
+                symbols,
+                &std::collections::BTreeSet::new(),
+                zh,
+                in_string,
+            ));
+            out
+        }
         CursorContext::Member { base } => member_completions(base, symbols, zh),
+        CursorContext::BoolValue => vec![
+            LsCompletionItem {
+                label: "true".to_owned(),
+                kind: LsCompletionKind::Keyword,
+                detail: Some("boolean".to_owned()),
+                documentation: None,
+                insert_text: "true".to_owned(),
+                is_snippet: false,
+                sort_priority: 2,
+            },
+            LsCompletionItem {
+                label: "false".to_owned(),
+                kind: LsCompletionKind::Keyword,
+                detail: Some("boolean".to_owned()),
+                documentation: None,
+                insert_text: "false".to_owned(),
+                is_snippet: false,
+                sort_priority: 1,
+            },
+        ],
         CursorContext::EntityRef { exclude } => symbols
             .entities
             .values()
@@ -383,6 +416,9 @@ fn build_completion_items(
                 sort_priority: 0,
             })
             .collect(),
+        CursorContext::NodeRef { exclude } => {
+            node_ref_completions(symbols, exclude, zh, in_string)
+        }
         CursorContext::EventRef { exclude } => symbols
             .events
             .values()
@@ -413,41 +449,57 @@ fn build_completion_items(
                 sort_priority: 0,
             })
             .collect(),
-        CursorContext::TagRef { exclude } => symbols
-            .tags
-            .iter()
-            .filter(|tag| !exclude.contains(*tag))
-            .map(|tag| LsCompletionItem {
-                label: tag.clone(),
-                kind: LsCompletionKind::Tag,
-                detail: Some(if zh { "已有标签" } else { "tag" }.to_owned()),
-                documentation: None,
-                insert_text: apply_name(tag, in_string, ""),
-                is_snippet: false,
-                sort_priority: 0,
-            })
-            .collect(),
-        CursorContext::RelationRef => symbols
-            .relations
-            .iter()
-            .map(|rel| LsCompletionItem {
-                label: rel.clone(),
-                kind: LsCompletionKind::Relation,
-                detail: Some(if zh { "已有关系" } else { "relation" }.to_owned()),
-                documentation: None,
-                insert_text: if in_string.is_some() {
-                    format!("{}\"", escape_string_inner(rel))
-                } else {
-                    format!("\"{}\"", escape_string_inner(rel))
-                },
-                is_snippet: false,
-                sort_priority: 0,
-            })
-            .collect(),
-        CursorContext::TimeExpr { self_event, field } => {
-            time_expr_completions(self_event.as_deref(), *field, symbols, zh, in_string)
-        }
+        CursorContext::TimeExpr {
+            self_event,
+            allow_self_start_end,
+            field,
+        } => time_expr_completions(
+            self_event.as_deref(),
+            *allow_self_start_end,
+            *field,
+            symbols,
+            zh,
+            in_string,
+        ),
     }
+}
+
+fn node_ref_completions(
+    symbols: &ScanSymbols,
+    exclude: &std::collections::BTreeSet<String>,
+    zh: bool,
+    in_string: Option<CursorString>,
+) -> Vec<LsCompletionItem> {
+    let mut out: Vec<LsCompletionItem> = symbols
+        .entities
+        .values()
+        .filter(|e| !exclude.contains(&e.name))
+        .map(|e| LsCompletionItem {
+            label: e.name.clone(),
+            kind: LsCompletionKind::Entity,
+            detail: Some(if zh { "实体" } else { "entity" }.to_owned()),
+            documentation: e.description.clone(),
+            insert_text: apply_name(&e.name, in_string, ""),
+            is_snippet: false,
+            sort_priority: 1,
+        })
+        .collect();
+    out.extend(
+        symbols
+            .events
+            .values()
+            .filter(|e| !exclude.contains(&e.name))
+            .map(|e| LsCompletionItem {
+                label: e.name.clone(),
+                kind: LsCompletionKind::Event,
+                detail: Some(if zh { "事件" } else { "event" }.to_owned()),
+                documentation: e.description.clone(),
+                insert_text: apply_name(&e.name, in_string, ""),
+                is_snippet: false,
+                sort_priority: 0,
+            }),
+    );
+    out
 }
 
 fn top_completions(symbols: &ScanSymbols, zh: bool) -> Vec<LsCompletionItem> {
@@ -479,7 +531,7 @@ fn top_completions(symbols: &ScanSymbols, zh: bool) -> Vec<LsCompletionItem> {
             kind: LsCompletionKind::Keyword,
             detail: Some(
                 if zh {
-                    "实体块（人物/团体/地点/道具）"
+                    "实体块（人物/组织/地点/道具）"
                 } else {
                     "Entity block (person/group/place/item)"
                 }
@@ -493,7 +545,7 @@ fn top_completions(symbols: &ScanSymbols, zh: bool) -> Vec<LsCompletionItem> {
             }
             .to_owned(),
             is_snippet: true,
-            sort_priority: 3,
+            sort_priority: 4,
         },
         LsCompletionItem {
             label: "event".to_owned(),
@@ -507,23 +559,28 @@ fn top_completions(symbols: &ScanSymbols, zh: bool) -> Vec<LsCompletionItem> {
             }
             .to_owned(),
             is_snippet: true,
-            sort_priority: 2,
+            sort_priority: 3,
         },
         LsCompletionItem {
             label: "link".to_owned(),
             kind: LsCompletionKind::Keyword,
             detail: Some(
-                if zh { "实体关系组块" } else { "Grouped entity links" }.to_owned(),
+                if zh {
+                    "时变关系图块"
+                } else {
+                    "Temporal relation graph block"
+                }
+                .to_owned(),
             ),
             documentation: None,
             insert_text: if zh {
-                "link ${1:关系组} {\n  ${2:实体A} -- \"${3:关系}\" -- ${4:实体B}\n}"
+                "link ${1:图名} {\n  ${2:源节点} -> ${3:目标节点}\n}"
             } else {
-                "link ${1:group} {\n  ${2:entity_a} -- \"${3:relation}\" -- ${4:entity_b}\n}"
+                "link ${1:graph_name} {\n  ${2:source} -> ${3:target}\n}"
             }
             .to_owned(),
             is_snippet: true,
-            sort_priority: 1,
+            sort_priority: 2,
         },
         LsCompletionItem {
             label: "events".to_owned(),
@@ -657,19 +714,20 @@ fn member_completions(base: &str, symbols: &ScanSymbols, zh: bool) -> Vec<LsComp
 
 fn time_expr_completions(
     self_event: Option<&str>,
+    allow_self_start_end: bool,
     field: TimeFieldKind,
     symbols: &ScanSymbols,
     zh: bool,
     in_string: Option<CursorString>,
 ) -> Vec<LsCompletionItem> {
     let mut out = Vec::new();
-    if in_string.is_none() && field == TimeFieldKind::End && self_event.is_some() {
+    if in_string.is_none() && field == TimeFieldKind::End && allow_self_start_end {
         out.push(LsCompletionItem {
             label: "start + [...]".to_owned(),
             kind: LsCompletionKind::Keyword,
             detail: Some(
                 if zh {
-                    "在当前事件开始时间上偏移"
+                    "在当前开始时间上偏移"
                 } else {
                     "offset from current start time"
                 }
@@ -685,9 +743,9 @@ fn time_expr_completions(
             kind: LsCompletionKind::Keyword,
             detail: Some(
                 if zh {
-                    "当前事件开始时间"
+                    "当前开始时间"
                 } else {
-                    "current event start time"
+                    "current start time"
                 }
                 .to_owned(),
             ),
@@ -761,7 +819,7 @@ pub fn hover(src: &str, base: &Path, byte_offset: usize, lang: &str) -> Option<L
     let idx = DocumentIndex::build(src);
     let zh = lang == "zh";
 
-    // 1. 命中的符号（实体 / 事件 / 锚点 / 事件列表 / 关系组 / 可计算属性）
+    // 1. 命中的符号（实体 / 事件 / 锚点 / 事件列表 / 关系图 / 可计算属性）
     if let Some(occ) = idx.occurrence_at(pos) {
         let compiled = check_document(
             src,
@@ -802,7 +860,27 @@ pub fn hover(src: &str, base: &Path, byte_offset: usize, lang: &str) -> Option<L
         });
     }
 
-    // 3. 命中顶层关键字
+    // 3. 命中 link 边（如箭头、临时字符串关系或边属性块空白处）：展示历法求解后的 start → end 区间
+    if let Some(edge_site) = idx.link_edge_at(pos) {
+        let compiled = check_document(
+            src,
+            base,
+            &CheckOptions {
+                run_scripts: true,
+                lang: lang.to_owned(),
+            },
+        )
+        .doc;
+        if let Some(md) = format_link_edge_hover(edge_site, compiled.as_ref(), zh) {
+            return Some(LsHover {
+                contents: md,
+                span: Some(edge_site.span),
+                utf16: Some(span_to_utf16(src, edge_site.span)),
+            });
+        }
+    }
+
+    // 4. 命中顶层关键字
     let scanned = tokenize(src, pos);
     if let Some(tok) = scanned
         .tokens
@@ -818,6 +896,41 @@ pub fn hover(src: &str, base: &Path, byte_offset: usize, lang: &str) -> Option<L
     }
 
     None
+}
+
+fn format_link_edge_hover(
+    edge_site: &crate::index::LinkEdgeSite,
+    compiled: Option<&WeftDoc>,
+    zh: bool,
+) -> Option<String> {
+    let mut lines = vec![format!("`{}`", edge_site.summary)];
+    if let Some(doc) = compiled
+        && let (Some(from), Some(to)) = (&edge_site.sample_from, &edge_site.sample_to)
+        && let Some(link) = doc.links.iter().find(|l| {
+            l.graph == edge_site.graph
+                && l.from == *from
+                && l.to == *to
+                && l.directed == edge_site.directed
+                && l.label == edge_site.label
+        })
+    {
+        let start_str = link
+            .start
+            .as_ref()
+            .map_or("-∞", |t| t.formatted.as_str());
+        let end_str = link
+            .end
+            .as_ref()
+            .map_or("+∞", |t| t.formatted.as_str());
+        let time_label = if zh { "生效区间" } else { "Interval" };
+        lines.push(format!("- **{time_label}**: {start_str} → {end_str}"));
+        if let Some(desc) = &link.description
+            && !desc.is_empty()
+        {
+            lines.push(desc.clone());
+        }
+    }
+    Some(lines.join("\n\n"))
 }
 
 fn format_symbol_hover(
@@ -846,28 +959,10 @@ fn format_symbol_hover(
                     let k = if zh { "基准时间" } else { "Base time" };
                     lines.push(format!("- **{k}**: {bt}"));
                 }
-                if let Some(d) = decl
-                    && !d.belong_to.is_empty()
-                {
-                    let k = if zh { "归属" } else { "Belongs to" };
-                    lines.push(format!("- **{k}**: {}", d.belong_to.join(", ")));
-                }
-                if !ent.tags.is_empty() {
-                    let k = if zh { "标签" } else { "Tags" };
-                    lines.push(format!("- **{k}**: {}", ent.tags.join(", ")));
-                }
-            } else if let Some(d) = decl {
-                if let Some(desc) = &d.description {
-                    lines.push(desc.clone());
-                }
-                if !d.belong_to.is_empty() {
-                    let k = if zh { "归属" } else { "Belongs to" };
-                    lines.push(format!("- **{k}**: {}", d.belong_to.join(", ")));
-                }
-                if !d.tags.is_empty() {
-                    let k = if zh { "标签" } else { "Tags" };
-                    lines.push(format!("- **{k}**: {}", d.tags.join(", ")));
-                }
+            } else if let Some(d) = decl
+                && let Some(desc) = &d.description
+            {
+                lines.push(desc.clone());
             }
         }
         SymbolKind::Event => {
@@ -916,14 +1011,55 @@ fn format_symbol_hover(
             let label = if zh { "时间锚点" } else { "Time anchor" };
             lines.push(format!("**{label}** `{name}`"));
         }
-        SymbolKind::LinkGroup => {
-            let label = if zh { "关系组" } else { "Link group" };
+        SymbolKind::LinkGraph => {
+            let label = if zh { "关系图" } else { "Link graph" };
             lines.push(format!("**{label}** `{name}`"));
             if let Some(doc) = compiled
-                && let Some(edges) = doc.entity_link.get(name)
+                && let Some(graph) = doc.graphs.get(name)
             {
-                let k = if zh { "关系边数" } else { "Edges" };
-                lines.push(format!("- **{k}**: {}", edges.len()));
+                if let Some(desc) = &graph.description
+                    && !desc.is_empty()
+                {
+                    lines.push(desc.clone());
+                }
+                let props = graph.enabled_properties();
+                let k = if zh { "图结构属性" } else { "Graph properties" };
+                if props.is_empty() {
+                    let none = if zh { "自由图（无约束）" } else { "free graph (unconstrained)" };
+                    lines.push(format!("- **{k}**: {none}"));
+                } else {
+                    lines.push(format!(
+                        "- **{k}**: {}",
+                        props
+                            .into_iter()
+                            .map(|p| format!("`{p}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                let count = doc.links.iter().filter(|l| l.graph == name).count();
+                let edge_k = if zh { "关系边数" } else { "Edges" };
+                lines.push(format!("- **{edge_k}**: {count}"));
+            } else if let Some(d) = decl {
+                if let Some(desc) = &d.description
+                    && !desc.is_empty()
+                {
+                    lines.push(desc.clone());
+                }
+                let k = if zh { "图结构属性" } else { "Graph properties" };
+                if d.graph_props.is_empty() {
+                    let none = if zh { "自由图（无约束）" } else { "free graph (unconstrained)" };
+                    lines.push(format!("- **{k}**: {none}"));
+                } else {
+                    lines.push(format!(
+                        "- **{k}**: {}",
+                        d.graph_props
+                            .iter()
+                            .map(|p| format!("`{p}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
             }
         }
         SymbolKind::CalculableProp => {
@@ -934,30 +1070,6 @@ fn format_symbol_hover(
             {
                 let k = if zh { "脚本" } else { "Script" };
                 lines.push(format!("- **{k}**: `{script}`"));
-            }
-        }
-        SymbolKind::Tag => {
-            let label = if zh { "标签" } else { "Tag" };
-            lines.push(format!("**{label}** `{name}`"));
-            let mut tagged: Vec<&str> = if let Some(doc) = compiled {
-                doc.entity
-                    .values()
-                    .filter(|e| e.tags.iter().any(|t| t == name))
-                    .map(|e| e.id.as_str())
-                    .collect()
-            } else {
-                idx.declarations
-                    .values()
-                    .filter(|d| {
-                        d.kind == SymbolKind::Entity && d.tags.iter().any(|t| t == name)
-                    })
-                    .map(|d| d.name.as_str())
-                    .collect()
-            };
-            tagged.sort_unstable();
-            if !tagged.is_empty() {
-                let k = if zh { "标记实体" } else { "Entities" };
-                lines.push(format!("- **{k}**: {}", tagged.join(", ")));
             }
         }
     }
@@ -998,10 +1110,7 @@ pub fn prepare_rename(src: &str, byte_offset: usize) -> Option<LsPrepareRename> 
     let pos = clamp_char_boundary(src, byte_offset);
     let idx = DocumentIndex::build(src);
     let occ = idx.occurrence_at(pos)?;
-    // 只有已在文档中声明的符号或免声明标签才允许重命名
-    if occ.kind != SymbolKind::Tag {
-        idx.declaration(occ.kind, &occ.name)?;
-    }
+    idx.declaration(occ.kind, &occ.name)?;
     Some(LsPrepareRename {
         span: occ.span,
         utf16: span_to_utf16(src, occ.span),
@@ -1017,9 +1126,7 @@ pub fn rename(src: &str, byte_offset: usize, new_name: &str) -> Option<Vec<LsTex
     let pos = clamp_char_boundary(src, byte_offset);
     let idx = DocumentIndex::build(src);
     let occ = idx.occurrence_at(pos)?;
-    if occ.kind != SymbolKind::Tag {
-        idx.declaration(occ.kind, &occ.name)?;
-    }
+    idx.declaration(occ.kind, &occ.name)?;
 
     let formatted = format_weft_name(trimmed);
     let mut edits: Vec<LsTextEdit> = idx

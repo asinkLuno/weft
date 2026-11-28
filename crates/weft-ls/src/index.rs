@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 
 use weft_core::errors::ByteSpan;
-use weft_core::parser::{Expr, Span, Spanned, TopItem, WeftAst, parse_weft_recover};
+use weft_core::parser::{
+    Expr, LinkEdgeKind, LinkEndpoint, Span, Spanned, TopItem, WeftAst, parse_weft_recover,
+};
 
 use crate::scanner::{TokKind, tokenize};
 use crate::schema::BlockKind;
@@ -14,9 +16,8 @@ pub enum SymbolKind {
     Event,
     Events,
     TimeAnchor,
-    LinkGroup,
+    LinkGraph,
     CalculableProp,
-    Tag,
 }
 
 impl SymbolKind {
@@ -26,9 +27,8 @@ impl SymbolKind {
             Self::Event => "event",
             Self::Events => "events",
             Self::TimeAnchor => "time",
-            Self::LinkGroup => "link",
+            Self::LinkGraph => "link",
             Self::CalculableProp => "calculable_prop",
-            Self::Tag => "tag",
         }
     }
 }
@@ -40,8 +40,7 @@ pub struct SymbolDecl {
     pub name_span: ByteSpan,
     pub full_span: ByteSpan,
     pub description: Option<String>,
-    pub belong_to: Vec<String>,
-    pub tags: Vec<String>,
+    pub graph_props: Vec<&'static str>,
     pub entities: Vec<String>,
 }
 
@@ -61,6 +60,17 @@ pub struct AttrKeySite {
 }
 
 #[derive(Clone, Debug)]
+pub struct LinkEdgeSite {
+    pub graph: String,
+    pub summary: String,
+    pub sample_from: Option<String>,
+    pub sample_to: Option<String>,
+    pub directed: bool,
+    pub label: Option<String>,
+    pub span: ByteSpan,
+}
+
+#[derive(Clone, Debug)]
 pub struct TopDeclEntry {
     pub kind: &'static str,
     pub name: String,
@@ -74,12 +84,25 @@ pub struct DocumentIndex {
     pub declarations: BTreeMap<(SymbolKind, String), SymbolDecl>,
     pub occurrences: Vec<Occurrence>,
     pub attr_keys: Vec<AttrKeySite>,
+    pub link_edges: Vec<LinkEdgeSite>,
     pub top_decls: Vec<TopDeclEntry>,
 }
 
 fn to_byte_span(span: Span) -> ByteSpan {
     ByteSpan::new(span.start, span.end)
 }
+
+const GRAPH_BOOL_KEYS: &[&str] = &[
+    "acyclic",
+    "asymmetric",
+    "intransitive",
+    "functional",
+    "inverse_functional",
+    "symmetric",
+    "transitive",
+    "equivalence",
+    "chronological",
+];
 
 impl DocumentIndex {
     pub fn build(src: &str) -> Self {
@@ -132,8 +155,7 @@ impl DocumentIndex {
                                         Expr::Str(p) => Some(p.clone()),
                                         _ => None,
                                     },
-                                    belong_to: Vec::new(),
-                                    tags: Vec::new(),
+                                    graph_props: Vec::new(),
                                     entities: Vec::new(),
                                 });
                             }
@@ -143,7 +165,10 @@ impl DocumentIndex {
                         kind: "story",
                         name: title.clone().unwrap_or_else(|| "story".to_owned()),
                         detail: title,
-                        name_span: ByteSpan::new(full_span.start, (full_span.start + 5).min(full_span.end)),
+                        name_span: ByteSpan::new(
+                            full_span.start,
+                            (full_span.start + 5).min(full_span.end),
+                        ),
                         full_span,
                     });
                 }
@@ -155,8 +180,7 @@ impl DocumentIndex {
                         name_span,
                         full_span,
                         description: None,
-                        belong_to: Vec::new(),
-                        tags: Vec::new(),
+                        graph_props: Vec::new(),
                         entities: Vec::new(),
                     });
                     idx.top_decls.push(TopDeclEntry {
@@ -170,8 +194,6 @@ impl DocumentIndex {
                 TopItem::Entity { name, attrs } => {
                     let name_span = to_byte_span(name.1);
                     let mut description = None;
-                    let mut belong_to = Vec::new();
-                    let mut tags = Vec::new();
                     for (attr, _) in attrs {
                         idx.attr_keys.push(AttrKeySite {
                             block: BlockKind::Entity,
@@ -182,24 +204,6 @@ impl DocumentIndex {
                             && let Expr::Str(s) = &attr.value.0
                         {
                             description = Some(s.clone());
-                        } else if attr.key.0 == "belong_to"
-                            && let Expr::List(items) = &attr.value.0
-                        {
-                            for (expr, _) in items {
-                                if let Some(target) = expr_as_name(expr) {
-                                    belong_to.push(target.to_owned());
-                                }
-                            }
-                        } else if attr.key.0 == "tags"
-                            && let Expr::List(items) = &attr.value.0
-                        {
-                            for (expr, _) in items {
-                                if let Some(tag) = expr_as_name(expr)
-                                    && !tag.trim().is_empty()
-                                {
-                                    tags.push(tag.to_owned());
-                                }
-                            }
                         }
                     }
                     idx.register_decl(SymbolDecl {
@@ -208,8 +212,7 @@ impl DocumentIndex {
                         name_span,
                         full_span,
                         description: description.clone(),
-                        belong_to,
-                        tags,
+                        graph_props: Vec::new(),
                         entities: Vec::new(),
                     });
                     idx.top_decls.push(TopDeclEntry {
@@ -220,22 +223,51 @@ impl DocumentIndex {
                         full_span,
                     });
                 }
-                TopItem::Link { group, .. } => {
-                    let name_span = to_byte_span(group.1);
+                TopItem::Link { name, attrs, .. } => {
+                    let name_span = to_byte_span(name.1);
+                    let mut description = None;
+                    let mut enabled_flags: BTreeMap<&'static str, bool> = BTreeMap::new();
+                    for (attr, _) in attrs {
+                        idx.attr_keys.push(AttrKeySite {
+                            block: BlockKind::Link,
+                            key: attr.key.0.clone(),
+                            span: to_byte_span(attr.key.1),
+                        });
+                        if attr.key.0 == "description"
+                            && let Expr::Str(s) = &attr.value.0
+                        {
+                            description = Some(s.clone());
+                        } else if let Some(&prop_key) = GRAPH_BOOL_KEYS
+                            .iter()
+                            .find(|&&k| k == attr.key.0.as_str())
+                            && let Expr::Bool(v) = attr.value.0
+                        {
+                            enabled_flags.insert(prop_key, v);
+                        }
+                    }
+                    let graph_props: Vec<&'static str> = GRAPH_BOOL_KEYS
+                        .iter()
+                        .copied()
+                        .filter(|k| enabled_flags.get(k).copied().unwrap_or(false))
+                        .collect();
+                    let detail = if !graph_props.is_empty() {
+                        Some(graph_props.join(", "))
+                    } else {
+                        description.clone()
+                    };
                     idx.register_decl(SymbolDecl {
-                        kind: SymbolKind::LinkGroup,
-                        name: group.0.clone(),
+                        kind: SymbolKind::LinkGraph,
+                        name: name.0.clone(),
                         name_span,
                         full_span,
-                        description: None,
-                        belong_to: Vec::new(),
-                        tags: Vec::new(),
+                        description,
+                        graph_props,
                         entities: Vec::new(),
                     });
                     idx.top_decls.push(TopDeclEntry {
                         kind: "link",
-                        name: group.0.clone(),
-                        detail: None,
+                        name: name.0.clone(),
+                        detail,
                         name_span,
                         full_span,
                     });
@@ -270,8 +302,7 @@ impl DocumentIndex {
                         name_span,
                         full_span,
                         description: description.clone(),
-                        belong_to: Vec::new(),
-                        tags: Vec::new(),
+                        graph_props: Vec::new(),
                         entities,
                     });
                     idx.top_decls.push(TopDeclEntry {
@@ -290,8 +321,7 @@ impl DocumentIndex {
                         name_span,
                         full_span,
                         description: None,
-                        belong_to: Vec::new(),
-                        tags: Vec::new(),
+                        graph_props: Vec::new(),
                         entities: Vec::new(),
                     });
                     idx.top_decls.push(TopDeclEntry {
@@ -305,7 +335,7 @@ impl DocumentIndex {
             }
         }
 
-        // 第二遍：收集全部引用出现位置（含时间表达式内的锚点 / 事件 / 实体引用）
+        // 第二遍：收集全部引用出现位置（含统一节点引用与时间表达式引用）
         for (item, _) in &ast.items {
             match item {
                 TopItem::Story(_) => {}
@@ -315,34 +345,6 @@ impl DocumentIndex {
                 TopItem::Entity { attrs, .. } => {
                     for (attr, _) in attrs {
                         match attr.key.0.as_str() {
-                            "belong_to" => {
-                                if let Expr::List(items) = &attr.value.0 {
-                                    for (expr, span) in items {
-                                        if let Some(target) = expr_as_name(expr) {
-                                            idx.push_ref(
-                                                SymbolKind::Entity,
-                                                target,
-                                                to_byte_span(*span),
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                            "tags" => {
-                                if let Expr::List(items) = &attr.value.0 {
-                                    for (expr, span) in items {
-                                        if let Some(tag) = expr_as_name(expr)
-                                            && !tag.trim().is_empty()
-                                        {
-                                            idx.push_ref(
-                                                SymbolKind::Tag,
-                                                tag,
-                                                to_byte_span(*span),
-                                            );
-                                        }
-                                    }
-                                }
-                            }
                             "calculable_props" => {
                                 if let Expr::List(items) = &attr.value.0 {
                                     for (expr, span) in items {
@@ -363,10 +365,97 @@ impl DocumentIndex {
                         }
                     }
                 }
-                TopItem::Link { edges, .. } => {
-                    for (edge, _) in edges {
-                        idx.push_ref(SymbolKind::Entity, &edge.left.0, to_byte_span(edge.left.1));
-                        idx.push_ref(SymbolKind::Entity, &edge.right.0, to_byte_span(edge.right.1));
+                TopItem::Link { name, edges, .. } => {
+                    for (edge, edge_span) in edges {
+                        let label = edge.label.as_ref().map(|(s, _)| s.clone());
+                        let directed = edge.is_directed();
+                        let (summary, sample_from, sample_to) = match &edge.kind {
+                            LinkEdgeKind::Directed { left, right } => {
+                                for (n, sp) in left.names() {
+                                    let kind = idx.node_kind(n);
+                                    idx.push_ref(kind, n, to_byte_span(*sp));
+                                }
+                                for (n, sp) in right.names() {
+                                    let kind = idx.node_kind(n);
+                                    idx.push_ref(kind, n, to_byte_span(*sp));
+                                }
+                                let l = format_endpoint_summary(left);
+                                let r = format_endpoint_summary(right);
+                                let op = match &label {
+                                    Some(lbl) => format!("-- \"{lbl}\" ->"),
+                                    None => "->".to_owned(),
+                                };
+                                (
+                                    format!("{l} {op} {r}"),
+                                    left.names().first().map(|(s, _)| s.clone()),
+                                    right.names().first().map(|(s, _)| s.clone()),
+                                )
+                            }
+                            LinkEdgeKind::Symmetric { left, right } => {
+                                for (n, sp) in left.names() {
+                                    let kind = idx.node_kind(n);
+                                    idx.push_ref(kind, n, to_byte_span(*sp));
+                                }
+                                for (n, sp) in right.names() {
+                                    let kind = idx.node_kind(n);
+                                    idx.push_ref(kind, n, to_byte_span(*sp));
+                                }
+                                let l = format_endpoint_summary(left);
+                                let r = format_endpoint_summary(right);
+                                let op = match &label {
+                                    Some(lbl) => format!("<- \"{lbl}\" ->"),
+                                    None => "<->".to_owned(),
+                                };
+                                (
+                                    format!("{l} {op} {r}"),
+                                    left.names().first().map(|(s, _)| s.clone()),
+                                    right.names().first().map(|(s, _)| s.clone()),
+                                )
+                            }
+                            LinkEdgeKind::Clique { members, .. } => {
+                                for (n, sp) in members {
+                                    let kind = idx.node_kind(n);
+                                    idx.push_ref(kind, n, to_byte_span(*sp));
+                                }
+                                let list_str = members
+                                    .iter()
+                                    .map(|(s, _)| s.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                let op = match &label {
+                                    Some(lbl) => format!("<- \"{lbl}\" ->"),
+                                    None => "<->".to_owned(),
+                                };
+                                (
+                                    format!("{op} [{list_str}]"),
+                                    members.first().map(|(s, _)| s.clone()),
+                                    members.get(1).map(|(s, _)| s.clone()),
+                                )
+                            }
+                        };
+
+                        if let Some((attrs, _)) = &edge.attrs {
+                            for (attr, _) in attrs {
+                                idx.attr_keys.push(AttrKeySite {
+                                    block: BlockKind::LinkEdge,
+                                    key: attr.key.0.clone(),
+                                    span: to_byte_span(attr.key.1),
+                                });
+                                if matches!(attr.key.0.as_str(), "start" | "end") {
+                                    idx.collect_time_expr_refs(&attr.value, true);
+                                }
+                            }
+                        }
+
+                        idx.link_edges.push(LinkEdgeSite {
+                            graph: name.0.clone(),
+                            summary,
+                            sample_from,
+                            sample_to,
+                            directed,
+                            label,
+                            span: to_byte_span(*edge_span),
+                        });
                     }
                 }
                 TopItem::Event { attrs, .. } => {
@@ -403,6 +492,17 @@ impl DocumentIndex {
         idx
     }
 
+    fn node_kind(&self, name: &str) -> SymbolKind {
+        if self
+            .declarations
+            .contains_key(&(SymbolKind::Event, name.to_owned()))
+        {
+            SymbolKind::Event
+        } else {
+            SymbolKind::Entity
+        }
+    }
+
     fn build_fallback_from_tokens(src: &str) -> Self {
         let mut idx = Self::default();
         let scanned = tokenize(src, 0);
@@ -416,7 +516,7 @@ impl DocumentIndex {
                 let kind_pair = match tok.value.as_str() {
                     "entity" => Some((SymbolKind::Entity, "entity", TokKind::LBrace)),
                     "event" => Some((SymbolKind::Event, "event", TokKind::LBrace)),
-                    "link" => Some((SymbolKind::LinkGroup, "link", TokKind::LBrace)),
+                    "link" => Some((SymbolKind::LinkGraph, "link", TokKind::LBrace)),
                     "events" => Some((SymbolKind::Events, "events", TokKind::Eq)),
                     "time" => Some((SymbolKind::TimeAnchor, "time", TokKind::Eq)),
                     _ => None,
@@ -433,8 +533,7 @@ impl DocumentIndex {
                         name_span: name_tok.span,
                         full_span,
                         description: None,
-                        belong_to: Vec::new(),
-                        tags: Vec::new(),
+                        graph_props: Vec::new(),
                         entities: Vec::new(),
                     });
                     idx.top_decls.push(TopDeclEntry {
@@ -481,10 +580,10 @@ impl DocumentIndex {
         });
     }
 
-    fn collect_time_expr_refs(&mut self, expr: &Spanned<Expr>, inside_event: bool) {
+    fn collect_time_expr_refs(&mut self, expr: &Spanned<Expr>, inside_timed_block: bool) {
         match &expr.0 {
             Expr::Ident(name) => {
-                if inside_event && matches!(name.as_str(), "start" | "end") {
+                if inside_timed_block && matches!(name.as_str(), "start" | "end") {
                     return;
                 }
                 self.push_ref(SymbolKind::TimeAnchor, name, to_byte_span(expr.1));
@@ -498,8 +597,8 @@ impl DocumentIndex {
                 self.push_ref(kind, &base.0, to_byte_span(base.1));
             }
             Expr::Binary { lhs, rhs, .. } => {
-                self.collect_time_expr_refs(lhs, inside_event);
-                self.collect_time_expr_refs(rhs, inside_event);
+                self.collect_time_expr_refs(lhs, inside_timed_block);
+                self.collect_time_expr_refs(rhs, inside_timed_block);
             }
             _ => {}
         }
@@ -527,11 +626,31 @@ impl DocumentIndex {
             .iter()
             .find(|site| site.span.start <= byte_offset && byte_offset <= site.span.end)
     }
+
+    pub fn link_edge_at(&self, byte_offset: usize) -> Option<&LinkEdgeSite> {
+        self.link_edges
+            .iter()
+            .find(|edge| edge.span.start <= byte_offset && byte_offset <= edge.span.end)
+    }
 }
 
 fn expr_as_name(expr: &Expr) -> Option<&str> {
     match expr {
         Expr::Ident(s) | Expr::Str(s) => Some(s.as_str()),
         _ => None,
+    }
+}
+
+fn format_endpoint_summary(endpoint: &LinkEndpoint) -> String {
+    match endpoint {
+        LinkEndpoint::Single((name, _)) => name.clone(),
+        LinkEndpoint::List(names, _) => {
+            let joined = names
+                .iter()
+                .map(|(s, _)| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("[{joined}]")
+        }
     }
 }

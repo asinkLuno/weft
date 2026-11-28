@@ -1,4 +1,4 @@
-# WEFT 故事文档示例（.weft 语法）
+# WEFT 故事文档示例
 
 story {
   title            = "哈利·波特与魔法石"
@@ -12,260 +12,221 @@ story {
   }
 }
 
-# ---- 实体 ----
+# ---- 1. 世界观与人物实体 ----
 
 entity 霍格沃茨魔法学校 {
-  # avatar = "images/hogwarts.png" # 相对本 .weft 的图片路径；省略时显示 ID 缩写
+  kind        = "学校"
   description = "英国的魔法学校，下设四大学院。"
-  tags        = [地点, 魔法界]
 }
 
 entity 格兰芬多 {
+  kind        = "学院"
   description = "以勇气著称的学院，院徽为狮子。"
-  belong_to   = [霍格沃茨魔法学校]
-  tags        = [学院, 魔法界]
 }
 
 entity 斯莱特林 {
+  kind        = "学院"
   description = "以野心著称的学院，院徽为蛇。"
-  belong_to   = [霍格沃茨魔法学校]
-  tags        = [学院, 魔法界]
 }
 
-entity 拉文克劳 {
-  description = "以智慧著称的学院，院徽为鹰。"
-  belong_to   = [霍格沃茨魔法学校]
-  tags        = [学院, 魔法界]
+entity 礼堂 {
+  kind        = "地点"
+  description = "霍格沃茨举行分院仪式与宴会的礼堂。"
 }
 
-entity 赫奇帕奇 {
-  description = "以忠诚著称的学院，院徽为獾。"
-  belong_to   = [霍格沃茨魔法学校]
-  tags        = [学院, 魔法界]
+entity 隐形衣 {
+  kind        = "道具"
+  description = "波特家世代相传的死亡圣器之一。"
 }
 
 entity 阿不思·邓布利多 {
-  description = "霍格沃茨校长，巧克力蛙卡片上的著名巫师，开学致辞常常只有几个词。"
+  kind        = "人物"
+  description = "霍格沃茨校长，巧克力蛙卡片上的著名巫师。"
   base_time   = 1881
-  # 多父归属示例：既是格兰芬多出身，也直属霍格沃茨
-  belong_to = [格兰芬多, 霍格沃茨魔法学校]
-  tags      = [巫师, 教师]
-}
-
-# 霍格沃茨教师
-entity 米勒娃·麦格 {
-  description      = "霍格沃茨副校长，格兰芬多学院院长，开学宴上主持分院。"
-  base_time        = [1935, 10, 4]
-  belong_to        = [霍格沃茨魔法学校, 格兰芬多]
-  tags             = [巫师, 教师]
-  calculable_props = [constellation]
 }
 
 entity 西弗勒斯·斯内普 {
-  description      = "魔药课教师，讲话阴阳怪气，上课处处刁难哈利。"
+  kind             = "人物"
+  description      = "魔药课教师，讲话阴阳怪气，实则暗中保护哈利。"
   base_time        = [1960, 1, 9]
-  belong_to        = [霍格沃茨魔法学校, 斯莱特林]
-  tags             = [巫师, 教师]
-  calculable_props = [constellation]
-}
-
-entity 奇洛 {
-  description = "黑魔法防御术课教师，说话结巴，缠着头巾的头颅下另有乾坤。"
-  belong_to   = [霍格沃茨魔法学校]
-  tags        = [巫师, 教师, 反派]
-}
-
-entity 鲁伯·海格 {
-  description      = "钥匙保管员兼狩猎场看守，骑着摩托车把襁褓中的哈利送到女贞路。"
-  base_time        = [1928, 12, 6]
-  belong_to        = [霍格沃茨魔法学校]
-  tags             = [巫师, 教职工]
   calculable_props = [constellation]
 }
 
 entity 詹姆·波特 {
+  kind             = "人物"
   description      = "哈利的父亲，格兰芬多击球手，掠夺者之首。"
   base_time        = [1960, 3, 27]
   calculable_props = [constellation]
-  belong_to        = [格兰芬多]
-  tags             = [巫师]
 }
 
 entity 莉莉·波特 {
+  kind             = "人物"
   description      = "哈利的母亲，麻瓜出身却天资出众的女巫。"
   base_time        = [1960, 1, 30]
   calculable_props = [constellation]
-  belong_to        = [格兰芬多]
-  tags             = [巫师]
 }
 
 entity 哈利·波特 {
-  description = "大难不死的男孩，入学当晚被分院帽分入格兰芬多。"
-  base_time   = [1980, 7, 31]
-  belong_to   = [格兰芬多]
-  tags        = [巫师, 学生, 主角]
-  # 可计算属性：按 base_time 计算，结果写进 extra_props
+  kind             = "人物"
+  description      = "大难不死的男孩，入学当晚被分入格兰芬多。"
+  base_time        = [1980, 7, 31]
   calculable_props = [constellation]
-  # 内置 key 之外的任意字段收进 extra_props 原样透传
-  gender = "男"
-  wand   = "冬青木魔杖，凤凰羽毛杖芯"
+  gender           = "男"
+  wand             = "冬青木魔杖，凤凰羽毛杖芯"
 }
 
 entity 罗恩·韦斯莱 {
+  kind             = "人物"
   description      = "哈利在火车上结识的好友，韦斯莱家幼子。"
   base_time        = [1980, 3, 1]
-  belong_to        = [格兰芬多]
-  tags             = [巫师, 学生, 主角]
   calculable_props = [constellation]
 }
 
 entity 赫敏·格兰杰 {
-  description      = "麻瓜出身、成绩拔尖的女巫，与哈利罗恩同寝。"
+  kind             = "人物"
+  description      = "麻瓜出身、成绩拔尖的女巫，与哈利罗恩同窗。"
   base_time        = [1979, 9, 19]
-  belong_to        = [格兰芬多]
-  tags             = [巫师, 学生, 主角]
   calculable_props = [constellation]
-}
-
-entity 纳威·隆巴顿 {
-  description      = "健忘胆小的同院同学，蟾蜍莱夫总在跑丢。"
-  base_time        = [1980, 7, 30]
-  calculable_props = [constellation]
-  belong_to        = [格兰芬多]
-  tags             = [巫师, 学生]
-}
-
-entity 金妮·韦斯莱 {
-  description      = "韦斯莱家的小女儿，在国王十字车站送哥哥上学。"
-  base_time        = [1981, 8, 11]
-  calculable_props = [constellation]
-  belong_to        = [格兰芬多]
-  tags             = [巫师, 学生]
 }
 
 entity 德拉科·马尔福 {
-  description      = "纯血世家出身的傲慢男生，入学前就想拉拢哈利。"
+  kind             = "人物"
+  description      = "纯血世家出身的傲慢男生，被分入斯莱特林。"
   base_time        = [1980, 6, 5]
-  belong_to        = [斯莱特林]
-  tags             = [巫师, 学生]
   calculable_props = [constellation]
-}
-
-entity 文森特·克拉布 {
-  description = "德拉科的跟班，胳膊粗脑子钝。"
-  belong_to   = [斯莱特林]
-  tags        = [巫师, 学生]
-}
-
-entity 格雷戈里·高尔 {
-  description = "德拉科的跟班，与克拉布形影不离。"
-  belong_to   = [斯莱特林]
-  tags        = [巫师, 学生]
-}
-
-entity 帕德玛·佩蒂尔 {
-  description = "帕瓦蒂的双胞胎妹妹，分院礼上被分入拉文克劳。"
-  belong_to   = [拉文克劳]
-  tags        = [巫师, 学生]
-}
-
-entity 汉娜·艾博 {
-  description = "分院礼上被分入赫奇帕奇的女生。"
-  belong_to   = [赫奇帕奇]
-  tags        = [巫师, 学生]
-}
-
-entity 苏珊·博恩斯 {
-  description = "分院礼上被分入赫奇帕奇的女生。"
-  belong_to   = [赫奇帕奇]
-  tags        = [巫师, 学生]
-}
-
-entity 贾斯廷·芬列里 {
-  description = "放弃麻瓜私立名校来读霍格沃茨的赫奇帕奇学生。"
-  belong_to   = [赫奇帕奇]
-  tags        = [巫师, 学生]
-}
-
-# 麻瓜世界；德思礼一家是独立归属树根
-entity 德思礼一家 {
-  description = "住在萨里郡女贞路四号的麻瓜家庭，哈利寒暑假的落脚处。"
-  tags        = [家庭, 麻瓜]
-}
-
-entity 佩妮·德思礼 {
-  description = "哈利的姨妈，莉莉的姐姐，绝口不提自家有女巫亲戚。"
-  belong_to   = [德思礼一家]
-  tags        = [麻瓜]
-}
-
-entity 弗农·德思礼 {
-  description = "哈利的姨父，一家之主，视一切不寻常之事为灾祸。"
-  belong_to   = [德思礼一家]
-  tags        = [麻瓜]
 }
 
 entity 达力·德思礼 {
-  description      = "德思礼夫妇的儿子，哈利的表哥，从小被惯得无法无天。"
+  kind             = "人物"
+  description      = "哈利的表哥，住在女贞路四号。"
   base_time        = [1980, 6, 23]
-  belong_to        = [德思礼一家]
-  tags             = [麻瓜]
   calculable_props = [constellation]
 }
 
-# 反派；不写 belong_to，自成一根
-entity 伏地魔 {
-  description      = "杀死哈利父母的黑魔王，人称「神秘人」，附在奇洛身上潜回霍格沃茨。"
+entity 汤姆·里德尔 {
+  kind             = "人物"
+  description      = "曾经的斯莱特林级长，后自称伏地魔。"
   base_time        = [1926, 12, 31]
-  real_name        = "汤姆·里德尔"
-  tags             = [巫师, 反派]
   calculable_props = [constellation]
 }
 
-# ---- 实体关系 ----
-
-link 波特一家 {
-  哈利·波特 -- "母子" -- 莉莉·波特
-  哈利·波特 -- "父子" -- 詹姆·波特
-  莉莉·波特 -- "夫妻" -- 詹姆·波特
+entity 伏地魔 {
+  kind             = "人物"
+  description      = "杀死哈利父母的黑魔王，人称「神秘人」。"
+  base_time        = [1926, 12, 31]
+  calculable_props = [constellation]
 }
 
-link 格兰芬多伙伴 {
-  哈利·波特 -- "同学与朋友" -- 罗恩·韦斯莱
-  哈利·波特 -- "同学与朋友" -- 赫敏·格兰杰
-  罗恩·韦斯莱 -- "同学与朋友" -- 赫敏·格兰杰
-}
-
-link 宿敌与羁绊 {
-  伏地魔 -- "追杀" -> 哈利·波特
-  奇洛 -- "效忠" -> 伏地魔
-  西弗勒斯·斯内普 -- "暗中保护" -> 哈利·波特
-  哈利·波特 <- "庇护" -- 阿不思·邓布利多
-  哈利·波特 -- "死对头" -- 德拉科·马尔福
-}
-
-# ---- 事件 ----
+# ---- 2. 剧情点与叙事线 ----
 
 event 分院帽晚宴 {
   start       = [1991, 9, 1, 19]
-  end         = start + [0, 0, 0, 2] # 宴会两小时后结束
-  entities    = [哈利·波特, 罗恩·韦斯莱, 赫敏·格兰杰, 德拉科·马尔福]
-  description = "开学宴会上分院帽把新生分入四大学院。"
+  end         = start + [0, 0, 0, 2]
+  entities    = [
+    哈利·波特,
+    罗恩·韦斯莱,
+    赫敏·格兰杰,
+    德拉科·马尔福,
+    西弗勒斯·斯内普,
+    礼堂,
+  ]
+  description = "开学宴会上分院帽把新生分入四大学院，哈利伤疤因斯内普方向的视线首次灼痛。"
+}
+
+event 圣诞节礼物 {
+  start       = [1991, 12, 25, 8]
+  entities    = [哈利·波特, 隐形衣]
+  description = "哈利在圣诞早晨收到匿名寄来的父亲遗物隐形衣。"
 }
 
 event 厄里斯魔镜 {
   start       = [1991, 12, 25, 21]
-  entities    = [哈利·波特]
-  description = "圣诞夜哈利在镜中看见了家人。"
+  entities    = [哈利·波特, 阿不思·邓布利多, 隐形衣]
+  description = "圣诞夜哈利披着隐形衣夜游，在镜中看见了亡故的双亲。"
 }
 
-event 蛇怪袭击 {
-  start       = [1993, 4, 20, 8]
-  end         = start + [0, 0, 0, 6] # 自己开始后 6 小时
-  entities    = [金妮·韦斯莱]
-  description = "金妮被里德的日记控制，打开密室。"
+event 冥想盆真相 {
+  start       = [1998, 5, 2, 3]
+  entities    = [哈利·波特, 西弗勒斯·斯内普, 伏地魔]
+  description = "哈利在冥想盆中看见斯内普的记忆，得知其毕生守护的真相。"
 }
 
-# ---- 事件列表 ----
+events 哈利的主线 = [分院帽晚宴, 圣诞节礼物, 厄里斯魔镜, 冥想盆真相]
 
-events 哈利的第一学年 = [分院帽晚宴, 厄里斯魔镜, 蛇怪袭击]
+# ---- 3. 实体时变关系图（状态层） ----
+
+link 组织归属 {
+  acyclic     = true
+  transitive  = true
+  description = "组织或阵营隶属关系（时变 DAG）"
+
+  [格兰芬多, 斯莱特林, 阿不思·邓布利多] -> 霍格沃茨魔法学校
+  西弗勒斯·斯内普 -> 斯莱特林
+  [哈利·波特, 罗恩·韦斯莱, 赫敏·格兰杰] -> 格兰芬多 {
+    start = 分院帽晚宴.start
+  }
+  德拉科·马尔福 -> 斯莱特林 {
+    start = 分院帽晚宴.start
+  }
+}
+
+link 空间 {
+  acyclic     = true
+  functional  = true
+  description = "物理空间包含关系（严格树）"
+
+  礼堂 -> 霍格沃茨魔法学校
+}
+
+link 物品持有 {
+  inverse_functional = true
+  description        = "唯一物品持有关系（同一时刻仅能由一人持有）"
+
+  詹姆·波特 -> 隐形衣 {
+    end = [1981, 10, 31]
+  }
+  哈利·波特 -> 隐形衣 {
+    start = 圣诞节礼物.start
+  }
+}
+
+link 人物关系 {
+  description = "人际关系图（有向、无向、团自由混写，通过边标签区分语义）"
+
+  莉莉·波特 <- "夫妻" -> 詹姆·波特
+  哈利·波特 <- "表兄弟" -> 达力·德思礼
+  <- "好友" -> [哈利·波特, 罗恩·韦斯莱, 赫敏·格兰杰]
+  哈利·波特 -- "怀疑" -> 西弗勒斯·斯内普 {
+    start       = 分院帽晚宴.start
+    end         = 冥想盆真相.start
+    description = "一直以为斯内普在帮伏地魔偷魔法石。"
+  }
+  哈利·波特 -- "致敬" -> 西弗勒斯·斯内普 {
+    start = 冥想盆真相.end
+  }
+}
+
+link 身份等价 {
+  equivalence = true
+  description = "身份等价关系（支持商图合并）"
+
+  伏地魔 <-> 汤姆·里德尔
+}
+
+# ---- 4. 剧情拓扑图（伏笔与阻塞层） ----
+
+link 剧情阻塞 {
+  acyclic       = true
+  chronological = true
+  description   = "剧情前置解锁关系（防止道具或条件未就绪即触发后续剧情）"
+
+  圣诞节礼物 -- "获得隐形衣" -> 厄里斯魔镜
+}
+
+link 伏笔 {
+  acyclic       = true
+  chronological = true
+  description   = "跨章节伏笔埋设与回收链"
+
+  分院帽晚宴 -- "伤疤灼痛与对斯内普的误判" -> 冥想盆真相
+}

@@ -3,7 +3,7 @@
 WEFT extends `.weft` documents with two kinds of sandboxed [Rune](https://rune-rs.github.io/) scripts (`.rn`, embedded `rune` 0.14.x), referenced relative to the `.weft` file:
 
 1. **Custom time axes / calendars** (`story.date_mode = "my_axis.rn"`) — define any discrete linear coordinate system: fiscal calendars (`[FY, Q, Week]`), sprint cycles (`[Release, Sprint, Day]`), elapsed experiment/mission time (`[Day, Hour, Minute]`), historical/lunar calendars, or custom world calendars.
-2. **Calculable properties** (`story.calculable_props = { my_prop = "my_prop.rn" }`) — compute derived entity metadata from `base_time`, `belong_to`, `extra_props`, and `calendar` metadata (e.g. era/cohort tags, lifecycle phases, tier labels).
+2. **Calculable properties** (`story.calculable_props = { my_prop = "my_prop.rn" }`) — compute derived entity metadata from `base_time`, `extra_props`, and `calendar` metadata (e.g. era/cohort tags, lifecycle phases, tier labels).
 
 ## Official Rune Language Docs
 
@@ -181,8 +181,6 @@ Export `pub fn calculable_prop(ctx)`:
       "tick": 63911462400
     },
     "description": "...",
-    "belong_to": ["平台组"],
-    "tags": ["核心服务", "生产环境"],
     "extra_props": { "kind": "service" }
   }
 }

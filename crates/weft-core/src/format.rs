@@ -4,8 +4,8 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::errors::Diagnostic;
 use crate::parser::{
-    Attr, BinOp, Comment, Expr, LinkEdge, LinkSyntax, Span, Spanned, TopItem, WeftAst,
-    extract_comments, is_valid_bare_name, parse_weft_recover,
+    Attr, BinOp, Comment, Expr, LinkEdge, LinkEdgeKind, LinkEndpoint, Span, Spanned, TopItem,
+    WeftAst, extract_comments, is_valid_bare_name, parse_weft_recover,
 };
 
 const INDENT_UNIT: &str = "  ";
@@ -203,11 +203,11 @@ impl<'a> Formatter<'a> {
                 self.out.push(' ');
                 self.format_attr_block(attrs, span, 0);
             }
-            TopItem::Link { group, edges } => {
+            TopItem::Link { name, attrs, edges } => {
                 self.out.push_str("link ");
-                self.out.push_str(&format_name(&group.0));
+                self.out.push_str(&format_name(&name.0));
                 self.out.push(' ');
-                self.format_link_block(edges, span, 0);
+                self.format_link_block(attrs, edges, span, 0);
             }
             TopItem::Event { name, attrs } => {
                 self.out.push_str("event ");
@@ -289,10 +289,16 @@ impl<'a> Formatter<'a> {
         self.out.push('}');
     }
 
-    fn format_link_block(&mut self, edges: &[Spanned<LinkEdge>], block_span: Span, indent: usize) {
+    fn format_link_block(
+        &mut self,
+        attrs: &[Spanned<Attr>],
+        edges: &[Spanned<LinkEdge>],
+        block_span: Span,
+        indent: usize,
+    ) {
         let inner_indent = indent + 1;
         let has_inner_comments = self.has_comments_in(block_span.start, block_span.end);
-        if edges.is_empty() && !has_inner_comments {
+        if attrs.is_empty() && edges.is_empty() && !has_inner_comments {
             self.out.push_str("{}");
             return;
         }
@@ -300,31 +306,123 @@ impl<'a> Formatter<'a> {
         self.out.push_str("{\n");
         let mut prev_end_line: Option<usize> = None;
 
+        // 1. 块级图代数属性（与普通属性块保持一致的等号对齐）
+        if !attrs.is_empty() {
+            let groups = partition_attr_groups(
+                attrs,
+                |start, end| self.has_comments_in(start, end),
+                |offset| self.line_of(offset),
+            );
+            for group in groups {
+                let align_width = group
+                    .iter()
+                    .map(|(attr, _)| UnicodeWidthStr::width(format_name(&attr.key.0).as_str()))
+                    .max()
+                    .unwrap_or(0);
+
+                for (attr, attr_span) in group {
+                    let start_line = self.line_of(attr_span.start);
+                    let last_comment = self.emit_leading_comments(
+                        attr_span.start,
+                        inner_indent,
+                        false,
+                        prev_end_line,
+                    );
+                    if let Some(comment_end) = last_comment {
+                        if start_line > comment_end + 1 {
+                            self.out.push('\n');
+                        }
+                    } else if let Some(prev) = prev_end_line {
+                        if start_line > prev + 1 {
+                            self.out.push('\n');
+                        }
+                    }
+
+                    self.push_indent(inner_indent);
+                    let key = format_name(&attr.key.0);
+                    let key_width = UnicodeWidthStr::width(key.as_str());
+                    self.out.push_str(&key);
+                    for _ in key_width..align_width {
+                        self.out.push(' ');
+                    }
+                    self.out.push_str(" = ");
+                    self.format_expr(&attr.value, inner_indent);
+
+                    let end_line = self.line_of(attr_span.end.saturating_sub(1));
+                    self.emit_trailing_comment(attr_span.end, end_line);
+                    self.out.push('\n');
+                    prev_end_line = Some(end_line);
+                }
+            }
+        }
+
+        // 2. 边与团语句（属性与边之间默认留一个空行）
+        let mut first_edge = true;
         for (edge, edge_span) in edges {
             let start_line = self.line_of(edge_span.start);
-            let last_comment =
-                self.emit_leading_comments(edge_span.start, inner_indent, false, prev_end_line);
+            let need_blank_after_attrs = first_edge && !attrs.is_empty();
+            let last_comment = self.emit_leading_comments(
+                edge_span.start,
+                inner_indent,
+                need_blank_after_attrs,
+                prev_end_line,
+            );
             if let Some(comment_end) = last_comment {
                 if start_line > comment_end + 1 {
                     self.out.push('\n');
                 }
+            } else if need_blank_after_attrs {
+                self.out.push('\n');
             } else if let Some(prev) = prev_end_line {
                 if start_line > prev + 1 {
                     self.out.push('\n');
                 }
             }
+            first_edge = false;
 
             self.push_indent(inner_indent);
-            let (left_op, right_op) = match edge.syntax {
-                LinkSyntax::Undirected => (" -- ", " -- "),
-                LinkSyntax::Forward => (" -- ", " -> "),
-                LinkSyntax::Backward => (" <- ", " -- "),
-            };
-            self.out.push_str(&format_name(&edge.left.0));
-            self.out.push_str(left_op);
-            self.out.push_str(&format_quoted_string(&edge.relation.0));
-            self.out.push_str(right_op);
-            self.out.push_str(&format_name(&edge.right.0));
+            match &edge.kind {
+                LinkEdgeKind::Directed { left, right } => {
+                    self.format_link_endpoint(left, inner_indent);
+                    match &edge.label {
+                        Some((label, _)) => {
+                            self.out.push_str(" -- ");
+                            self.out.push_str(&format_quoted_string(label));
+                            self.out.push_str(" -> ");
+                        }
+                        None => self.out.push_str(" -> "),
+                    }
+                    self.format_link_endpoint(right, inner_indent);
+                }
+                LinkEdgeKind::Symmetric { left, right } => {
+                    self.format_link_endpoint(left, inner_indent);
+                    match &edge.label {
+                        Some((label, _)) => {
+                            self.out.push_str(" <- ");
+                            self.out.push_str(&format_quoted_string(label));
+                            self.out.push_str(" -> ");
+                        }
+                        None => self.out.push_str(" <-> "),
+                    }
+                    self.format_link_endpoint(right, inner_indent);
+                }
+                LinkEdgeKind::Clique { members, list_span } => {
+                    match &edge.label {
+                        Some((label, _)) => {
+                            self.out.push_str("<- ");
+                            self.out.push_str(&format_quoted_string(label));
+                            self.out.push_str(" -> ");
+                        }
+                        None => self.out.push_str("<-> "),
+                    }
+                    self.format_name_list(members, *list_span, inner_indent);
+                }
+            }
+
+            if let Some((edge_attrs, attr_span)) = &edge.attrs {
+                self.out.push(' ');
+                self.format_attr_block(edge_attrs, *attr_span, inner_indent);
+            }
 
             let end_line = self.line_of(edge_span.end.saturating_sub(1));
             self.emit_trailing_comment(edge_span.end, end_line);
@@ -335,6 +433,15 @@ impl<'a> Formatter<'a> {
         self.emit_leading_comments(block_span.end, inner_indent, false, prev_end_line);
         self.push_indent(indent);
         self.out.push('}');
+    }
+
+    fn format_link_endpoint(&mut self, endpoint: &LinkEndpoint, indent: usize) {
+        match endpoint {
+            LinkEndpoint::Single((name, _)) => self.out.push_str(&format_name(name)),
+            LinkEndpoint::List(names, list_span) => {
+                self.format_name_list(names, *list_span, indent);
+            }
+        }
     }
 
     fn format_name_list(&mut self, items: &[Spanned<String>], list_span: Span, indent: usize) {

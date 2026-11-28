@@ -8,7 +8,7 @@ use crate::errors::{ByteSpan, Diagnostic, DocumentError, ValidationError};
 use crate::plugin_loader;
 
 // 可计算属性运行时：脚本接收实体上下文，calculable_prop 的返回值直接作为
-// 实体 extra_props 中该属性注册 ID 下的值，不生成实体，也不改归属。
+// 实体 extra_props 中该属性注册 ID 下的值，不生成实体。
 #[derive(Debug)]
 pub struct CalculablePropRuntime {
     runtime: Arc<RuntimeContext>,

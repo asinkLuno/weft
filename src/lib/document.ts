@@ -3,6 +3,39 @@ export type Phase = {
   anchor: Phase | null;
 };
 
+export type LinkDomain = "entity" | "event";
+
+export type LinkGraphSpec = {
+  domain?: LinkDomain | null;
+  acyclic: boolean;
+  asymmetric: boolean;
+  intransitive: boolean;
+  functional: boolean;
+  inverse_functional: boolean;
+  symmetric: boolean;
+  transitive: boolean;
+  equivalence: boolean;
+  chronological: boolean;
+  description?: string | null;
+};
+
+export type LinkTime = {
+  raw: number[];
+  formatted: string;
+  tick: number;
+};
+
+export type WeftLink = {
+  graph: string;
+  from: string;
+  to: string;
+  directed: boolean;
+  label?: string | null;
+  start?: LinkTime | null;
+  end?: LinkTime | null;
+  description?: string | null;
+};
+
 export type WeftDoc = {
   story?: {
     title?: string;
@@ -12,6 +45,7 @@ export type WeftDoc = {
   };
   // 所选历法的时间分量数（后端解析时填充）
   calendar_components?: number;
+  graphs?: Record<string, LinkGraphSpec>;
   entity?: Record<
     string,
     {
@@ -20,17 +54,11 @@ export type WeftDoc = {
       description?: string;
       base_time?: Phase | null;
       base_time_humanizer?: string;
-      tags?: string[];
       // 内置 key 之外的输入字段原样透传（后端 extra_props）
       extra_props?: Record<string, unknown>;
     }
   >;
-  // 归属 DAG：每个节点只含实体 ID 与已解析的直接上级
-  belong_dag?: Array<{ id: string; belong_to?: string[] }>;
-  entity_link?: Record<
-    string,
-    Array<{ entities: [string, string]; relations: string; directed: boolean }>
-  >;
+  links?: WeftLink[];
   // 事件 ID → 事件定义
   event?: Record<string, Event>;
   // 事件列表名称 → 事件 ID 列表

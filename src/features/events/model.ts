@@ -18,11 +18,22 @@ export type EventEntityRef = {
   baseTimeDelta?: EventEntityDelta;
 };
 
+export type EventPlotLink = {
+  key: string;
+  graph: string;
+  label?: string;
+  direction: "symmetric" | "outgoing" | "incoming";
+  peerId: string;
+  peerTime?: string;
+  description?: string;
+};
+
 export type EventDetail = {
   id: string;
   time?: string;
   description?: string;
   entities: EventEntityRef[];
+  links: EventPlotLink[];
   lists: Array<{ id: string; label: string }>;
   prevId?: string;
   nextId?: string;
@@ -31,6 +42,7 @@ export type EventDetail = {
 export type EventsIndex = {
   listsByEvent: ReadonlyMap<string, Array<{ id: string; label: string }>>;
   listIndexByName: ReadonlyMap<string, ReadonlyMap<string, number>>;
+  plotLinksByEvent: ReadonlyMap<string, EventPlotLink[]>;
 };
 
 export type GanttBreak = {
@@ -60,11 +72,12 @@ export type GanttChartModel = {
 };
 
 export function buildEventsView(doc: WeftDoc | null) {
+  const eventMap = doc?.event ?? {};
+  const graphs = doc?.graphs ?? {};
+  const allLinks = doc?.links ?? [];
+
   const byId = new Map<string, EventItem>(
-    Object.entries(doc?.event ?? {}).map(([id, event]) => [
-      id,
-      { ...event, id },
-    ]),
+    Object.entries(eventMap).map(([id, event]) => [id, { ...event, id }]),
   );
   const entries = Object.entries(doc?.events ?? {})
     .filter(([, ids]) => ids.length > 0)
@@ -89,8 +102,57 @@ export function buildEventsView(doc: WeftDoc | null) {
     listIndexByName.set(listName, posMap);
   }
 
+  const plotLinksByEvent = new Map<string, EventPlotLink[]>();
+  const pushPlotLink = (eventId: string, entry: EventPlotLink) => {
+    let list = plotLinksByEvent.get(eventId);
+    if (!list) {
+      list = [];
+      plotLinksByEvent.set(eventId, list);
+    }
+    list.push(entry);
+  };
+
+  for (let i = 0; i < allLinks.length; i++) {
+    const link = allLinks[i];
+    if (graphs[link.graph]?.domain === "entity") continue;
+    const fromEv = eventMap[link.from];
+    const toEv = eventMap[link.to];
+    if (!fromEv || !toEv) continue;
+
+    const label = link.label ?? undefined;
+    const description = link.description ?? undefined;
+
+    pushPlotLink(link.from, {
+      key: `${link.graph}:${i}:from`,
+      graph: link.graph,
+      label,
+      direction: link.directed ? "outgoing" : "symmetric",
+      peerId: link.to,
+      peerTime: formatTimeRange(toEv.start_display, toEv.end_display),
+      description,
+    });
+    if (link.from !== link.to) {
+      pushPlotLink(link.to, {
+        key: `${link.graph}:${i}:to`,
+        graph: link.graph,
+        label,
+        direction: link.directed ? "incoming" : "symmetric",
+        peerId: link.from,
+        peerTime: formatTimeRange(fromEv.start_display, fromEv.end_display),
+        description,
+      });
+    }
+  }
+
   const calendarId = doc?.story?.date.id ?? "gregorian";
-  return { byId, entries, calendarId, listsByEvent, listIndexByName };
+  return {
+    byId,
+    entries,
+    calendarId,
+    listsByEvent,
+    listIndexByName,
+    plotLinksByEvent,
+  };
 }
 
 function resolveEventNeighbors(
@@ -150,6 +212,7 @@ export function buildEventDetail(
     };
   });
 
+  const links = index.plotLinksByEvent.get(eventId) ?? [];
   const lists = index.listsByEvent.get(eventId) ?? [];
   const { prevId, nextId } = resolveEventNeighbors(
     doc?.events,
@@ -164,6 +227,7 @@ export function buildEventDetail(
     time: formatTimeRange(event.start_display, event.end_display),
     description: event.description,
     entities,
+    links,
     lists,
     prevId,
     nextId,

@@ -1,7 +1,7 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { type Edge, MarkerType, type Node } from "@xyflow/react";
 import { type Lang, strings } from "@/i18n";
-import type { WeftDoc } from "@/lib/document";
+import type { WeftDoc, WeftLink } from "@/lib/document";
 import { formatTimeRange } from "@/lib/ui";
 import {
   type EntityLayoutMode,
@@ -12,53 +12,43 @@ import {
 
 export type EntityT = NonNullable<WeftDoc["entity"]>[string];
 
-export type EntityFilter =
-  | { dim: "belong"; pick: string }
-  | { dim: "link"; pick: string }
-  | { dim: "tags"; picks: readonly string[] };
-
-export type TagOption = {
-  tag: string;
-  count: number;
-};
-
-export type EntityParentRef = {
-  id: string;
-  name: string;
-  preview?: EntityData;
-};
+export type EntityViewMode = "narrative" | "quotient";
 
 export type EntityData = {
   id: string;
   name: string;
+  aliases: string[];
   avatar?: string;
   baseTime?: string;
-  tags: string[];
-  parents: EntityParentRef[];
   extraProps: Array<[string, string]>;
   description?: string;
-  belongLabel: string;
 };
 
 export type EntityFlowNode = Node<EntityData, "entity">;
 
 export type FloatingEdgeData = {
-  label: string;
+  label?: string;
   directed: boolean;
+  timeRange?: string;
+  description?: string;
   pairIndex: number;
   pairTotal: number;
   canonicalForward: boolean;
 };
 
-export type EntityLinkDirection = "undirected" | "outgoing" | "incoming";
+export type EntityLinkDirection = "symmetric" | "outgoing" | "incoming";
 
 export type EntityLinkEntry = {
   key: string;
-  group: string;
-  relation: string;
+  graph: string;
+  label?: string;
   direction: EntityLinkDirection;
   peerId: string;
   peerName: string;
+  startTick?: number;
+  endTick?: number;
+  timeRange?: string;
+  description?: string;
 };
 
 export type EntityEventEntry = {
@@ -70,85 +60,207 @@ export type EntityEventEntry = {
 export type EntityDetail = {
   id: string;
   name: string;
+  aliases: string[];
   avatar?: string;
   baseTime?: string;
   description?: string;
-  tags: string[];
   extraProps: Array<[string, string]>;
-  parents: Array<{ id: string; label: string }>;
-  children: Array<{ id: string; label: string }>;
   links: EntityLinkEntry[];
   events: EntityEventEntry[];
 };
 
 const EMPTY_SIZES: ReadonlyMap<string, NodeSize> = new Map();
 
+const DIRECTED_MARKER = {
+  type: MarkerType.ArrowClosed,
+  color: "var(--color-primary)",
+  width: 18,
+  height: 18,
+} as const;
+
 type EntityDocIndex = {
   sortedEntities: ReadonlyArray<[string, EntityT]>;
-  parentsById: Map<string, Set<string>>;
-  ancestorsOf: (id: string) => Set<string>;
-  belongTargetSet: ReadonlySet<string>;
-  belongSections: Array<Array<{ v: string; label: string }>>;
   linkSections: Array<Array<{ v: string; label: string }>>;
-  tagCounts: ReadonlyMap<string, number>;
-  tagOptions: ReadonlyArray<TagOption>;
-  childrenById: Map<string, Array<{ id: string; label: string }>>;
-  linksByEntity: Map<string, EntityLinkEntry[]>;
-  eventsByEntity: Map<string, EntityEventEntry[]>;
+  timeSections: Array<Array<{ v: string; label: string }>>;
+  eventSliceTicks: ReadonlyMap<string, number>;
+  linksByEntity: ReadonlyMap<string, EntityLinkEntry[]>;
+  eventsByEntity: ReadonlyMap<string, EntityEventEntry[]>;
+  hasEquivalence: boolean;
+  repByEntity: ReadonlyMap<string, string>;
+  membersByRep: ReadonlyMap<string, string[]>;
 };
 
 const entityIndexCache = new WeakMap<WeftDoc, EntityDocIndex>();
 
-// 按 WeftDoc 实例缓存文档级派生索引：筛选切换零重复排序/DAG遍历/标签聚合，详情查表 O(1)
+function formatLinkInterval(link: WeftLink): string | undefined {
+  if (link.start && link.end) {
+    return `${link.start.formatted} → ${link.end.formatted}`;
+  }
+  if (link.start) {
+    return `${link.start.formatted} → +∞`;
+  }
+  if (link.end) {
+    return `-∞ → ${link.end.formatted}`;
+  }
+  return undefined;
+}
+
+/**
+ * 判断一条时变边在给定刻度 `tick` 是否处于生效状态（严格对齐后端 `AtomicSlice::Point(tick)`）：
+ * - 默认省略 `start`/`end` 视为 `(-∞, +∞)`；
+ * - 常规区间为左闭右开 `[start, end)`；
+ * - 瞬时边 `start == end` 在且仅在 `tick == start` 时生效。
+ */
+export function isSpanActiveAtTick(
+  startTick: number | undefined,
+  endTick: number | undefined,
+  tick: number,
+): boolean {
+  if (startTick !== undefined && startTick > tick) return false;
+  if (endTick !== undefined) {
+    if (startTick !== undefined && startTick === endTick) {
+      return startTick === tick;
+    }
+    if (tick >= endTick) return false;
+  }
+  return true;
+}
+
+function formatExtraProps(
+  extraProps?: Record<string, unknown>,
+): Array<[string, string]> {
+  return Object.entries(extraProps ?? {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => [
+      key,
+      typeof value === "object" && value !== null
+        ? JSON.stringify(value)
+        : String(value),
+    ]);
+}
+
+function computeEquivalenceClasses(
+  entityMap: Readonly<Record<string, EntityT>>,
+  links: readonly WeftLink[],
+  graphs: Readonly<Record<string, NonNullable<WeftDoc["graphs"]>[string]>>,
+): {
+  hasEquivalence: boolean;
+  repByEntity: Map<string, string>;
+  membersByRep: Map<string, string[]>;
+} {
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    let curr = x;
+    while (parent.get(curr) !== undefined && parent.get(curr) !== curr) {
+      curr = parent.get(curr) as string;
+    }
+    let walk = x;
+    while (walk !== curr) {
+      const next = parent.get(walk) ?? curr;
+      parent.set(walk, curr);
+      walk = next;
+    }
+    return curr;
+  };
+  const union = (a: string, b: string) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(rb, ra);
+  };
+
+  for (const id of Object.keys(entityMap)) {
+    parent.set(id, id);
+  }
+  for (const link of links) {
+    const g = graphs[link.graph];
+    if (!g?.equivalence || g.domain === "event") continue;
+    if (!(link.from in entityMap) || !(link.to in entityMap)) continue;
+    union(link.from, link.to);
+  }
+
+  const buckets = new Map<string, string[]>();
+  for (const id of Object.keys(entityMap)) {
+    const root = find(id);
+    const list = buckets.get(root) ?? [];
+    list.push(id);
+    buckets.set(root, list);
+  }
+
+  const repByEntity = new Map<string, string>();
+  const membersByRep = new Map<string, string[]>();
+  let hasEquivalence = false;
+
+  for (const members of buckets.values()) {
+    members.sort((a, b) => {
+      const scoreA =
+        (entityMap[a]?.avatar ? 2 : 0) + (entityMap[a]?.description ? 1 : 0);
+      const scoreB =
+        (entityMap[b]?.avatar ? 2 : 0) + (entityMap[b]?.description ? 1 : 0);
+      if (scoreA !== scoreB) return scoreB - scoreA;
+      return a.localeCompare(b);
+    });
+    const rep = members[0];
+    if (members.length > 1) hasEquivalence = true;
+    membersByRep.set(rep, members);
+    for (const m of members) {
+      repByEntity.set(m, rep);
+    }
+  }
+
+  return { hasEquivalence, repByEntity, membersByRep };
+}
+
 function getEntityDocIndex(doc: WeftDoc): EntityDocIndex {
   const cached = entityIndexCache.get(doc);
   if (cached) return cached;
 
   const entityMap = doc.entity ?? {};
+  const graphs = doc.graphs ?? {};
+  const links = doc.links ?? [];
+  const eventMap = doc.event ?? {};
+
   const sortedEntities = Object.entries(entityMap).sort(([a], [b]) =>
     a.localeCompare(b),
   );
-  const nameOf = (id: string) => entityMap[id]?.id ?? id;
-  const parentsById = entityParents(doc.belong_dag);
-  const ancestorsOf = createAncestorsLookup(parentsById);
-  const { targetSet: belongTargetSet, belongSections } = buildBelongSections(
-    parentsById,
-    ancestorsOf,
-    nameOf,
-  );
 
-  const tagCounts = new Map<string, number>();
-  for (const [, entity] of sortedEntities) {
-    for (const tag of entity.tags ?? []) {
-      tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+  const isEntityLink = (link: WeftLink) =>
+    graphs[link.graph]?.domain !== "event" &&
+    link.from in entityMap &&
+    link.to in entityMap;
+
+  // 1. 实体关系图筛选清单（仅包含连接实体的 link 图）
+  const graphNames = new Set<string>();
+  for (const link of links) {
+    if (isEntityLink(link)) {
+      graphNames.add(link.graph);
     }
   }
-  const tagOptions: TagOption[] = [...tagCounts.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([tag, count]) => ({ tag, count }));
+  const linkSections = [
+    [...graphNames]
+      .sort((a, b) => a.localeCompare(b))
+      .map((g) => ({ v: g, label: g })),
+  ];
 
-  const childrenById = new Map<string, Array<{ id: string; label: string }>>();
-  for (const [childId, pSet] of parentsById.entries()) {
-    const child = entityMap[childId];
-    if (!child) continue;
-    for (const parentId of pSet) {
-      let list = childrenById.get(parentId);
-      if (!list) {
-        list = [];
-        childrenById.set(parentId, list);
-      }
-      list.push({ id: childId, label: child.id });
-    }
+  // 2. 事件时间截面选项（按发生时间升序，取事件完成时刻 end_tick ?? start_tick 作为切片刻度）
+  const eventSliceTicks = new Map<string, number>();
+  const chronologicalEvents = Object.entries(eventMap)
+    .filter(([, ev]) => ev.start_tick !== undefined)
+    .sort(
+      ([idA, a], [idB, b]) =>
+        (a.start_tick ?? 0) - (b.start_tick ?? 0) || idA.localeCompare(idB),
+    );
+  for (const [evId, ev] of chronologicalEvents) {
+    eventSliceTicks.set(evId, ev.end_tick ?? ev.start_tick ?? 0);
   }
-  for (const list of childrenById.values()) {
-    list.sort((a, b) => a.label.localeCompare(b.label));
-  }
+  const timeSections = [
+    chronologicalEvents.map(([evId]) => ({
+      v: evId,
+      label: evId,
+    })),
+  ];
 
+  // 3. 实体参与的关系边索引
   const linksByEntity = new Map<string, EntityLinkEntry[]>();
-  const sortedGroups = Object.entries(doc.entity_link ?? {}).sort(([a], [b]) =>
-    a.localeCompare(b),
-  );
-  const linkSections = [sortedGroups.map(([g]) => ({ v: g, label: g }))];
   const pushLink = (entityId: string, entry: EntityLinkEntry) => {
     let list = linksByEntity.get(entityId);
     if (!list) {
@@ -157,42 +269,50 @@ function getEntityDocIndex(doc: WeftDoc): EntityDocIndex {
     }
     list.push(entry);
   };
-  for (const [group, entries] of sortedGroups) {
-    for (let i = 0; i < entries.length; i++) {
-      const {
-        entities: [a, b],
-        relations,
-        directed,
-      } = entries[i];
-      const entA = entityMap[a];
-      const entB = entityMap[b];
-      if (!entA || !entB) continue;
-      pushLink(a, {
-        key: `${group}:${i}:a`,
-        group,
-        relation: relations,
-        direction: directed ? "outgoing" : "undirected",
-        peerId: b,
-        peerName: entB.id,
+
+  for (let i = 0; i < links.length; i++) {
+    const link = links[i];
+    if (!isEntityLink(link)) continue;
+    const timeRange = formatLinkInterval(link);
+    const description = link.description ?? undefined;
+    const label = link.label ?? undefined;
+    const startTick = link.start?.tick;
+    const endTick = link.end?.tick;
+
+    pushLink(link.from, {
+      key: `${link.graph}:${i}:from`,
+      graph: link.graph,
+      label,
+      direction: link.directed ? "outgoing" : "symmetric",
+      peerId: link.to,
+      peerName: entityMap[link.to].id,
+      startTick,
+      endTick,
+      timeRange,
+      description,
+    });
+    if (link.from !== link.to) {
+      pushLink(link.to, {
+        key: `${link.graph}:${i}:to`,
+        graph: link.graph,
+        label,
+        direction: link.directed ? "incoming" : "symmetric",
+        peerId: link.from,
+        peerName: entityMap[link.from].id,
+        startTick,
+        endTick,
+        timeRange,
+        description,
       });
-      if (a !== b) {
-        pushLink(b, {
-          key: `${group}:${i}:b`,
-          group,
-          relation: relations,
-          direction: directed ? "incoming" : "undirected",
-          peerId: a,
-          peerName: entA.id,
-        });
-      }
     }
   }
 
+  // 4. 实体关联事件索引
   const rawEventsByEntity = new Map<
     string,
     Array<EntityEventEntry & { tick: number }>
   >();
-  for (const [id, ev] of Object.entries(doc.event ?? {})) {
+  for (const [id, ev] of Object.entries(eventMap)) {
     const participants = ev.entities;
     if (!participants?.length) continue;
     const entry: EntityEventEntry & { tick: number } = {
@@ -224,210 +344,116 @@ function getEntityDocIndex(doc: WeftDoc): EntityDocIndex {
     );
   }
 
+  // 5. 等价关系商图分量
+  const { hasEquivalence, repByEntity, membersByRep } =
+    computeEquivalenceClasses(entityMap, links, graphs);
+
   const index: EntityDocIndex = {
     sortedEntities,
-    parentsById,
-    ancestorsOf,
-    belongTargetSet,
-    belongSections,
     linkSections,
-    tagCounts,
-    tagOptions,
-    childrenById,
+    timeSections,
+    eventSliceTicks,
     linksByEntity,
     eventsByEntity,
+    hasEquivalence,
+    repByEntity,
+    membersByRep,
   };
   entityIndexCache.set(doc, index);
   return index;
 }
 
-// 从归属 DAG 收集直接归属；后端已保证 ID 合法且无环。
-export function entityParents(
-  dag: WeftDoc["belong_dag"],
-): Map<string, Set<string>> {
-  const parents = new Map<string, Set<string>>();
-  for (const node of dag ?? []) {
-    if (node.belong_to?.length) {
-      parents.set(node.id, new Set(node.belong_to));
-    }
-  }
-  return parents;
-}
-
-function formatExtraProps(
-  extraProps?: Record<string, unknown>,
-): Array<[string, string]> {
-  return Object.entries(extraProps ?? {})
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => [
-      key,
-      typeof value === "object" && value !== null
-        ? JSON.stringify(value)
-        : String(value),
-    ]);
-}
-
-function createAncestorsLookup(
-  parentsById: ReadonlyMap<string, Set<string>>,
-): (id: string) => Set<string> {
-  const cache = new Map<string, Set<string>>();
-  const ancestorsOf = (id: string): Set<string> => {
-    const hit = cache.get(id);
-    if (hit) return hit;
-    const set = new Set<string>();
-    cache.set(id, set);
-    for (const p of parentsById.get(id) ?? []) {
-      set.add(p);
-      for (const a of ancestorsOf(p)) set.add(a);
-    }
-    return set;
-  };
-  return ancestorsOf;
-}
-
-function buildBelongSections(
-  parentsById: ReadonlyMap<string, Set<string>>,
-  ancestorsOf: (id: string) => Set<string>,
-  nameOf: (id: string) => string,
-) {
-  const targetSet = new Set<string>();
-  for (const ids of parentsById.values()) {
-    for (const id of ids) targetSet.add(id);
-  }
-
-  const rootsOf = (id: string) => {
-    const roots = [...ancestorsOf(id)].filter(
-      (ancestor) => (parentsById.get(ancestor)?.size ?? 0) === 0,
-    );
-    return roots.length ? roots : [id];
-  };
-
-  const byRoot = new Map<string, Array<{ v: string; label: string }>>();
-  for (const target of targetSet) {
-    for (const root of rootsOf(target)) {
-      const section = byRoot.get(root) ?? [];
-      section.push({ v: target, label: nameOf(target) });
-      byRoot.set(root, section);
-    }
-  }
-
-  const belongSections = [...byRoot.entries()]
-    .sort(([a], [b]) => nameOf(a).localeCompare(nameOf(b)))
-    .map(([, section]) =>
-      section.sort(
-        (a, b) =>
-          ancestorsOf(a.v).size - ancestorsOf(b.v).size ||
-          a.label.localeCompare(b.label),
-      ),
-    );
-
-  return { targetSet, belongSections };
-}
-
-function buildBelongEdges(
-  filtered: ReadonlyArray<[string, EntityT]>,
-  parentsById: ReadonlyMap<string, Set<string>>,
+function buildGraphEdges(
+  keyPrefix: string,
+  links: readonly WeftLink[],
   visibleSet: ReadonlySet<string>,
+  mapNode: (id: string) => string,
+  graphs: Readonly<Record<string, NonNullable<WeftDoc["graphs"]>[string]>>,
+  dropEquivalenceSelf: boolean,
 ): Edge[] {
-  const edges: Edge[] = [];
-  for (const [id] of filtered) {
-    const parents = parentsById.get(id);
-    if (!parents) continue;
-    for (const p of parents) {
-      if (!visibleSet.has(p)) continue;
-      edges.push({
-        id: `${p}->${id}`,
-        source: p,
-        target: id,
-      });
-    }
-  }
-  return edges;
-}
-
-type LinkEdgeRecord = {
-  index: number;
-  source: string;
-  target: string;
-  relation: string;
-  directed: boolean;
-  pairKey: string;
-  canonicalForward: boolean;
-};
-
-function collectValidLinks(
-  activeLinks: ReadonlyArray<{
-    entities: [string, string];
-    relations: string;
+  type EdgeRecord = {
+    index: number;
+    source: string;
+    target: string;
+    label?: string;
     directed: boolean;
-  }>,
-  visibleSet: ReadonlySet<string>,
-): LinkEdgeRecord[] {
-  const valid: LinkEdgeRecord[] = [];
-  for (let i = 0; i < activeLinks.length; i++) {
-    const {
-      entities: [source, target],
-      relations,
-      directed,
-    } = activeLinks[i];
-    if (source === target || !visibleSet.has(source) || !visibleSet.has(target))
+    timeRange?: string;
+    description?: string;
+    pairKey: string;
+    canonicalForward: boolean;
+  };
+
+  const valid: EdgeRecord[] = [];
+  const dedup = new Set<string>();
+
+  for (let i = 0; i < links.length; i++) {
+    const link = links[i];
+    const source = mapNode(link.from);
+    const target = mapNode(link.to);
+    if (
+      dropEquivalenceSelf &&
+      graphs[link.graph]?.equivalence &&
+      source === target
+    ) {
       continue;
+    }
+    if (
+      source === target ||
+      !visibleSet.has(source) ||
+      !visibleSet.has(target)
+    ) {
+      continue;
+    }
+    const timeRange = formatLinkInterval(link);
+    const label = link.label ?? undefined;
     const canonicalForward = source < target;
     const pairKey = canonicalForward
       ? `${source}\0${target}`
       : `${target}\0${source}`;
+    const dedupKey = link.directed
+      ? `${source}\0${target}\0${label ?? ""}\0${timeRange ?? ""}`
+      : `${pairKey}\0${label ?? ""}\0${timeRange ?? ""}`;
+    if (dedup.has(dedupKey)) continue;
+    dedup.add(dedupKey);
+
     valid.push({
       index: i,
       source,
       target,
-      relation: relations,
-      directed,
+      label,
+      directed: link.directed,
+      timeRange,
+      description: link.description ?? undefined,
       pairKey,
       canonicalForward,
     });
   }
-  return valid;
-}
 
-const DIRECTED_MARKER = {
-  type: MarkerType.ArrowClosed,
-  color: "var(--color-primary)",
-  width: 18,
-  height: 18,
-} as const;
-
-function buildLinkEdges(
-  activeLink: string,
-  activeLinks: ReadonlyArray<{
-    entities: [string, string];
-    relations: string;
-    directed: boolean;
-  }>,
-  visibleSet: ReadonlySet<string>,
-): Edge[] {
-  const valid = collectValidLinks(activeLinks, visibleSet);
   const pairCounts = new Map<string, number>();
   for (const item of valid) {
     pairCounts.set(item.pairKey, (pairCounts.get(item.pairKey) ?? 0) + 1);
   }
-
   const pairSeen = new Map<string, number>();
+
   return valid.map((item) => {
     const pairIndex = pairSeen.get(item.pairKey) ?? 0;
     pairSeen.set(item.pairKey, pairIndex + 1);
     const data: FloatingEdgeData = {
-      label: item.relation,
+      label: item.label,
       directed: item.directed,
+      timeRange: item.timeRange,
+      description: item.description,
       pairIndex,
       pairTotal: pairCounts.get(item.pairKey) ?? 1,
       canonicalForward: item.canonicalForward,
     };
     return {
-      id: `link:${activeLink}:${item.index}`,
+      id: `${keyPrefix}:${item.index}`,
       type: "floating",
       source: item.source,
       target: item.target,
-      markerEnd: item.directed ? DIRECTED_MARKER : undefined,
+      markerStart: item.directed ? undefined : DIRECTED_MARKER,
+      markerEnd: DIRECTED_MARKER,
       data,
     };
   });
@@ -437,212 +463,270 @@ export function buildEntityDetail(
   doc: WeftDoc | null,
   lang: Lang,
   entityId: string,
+  viewMode: EntityViewMode = "narrative",
+  activeEvent: string | null = null,
 ): EntityDetail | null {
   const entityMap = doc?.entity;
-  const entity = entityMap?.[entityId];
-  if (!doc || !entity || !entityMap) return null;
+  if (!doc || !entityMap) return null;
+
+  const index = getEntityDocIndex(doc);
+  const resolvedId =
+    viewMode === "quotient"
+      ? (index.repByEntity.get(entityId) ?? entityId)
+      : entityId;
+  const entity = entityMap[resolvedId];
+  if (!entity) return null;
+
+  const sliceTick =
+    activeEvent !== null ? index.eventSliceTicks.get(activeEvent) : undefined;
 
   const t = strings[lang];
-  const { parentsById, childrenById, linksByEntity, eventsByEntity } =
-    getEntityDocIndex(doc);
-  const parents = [...(parentsById.get(entityId) ?? [])]
-    .map((id) => ({ id, label: entityMap[id]?.id ?? id }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+  const members =
+    viewMode === "quotient"
+      ? (index.membersByRep.get(resolvedId) ?? [resolvedId])
+      : [resolvedId];
+  const aliases = members.filter((id) => id !== resolvedId);
+
+  const mergedProps: Record<string, unknown> = {};
+  const mergedEvents = new Map<string, EntityEventEntry>();
+  const mergedLinks: EntityLinkEntry[] = [];
+  const seenLinks = new Set<string>();
+  const graphs = doc.graphs ?? {};
+
+  for (const memberId of members) {
+    const ent = entityMap[memberId];
+    if (ent?.extra_props) {
+      for (const [k, v] of Object.entries(ent.extra_props)) {
+        if (!(k in mergedProps)) mergedProps[k] = v;
+      }
+    }
+    for (const ev of index.eventsByEntity.get(memberId) ?? []) {
+      if (!mergedEvents.has(ev.id)) mergedEvents.set(ev.id, ev);
+    }
+    for (const lk of index.linksByEntity.get(memberId) ?? []) {
+      if (
+        sliceTick !== undefined &&
+        !isSpanActiveAtTick(lk.startTick, lk.endTick, sliceTick)
+      ) {
+        continue;
+      }
+      const peerId =
+        viewMode === "quotient"
+          ? (index.repByEntity.get(lk.peerId) ?? lk.peerId)
+          : lk.peerId;
+      if (
+        viewMode === "quotient" &&
+        peerId === resolvedId &&
+        graphs[lk.graph]?.equivalence
+      ) {
+        continue;
+      }
+      const dedupKey = `${lk.graph}|${lk.label ?? ""}|${lk.direction}|${peerId}|${lk.timeRange ?? ""}`;
+      if (seenLinks.has(dedupKey)) continue;
+      seenLinks.add(dedupKey);
+      mergedLinks.push({
+        ...lk,
+        peerId,
+        peerName: entityMap[peerId]?.id ?? peerId,
+      });
+    }
+  }
+
+  const descriptions = members
+    .map((m) => entityMap[m]?.description)
+    .filter((d): d is string => Boolean(d && d.trim().length > 0));
+  const baseTimeHumanizer = members
+    .map((m) => entityMap[m]?.base_time_humanizer)
+    .find((v): v is string => v !== undefined);
+  const avatarPath = members
+    .map((m) => entityMap[m]?.avatar)
+    .find((v): v is string => Boolean(v));
 
   return {
-    id: entityId,
+    id: resolvedId,
     name: entity.id,
-    avatar: entity.avatar ? convertFileSrc(entity.avatar) : undefined,
+    aliases,
+    avatar: avatarPath ? convertFileSrc(avatarPath) : undefined,
     baseTime:
-      entity.base_time_humanizer !== undefined
-        ? `${t.baseTime}: ${entity.base_time_humanizer}`
+      baseTimeHumanizer !== undefined
+        ? `${t.baseTime}: ${baseTimeHumanizer}`
         : undefined,
-    description: entity.description,
-    tags: entity.tags ?? [],
-    extraProps: formatExtraProps(entity.extra_props),
-    parents,
-    children: childrenById.get(entityId) ?? [],
-    links: linksByEntity.get(entityId) ?? [],
-    events: eventsByEntity.get(entityId) ?? [],
+    description:
+      descriptions.length > 0 ? descriptions.join("\n\n") : undefined,
+    extraProps: formatExtraProps(mergedProps),
+    links: mergedLinks,
+    events: [...mergedEvents.values()],
   };
-}
-
-function createEntityDataBuilder(
-  entityMap: Readonly<Record<string, EntityT>>,
-  parentsById: ReadonlyMap<string, Set<string>>,
-  t: (typeof strings)[Lang],
-) {
-  const previewCache = new Map<string, EntityData>();
-  const build = (
-    id: string,
-    e: EntityT,
-    includePreviews = true,
-  ): EntityData => {
-    if (!includePreviews) {
-      const cached = previewCache.get(id);
-      if (cached) return cached;
-    }
-    const built: EntityData = {
-      id,
-      name: e.id,
-      avatar: e.avatar ? convertFileSrc(e.avatar) : undefined,
-      baseTime:
-        e.base_time_humanizer !== undefined
-          ? `${t.baseTime}: ${e.base_time_humanizer}`
-          : undefined,
-      tags: e.tags ?? [],
-      parents: [...(parentsById.get(id) ?? [])].map((b) => ({
-        id: b,
-        name: entityMap[b]?.id ?? b,
-        preview:
-          includePreviews && entityMap[b]
-            ? build(b, entityMap[b], false)
-            : undefined,
-      })),
-      extraProps: formatExtraProps(e.extra_props),
-      description: e.description,
-      belongLabel: t.belongTo,
-    };
-    if (!includePreviews) previewCache.set(id, built);
-    return built;
-  };
-  return build;
-}
-
-function collectLinkMembers(
-  activeLinks: ReadonlyArray<{ entities: [string, string] }>,
-  entityMap: Readonly<Record<string, EntityT>>,
-): Set<string> {
-  const members = new Set<string>();
-  for (const {
-    entities: [a, b],
-  } of activeLinks) {
-    if (a in entityMap) members.add(a);
-    if (b in entityMap) members.add(b);
-  }
-  return members;
-}
-
-function filterEntities(
-  entities: ReadonlyArray<[string, EntityT]>,
-  activePick: string | null,
-  activeLink: string | null,
-  activeTags: readonly string[],
-  ancestorsOf: (id: string) => Set<string>,
-  linkMembers: ReadonlySet<string>,
-): Array<[string, EntityT]> {
-  if (activePick) {
-    return entities.filter(
-      ([id]) => id === activePick || ancestorsOf(id).has(activePick),
-    );
-  }
-  if (activeLink) {
-    return entities.filter(([id]) => linkMembers.has(id));
-  }
-  if (activeTags.length > 0) {
-    return entities.filter(([, entity]) => {
-      const entityTags = entity.tags;
-      if (!entityTags || entityTags.length < activeTags.length) return false;
-      return activeTags.every((tag) => entityTags.includes(tag));
-    });
-  }
-  return [...entities];
 }
 
 const EMPTY_DOC_INDEX: EntityDocIndex = {
   sortedEntities: [],
-  parentsById: new Map(),
-  ancestorsOf: () => new Set(),
-  belongTargetSet: new Set(),
-  belongSections: [],
   linkSections: [[]],
-  tagCounts: new Map(),
-  tagOptions: [],
-  childrenById: new Map(),
+  timeSections: [[]],
+  eventSliceTicks: new Map(),
   linksByEntity: new Map(),
   eventsByEntity: new Map(),
+  hasEquivalence: false,
+  repByEntity: new Map(),
+  membersByRep: new Map(),
 };
 
 export function buildEntityView(
   doc: WeftDoc | null,
   lang: Lang,
-  filter: EntityFilter | null,
+  selectedLink: string | null,
+  selectedEvent: string | null,
+  viewMode: EntityViewMode,
   saved: Readonly<Record<string, Point>>,
 ) {
   const t = strings[lang];
   const entityMap = doc?.entity ?? {};
+  const graphs = doc?.graphs ?? {};
+  const allLinks = doc?.links ?? [];
   const index = doc ? getEntityDocIndex(doc) : EMPTY_DOC_INDEX;
   const {
-    sortedEntities: entities,
-    parentsById,
-    ancestorsOf,
-    belongTargetSet: targetSet,
-    belongSections,
+    sortedEntities,
     linkSections,
-    tagCounts,
-    tagOptions,
+    timeSections,
+    eventSliceTicks,
+    hasEquivalence,
+    repByEntity,
+    membersByRep,
   } = index;
-  const nameOf = (id: string) => entityMap[id]?.id ?? id;
 
-  const activePick =
-    filter?.dim === "belong" && targetSet.has(filter.pick) ? filter.pick : null;
-  const linkGroups = doc?.entity_link ?? {};
-  const activeLink =
-    filter?.dim === "link" && filter.pick in linkGroups ? filter.pick : null;
-  const activeLinks = activeLink ? (linkGroups[activeLink] ?? []) : [];
+  const isQuotient = viewMode === "quotient" && hasEquivalence;
+  const mapNode = (id: string) =>
+    isQuotient ? (repByEntity.get(id) ?? id) : id;
 
-  const activeTags =
-    filter?.dim === "tags"
-      ? [...new Set(filter.picks.filter((tag) => tagCounts.has(tag)))].sort(
-          (a, b) => a.localeCompare(b),
-        )
-      : [];
-
-  const filtered = filterEntities(
-    entities,
-    activePick,
-    activeLink,
-    activeTags,
-    ancestorsOf,
-    collectLinkMembers(activeLinks, entityMap),
+  const validGroupSet = new Set(
+    linkSections.flatMap((s) => s.map((item) => item.v)),
   );
+  const activeLink =
+    selectedLink && validGroupSet.has(selectedLink) ? selectedLink : null;
 
-  const layoutMode: EntityLayoutMode = activePick
+  const activeEvent =
+    selectedEvent && eventSliceTicks.has(selectedEvent) ? selectedEvent : null;
+  const sliceTick =
+    activeEvent !== null ? eventSliceTicks.get(activeEvent) : undefined;
+
+  // 构建当前视角下的实体列表（上帝视角合并等价类）
+  const baseEntities: Array<[string, EntityT, string[]]> = [];
+  if (isQuotient) {
+    const seenReps = new Set<string>();
+    for (const [id] of sortedEntities) {
+      const rep = mapNode(id);
+      if (seenReps.has(rep)) continue;
+      seenReps.add(rep);
+      const repEntity = entityMap[rep];
+      if (!repEntity) continue;
+      const members = membersByRep.get(rep) ?? [rep];
+      baseEntities.push([rep, repEntity, members]);
+    }
+  } else {
+    for (const [id, ent] of sortedEntities) {
+      baseEntities.push([id, ent, [id]]);
+    }
+  }
+
+  const scopedLinks = activeLink
+    ? allLinks.filter((l) => {
+        if (l.graph !== activeLink) return false;
+        if (!(l.from in entityMap) || !(l.to in entityMap)) return false;
+        if (sliceTick !== undefined) {
+          return isSpanActiveAtTick(l.start?.tick, l.end?.tick, sliceTick);
+        }
+        return true;
+      })
+    : [];
+
+  const linkMembers = new Set<string>();
+  for (const link of scopedLinks) {
+    linkMembers.add(mapNode(link.from));
+    linkMembers.add(mapNode(link.to));
+  }
+
+  const filtered = baseEntities.filter(([id]) => {
+    if (activeLink) {
+      return linkMembers.has(id);
+    }
+    return true;
+  });
+
+  const isHierarchy = activeLink ? Boolean(graphs[activeLink]?.acyclic) : false;
+
+  const layoutMode: EntityLayoutMode = isHierarchy
     ? "hierarchy"
     : activeLink
       ? "network"
       : "grid";
-  const useSavedPositions = layoutMode === "grid" && activeTags.length === 0;
+  const useSavedPositions =
+    layoutMode === "grid" && activeEvent === null && !isQuotient;
 
   const visibleIds = filtered.map(([id]) => id);
   const visibleSet = new Set(visibleIds);
-  const edges = activePick
-    ? buildBelongEdges(filtered, parentsById, visibleSet)
-    : activeLink
-      ? buildLinkEdges(activeLink, activeLinks, visibleSet)
-      : [];
+  const edges = activeLink
+    ? buildGraphEdges(
+        `grp:${activeLink}:${activeEvent ?? "all"}`,
+        scopedLinks,
+        visibleSet,
+        mapNode,
+        graphs,
+        isQuotient,
+      )
+    : [];
 
-  const entityData = createEntityDataBuilder(entityMap, parentsById, t);
-  // 首次测量前的占位坐标用 O(n) 网格布局，避免同步加载 dagre；测量完成后由 EntityCanvas 精准重排
   const auto = gridLayout(visibleIds, EMPTY_SIZES);
-  const nodes: EntityFlowNode[] = filtered.map(([id, e]) => ({
-    id,
-    type: "entity",
-    position: useSavedPositions ? (saved[id] ?? auto[id]) : auto[id],
-    data: entityData(id, e),
-  }));
+  const nodes: EntityFlowNode[] = filtered.map(([id, e, members]) => {
+    const aliases = members.filter((m) => m !== id);
+    const mergedProps: Record<string, unknown> = {};
+    for (const m of members) {
+      const ent = entityMap[m];
+      if (ent?.extra_props) {
+        for (const [k, v] of Object.entries(ent.extra_props)) {
+          if (!(k in mergedProps)) mergedProps[k] = v;
+        }
+      }
+    }
+    const avatarPath = members
+      .map((m) => entityMap[m]?.avatar)
+      .find((v): v is string => Boolean(v));
+    const descriptions = members
+      .map((m) => entityMap[m]?.description)
+      .filter((d): d is string => Boolean(d && d.trim().length > 0));
+    const baseTimeHumanizer = members
+      .map((m) => entityMap[m]?.base_time_humanizer)
+      .find((v): v is string => v !== undefined);
+
+    return {
+      id,
+      type: "entity",
+      position: (useSavedPositions ? saved[id] : undefined) ??
+        auto[id] ?? { x: 0, y: 0 },
+      data: {
+        id,
+        name: e.id,
+        aliases,
+        avatar: avatarPath ? convertFileSrc(avatarPath) : undefined,
+        baseTime:
+          baseTimeHumanizer !== undefined
+            ? `${t.baseTime}: ${baseTimeHumanizer}`
+            : undefined,
+        extraProps: formatExtraProps(mergedProps),
+        description:
+          descriptions.length > 0 ? descriptions.join("\n\n") : undefined,
+      },
+    };
+  });
 
   return {
     nodes,
     edges,
     layoutMode,
     useSavedPositions,
-    activePick,
     activeLink,
-    activeTags,
-    belongSections,
+    activeEvent,
     linkSections,
-    tagOptions,
-    nameOf,
+    timeSections,
+    hasEquivalence,
   };
 }
